@@ -1,0 +1,11 @@
+## Interface: 11200
+## Title: Order of the Lion Guild Manager
+## Notes: Complete guild companion, roster, activity, history, recruitment and guild information for Order of the Lion on OctoWoW.
+## Author: Order of the Lion
+## Version: 1.0.9
+## SavedVariables: OTLGM_DB
+Core.lua
+Advanced.lua
+UI.lua
+Minimap.lua
+Events.lua

@@ -1,0 +1,28 @@
+Order of the Lion Guild Manager v1.0.9
+
+OFFICER RELEASE 1.0.9
+- Added a visible addon-user detector in the sidebar.
+- Hovering addon users shows detected names, versions, online state and last-seen time.
+- Clicking the indicator pings online guildmates using compatible versions.
+- Addon-user detection remains hidden from normal guild chat.
+- Added addon adoption statistics to Overview.
+- Expanded Overview with Level 60, Core Raider and Leadership online/total counts.
+- Rebuilt Guild Ranks around the current Order of the Lion structure:
+  Tormented, Guest, Lion, Loyal, Raider, Core Raider, Helper, Officer, Lionheart and Lucky Luck.
+- Added separate colored groups for Restricted, Visitor, Social, Raiding and Leadership ranks.
+- Added numbered rank rows and clear How to Receive / Role columns.
+- Added the Tormented disciplinary rank description.
+- Added purple Core Raider and Raider role icons in Roster/member cards.
+- Added restricted-rank icon and color handling.
+- Replaced the missing Roster navigation icon with a confirmed visible spyglass icon.
+- Restyled Mark Reviewed as a green confirmation action.
+- Restyled Copy Weekly as a blue utility action.
+- Added a clearer empty-history message and stronger row frame levels.
+- Preserved the stable v1.0.8 UI loading structure and controlled roster refresh behavior.
+
+COMPATIBILITY AND VALIDATION
+- Interface target remains 11200.
+- No LiveRoster.lua dependency.
+- No HasFocus, string.match, string.gmatch or modern length-operator dependencies.
+- All short Lua strings were checked for illegal raw newlines.
+- All Lua files passed syntax parsing before release packaging.

@@ -1,0 +1,136 @@
+-- Order of the Lion Guild Manager
+-- Safe events, diagnostics and controlled roster refresh - v1.0.9
+
+SLASH_OTLGM1 = "/otl"
+SLASH_OTLGM2 = "/liongm"
+SLASH_OTLGMTEST1 = "/otltest"
+
+local function PrintLine(message, errorLine)
+    if not DEFAULT_CHAT_FRAME then return end
+    local color = errorLine and "|cffff3333" or "|cffffcc33"
+    DEFAULT_CHAT_FRAME:AddMessage(color .. "[Lion GM]|r " .. tostring(message or ""))
+end
+
+local function ToggleSafely()
+    if not OTLGM or not OTLGM.ToggleUI then
+        PrintLine("UI.lua did not load. Type /otltest for the module report.", true)
+        return
+    end
+    local ok, err = pcall(function() OTLGM:ToggleUI() end)
+    if not ok then PrintLine("UI runtime error: " .. tostring(err), true) end
+end
+
+SlashCmdList["OTLGM"] = function(message)
+    message = string.lower(message or "")
+    if message == "scan" then
+        if OTLGM and OTLGM.RequestScan then OTLGM:RequestScan("MANUAL") end
+    elseif message == "reset" then
+        if IsShiftKeyDown() and OTLGM and OTLGM.ResetGuildData then OTLGM:ResetGuildData()
+        else PrintLine("Hold Shift while entering /otl reset, or use Settings.") end
+    elseif message == "minimap" then
+        if OTLGM and OTLGM.EnsureDB then
+            OTLGM:EnsureDB()
+            OTLGM_DB.settings.showMinimap = not OTLGM_DB.settings.showMinimap
+            if OTLGM.ApplyMinimapVisibility then OTLGM:ApplyMinimapVisibility() end
+        end
+    elseif message == "wizard" then
+        if OTLGM and OTLGM.OpenFirstRunWizard then OTLGM:OpenFirstRunWizard() else ToggleSafely() end
+    elseif message == "backup" then
+        if OTLGM and OTLGM.ShowCopyDialog and OTLGM.ExportBackup then OTLGM:ShowCopyDialog("Order of the Lion Addon Backup", OTLGM:ExportBackup()) else ToggleSafely() end
+    elseif message == "help" then
+        PrintLine("/otl - open | /otl scan - manual update | /otl minimap | /otltest - diagnostics")
+    else
+        ToggleSafely()
+    end
+end
+
+SlashCmdList["OTLGMTEST"] = function()
+    local loaded, reason = IsAddOnLoaded("OrderOfTheLionGM"), ""
+    if GetAddOnInfo then
+        local name, title, notes, enabled, loadable, loadReason = GetAddOnInfo("OrderOfTheLionGM")
+        reason = tostring(loadReason)
+    end
+    PrintLine("Diagnostic: TOC=" .. tostring(loaded) .. ", reason=" .. tostring(reason))
+    PrintLine("Core=" .. tostring(OTLGM and OTLGM.EnsureDB ~= nil) .. ", Advanced=" .. tostring(OTLGM and OTLGM.GetGuildDB ~= nil))
+    PrintLine("UI marker=" .. tostring(OTLGM and OTLGM.fullUILoaded) .. ", BuildUI=" .. tostring(OTLGM and OTLGM.BuildUI ~= nil) .. ", ToggleUI=" .. tostring(OTLGM and OTLGM.ToggleUI ~= nil))
+    PrintLine("Minimap=" .. tostring(OTLGM and OTLGM.BuildMinimapButton ~= nil) .. ", RequestScan=" .. tostring(OTLGM and OTLGM.RequestScan ~= nil))
+end
+
+local eventFrame = CreateFrame("Frame", "OTLGM_EventFrame")
+eventFrame:RegisterEvent("VARIABLES_LOADED")
+eventFrame:RegisterEvent("PLAYER_LOGIN")
+eventFrame:RegisterEvent("PLAYER_GUILD_UPDATE")
+eventFrame:RegisterEvent("GUILD_ROSTER_UPDATE")
+eventFrame:RegisterEvent("CHAT_MSG_SYSTEM")
+eventFrame:RegisterEvent("CHAT_MSG_ADDON")
+
+eventFrame:SetScript("OnEvent", function()
+    if event == "VARIABLES_LOADED" then
+        if OTLGM and OTLGM.EnsureDB then OTLGM:EnsureDB() end
+
+    elseif event == "PLAYER_LOGIN" then
+        if not OTLGM then PrintLine("Core.lua did not load.", true) return end
+        if OTLGM.EnsureDB then OTLGM:EnsureDB() end
+        if OTLGM.InstallInviteHook then OTLGM:InstallInviteHook() end
+        if OTLGM.InstallGuildActionHooks then OTLGM:InstallGuildActionHooks() end
+        if OTLGM.BuildMinimapButton then
+            local ok, err = pcall(function() OTLGM:BuildMinimapButton() end)
+            if not ok then PrintLine("Minimap runtime error: " .. tostring(err), true) end
+        end
+        if OTLGM.BroadcastVersion then OTLGM:BroadcastVersion() end
+        if not OTLGM.fullUILoaded or not OTLGM.ToggleUI then
+            PrintLine("Full UI did not load. Type /otltest for details.", true)
+        end
+
+    elseif event == "CHAT_MSG_SYSTEM" then
+        if OTLGM and OTLGM.TryCaptureSystemGuildAction then OTLGM:TryCaptureSystemGuildAction(arg1) end
+
+    elseif event == "CHAT_MSG_ADDON" then
+        if OTLGM and OTLGM.HandleAddonMessage then OTLGM:HandleAddonMessage(arg1, arg2, arg3, arg4) end
+
+    elseif event == "PLAYER_GUILD_UPDATE" then
+        if OTLGM and OTLGM.BroadcastVersion then OTLGM:BroadcastVersion() end
+
+    elseif event == "GUILD_ROSTER_UPDATE" then
+        if OTLGM and OTLGM.pendingScan then
+            local reason = OTLGM.pendingScanReason or "INTERNAL"
+            OTLGM.pendingScan = false
+            OTLGM.pendingScanReason = nil
+            OTLGM:Scan(reason)
+        end
+    end
+end)
+
+eventFrame:SetScript("OnUpdate", function()
+    OTLGM.heartbeatElapsed = (OTLGM.heartbeatElapsed or 0) + (arg1 or 0)
+    if OTLGM.heartbeatElapsed < 1 then return end
+    local elapsed = OTLGM.heartbeatElapsed
+    OTLGM.heartbeatElapsed = 0
+
+    OTLGM.elapsed = (OTLGM.elapsed or 0) + elapsed
+    OTLGM.versionElapsed = (OTLGM.versionElapsed or 0) + elapsed
+
+    if OTLGM.confirmScanAt and OTLGM:Now() >= OTLGM.confirmScanAt and not OTLGM.pendingScan then
+        OTLGM.confirmScanAt = nil
+        OTLGM:RequestScan("CONFIRM")
+    end
+
+    if OTLGM.versionElapsed >= 900 then
+        OTLGM.versionElapsed = 0
+        if OTLGM.BroadcastVersion then OTLGM:BroadcastVersion() end
+    end
+
+    local visible = OTLGM.ui and OTLGM.ui.main and OTLGM.ui.main:IsVisible()
+    if not visible then return end
+
+    if OTLGM.MaybeRefreshVisibleRoster then OTLGM:MaybeRefreshVisibleRoster() end
+
+    if not OTLGM_DB or not OTLGM_DB.settings or not OTLGM_DB.settings.autoScan then return end
+    if not GetGuildInfo("player") then return end
+    local interval = OTLGM_DB.settings.scanInterval or 1200
+    if interval < 600 then interval = 1200 end
+    if OTLGM.elapsed >= interval and not OTLGM.pendingScan and not OTLGM.confirmScanAt then
+        OTLGM.elapsed = 0
+        OTLGM:RequestScan("AUTO")
+    end
+end)
