@@ -1,28 +1,56 @@
-Order of the Lion Guild Manager v1.0.9
+Order of the Lion Guild Manager v1.4.1
 
-OFFICER RELEASE 1.0.9
-- Added a visible addon-user detector in the sidebar.
-- Hovering addon users shows detected names, versions, online state and last-seen time.
-- Clicking the indicator pings online guildmates using compatible versions.
-- Addon-user detection remains hidden from normal guild chat.
-- Added addon adoption statistics to Overview.
-- Expanded Overview with Level 60, Core Raider and Leadership online/total counts.
-- Rebuilt Guild Ranks around the current Order of the Lion structure:
-  Tormented, Guest, Lion, Loyal, Raider, Core Raider, Helper, Officer, Lionheart and Lucky Luck.
-- Added separate colored groups for Restricted, Visitor, Social, Raiding and Leadership ranks.
-- Added numbered rank rows and clear How to Receive / Role columns.
-- Added the Tormented disciplinary rank description.
-- Added purple Core Raider and Raider role icons in Roster/member cards.
-- Added restricted-rank icon and color handling.
-- Replaced the missing Roster navigation icon with a confirmed visible spyglass icon.
-- Restyled Mark Reviewed as a green confirmation action.
-- Restyled Copy Weekly as a blue utility action.
-- Added a clearer empty-history message and stronger row frame levels.
-- Preserved the stable v1.0.8 UI loading structure and controlled roster refresh behavior.
+ADDON NETWORK / ONLINE USERS
+- Fixed Addon users detection when PvE synchronization was already working but the old version ping was not counted.
+- Every valid OrderOfTheLionGM addon packet now refreshes the sender's online presence.
+- Manual Ping sends the normal version request and a PvE sync request.
+- Version replies are sent directly back to the requesting player by hidden addon whisper.
+- A packet received during the last five minutes counts as online even when the local roster snapshot is older.
+- The service button and PvE Hub now show the number of other detected addon users currently online.
 
-COMPATIBILITY AND VALIDATION
-- Interface target remains 11200.
-- No LiveRoster.lua dependency.
-- No HasFocus, string.match, string.gmatch or modern length-operator dependencies.
-- All short Lua strings were checked for illegal raw newlines.
-- All Lua files passed syntax parsing before release packaging.
+GROUP FINDER
+- Replaced the old single-player Group Request model with leader-created groups.
+- The leader chooses activity type, their own role, group size and the open Tank / Healer / DPS positions.
+- Group cards show an activity icon, class-coloured leader name, current size, open roles, status and remaining lifetime.
+- Added OPEN, FULL and CLOSED state handling.
+- Other players can choose a role, add a short note and send a private Join Request to the leader.
+- The leader receives a popup, sees pending candidates and may Accept + Invite, Decline or Whisper.
+- Accepted candidates update the shared group composition and receive a direct result notification.
+- Applicants can cancel a pending request.
+- Group applications synchronize privately only between the leader and applicant.
+- Group lists support mouse-wheel and slider scrolling.
+- Groups and applications expire after 60 minutes.
+
+RAID ALERTS
+- Raid Alerts now use a separate red PvE tab and a clearer red active-raid card.
+- Active raid information remains visible in PvE Hub for reference.
+- Popup and normal-chat raid reminders are filtered locally to Raider and Core Raider ranks only.
+- Non-raiders do not receive reminder popups, but can still open the current raid information.
+- Official raid sign-ups remain strictly in Discord.
+- Added a simpler member information panel when the raid editor is not available.
+
+HOME AND OVERVIEW
+- Home now has an Important Notices panel with the relevant next raid, active groups, pending applicants, board posts and unread guild changes.
+- Added a direct Open PvE Hub button on Home.
+- Overview now shows pending Group Finder applicants instead of a less useful board-only counter.
+- PvE Hub displays the current number of detected online addon users.
+
+GUILD ADDON MESSAGE
+- Updated the protected Guild Addon message for ordinary members.
+- It explains that the addon was made specifically for Order of the Lion to help members stay connected, share experience and play together.
+- It highlights Guild Chat, roster/profession search, Guild Information, activity, Group Finder, raid alerts and the shared board.
+
+PERFORMANCE AND SAFETY
+- PvE networking remains event-driven: records are sent only on creation, change, deletion, sync or a direct application response.
+- Join applications use targeted addon whispers instead of guild-wide broadcasts.
+- Added sender/owner checks for application state changes.
+- Message payloads remain below the Vanilla addon-message size limit.
+- All Lua files passed syntax parsing and the mocked Vanilla runtime suite, including addon presence, leader/applicant flow, rank-filtered raid alerts and Home notices.
+
+
+Version 1.4.1
+- Promoted PvE Hub in the sidebar with a dedicated icon, stronger raid-style button and removed the TEST wording from visible UI labels.
+- Changed repeated sidebar icons so Overview, Roster and Update Roster no longer reuse the same visual.
+- Improved member detail styling: location and professions are now separated and easier to read in the roster side panel.
+- Expanded profession detection with more English aliases, strict BS / JC detection, Jewelcrafting support and profession specialization labels.
+- Removed Cooking and Fishing from automatic profession detection to keep guild roster notes focused on core professions.

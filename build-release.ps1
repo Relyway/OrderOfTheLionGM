@@ -1,4 +1,4 @@
-param([string]$Version = "1.0.9")
+param([string]$Version = "1.4.1")
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -12,6 +12,7 @@ $Files = @(
     "OrderOfTheLionGM.toc",
     "Core.lua",
     "Advanced.lua",
+    "PVE.lua",
     "UI.lua",
     "Minimap.lua",
     "Events.lua",

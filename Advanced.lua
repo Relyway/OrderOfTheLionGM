@@ -1,8 +1,8 @@
 -- Order of the Lion Guild Manager
--- Advanced data, safety and analytics layer for v1.0.9
+-- Advanced data, safety and analytics layer for v1.2.2
 
-OTLGM.version = "1.0.9"
-OTLGM.schemaVersion = 4
+OTLGM.version = "1.4.1"
+OTLGM.schemaVersion = 5
 OTLGM.confirmScanAt = nil
 OTLGM.scanReason = nil
 
@@ -81,6 +81,13 @@ OTLGM.professionDefinitions = {
         typos = { "enginering", "engeneering", "enginearing", "engeneer" },
     },
     {
+        key = "JEWELCRAFTING", label = "Jewelcrafting",
+        terms = { "jewelcrafting", "jewelcrafter", "jewel crafter", "gemcutter", "gem cutter", "prospector", "prospecting", "jeweler", "jeweller", "jc" },
+        shortTerms = { "jewel", "jewels", "gemcut", "gem cutter", "gems", "prospect", "prospecting", "jcraft", "jwc" },
+        strictTerms = { "jc" },
+        typos = { "jewelcraftng", "jewelcrafring", "jewelcrft", "jewelcrating" },
+    },
+    {
         key = "HERBALISM", label = "Herbalism",
         terms = { "herbalism", "herbalist", "herb gathering", "травничество", "травник", "сбор трав", "травы" },
         shortTerms = { "herb", "herbs", "herbing", "herba", "herbal", "gather herbs", "травка", "трав" },
@@ -113,18 +120,6 @@ OTLGM.professionDefinitions = {
         typos = { "tailorng", "tayloring", "tailering", "taloring" },
     },
     {
-        key = "COOKING", label = "Cooking",
-        terms = { "cooking", "cook", "chef", "food crafting", "кулинария", "повар", "готовка" },
-        shortTerms = { "food", "foods", "chef", "cook", "кухня", "кулинар", "повар" },
-        typos = { "coocking", "cookng", "cookingg" },
-    },
-    {
-        key = "FISHING", label = "Fishing",
-        terms = { "fishing", "fisher", "fisherman", "рыбалка", "рыбак", "рыболовство" },
-        shortTerms = { "fish", "fishes", "fisher", "angler", "рыб" },
-        typos = { "fising", "fishng", "fishingg" },
-    },
-    {
         key = "FIRSTAID", label = "First Aid",
         terms = { "first aid", "firstaid", "bandage maker", "первая помощь", "бинтование", "бинты" },
         shortTerms = { "bandage", "bandages", "medic", "healer bandages", "бинт", "медик" },
@@ -135,8 +130,8 @@ OTLGM.professionDefinitions = {
 
 OTLGM.rankInformation = {
     {
-        number = "!", name = "Tormented", kind = "Restricted",
-        aliases = { "tormented", "punished", "restricted", "warning", "замученный", "Замученный" },
+        number = "!", name = "Muted", kind = "Restricted",
+        aliases = { "muted", "mute", "tormented", "punished", "restricted", "warning", "замученный", "Замученный" },
         receive = "Assigned temporarily by leadership after a serious warning, rule violation or refusal to follow guild decisions.",
         access = "Restricted disciplinary status. Normal guild privileges remain limited until leadership reviews the situation."
     },
@@ -251,13 +246,23 @@ function OTLGM:MigrateGuildDB(db)
     local i, eventInfo
     for i = 1, table.getn(db.log or {}) do
         eventInfo = db.log[i]
-        if eventInfo.kind == "LEVEL" and not eventInfo.milestone then
+        if eventInfo.kind == "LEVEL" then
             local beforeLevel = tonumber(eventInfo.levelBefore) or 0
             local afterLevel = tonumber(eventInfo.levelAfter) or 0
-            local crossed = (math.floor(beforeLevel / 10) + 1) * 10
-            if crossed <= afterLevel and crossed <= 60 then
-                eventInfo.milestone = crossed
-                eventInfo.detail = crossed == 60 and "Reached maximum level 60" or ("Reached level " .. tostring(crossed))
+            local chosen = nil
+            local milestoneList = { 20, 40, 60 }
+            local index, levelMark
+            for index = 1, table.getn(milestoneList) do
+                levelMark = milestoneList[index]
+                if beforeLevel < levelMark and afterLevel >= levelMark then
+                    chosen = levelMark
+                    break
+                end
+            end
+            if chosen then
+                eventInfo.milestone = chosen
+                eventInfo.detail = chosen == 60 and "Reached maximum level 60" or ("Reached level " .. tostring(chosen))
+                eventInfo.hiddenLegacyLevel = nil
             else
                 eventInfo.hiddenLegacyLevel = true
                 eventInfo.reviewed = true
@@ -467,15 +472,66 @@ function OTLGM:GetMemberProfessionKeys(member)
     return result
 end
 
+local professionSpecializationMap = {
+    BLACKSMITHING = {
+        { terms = { "armorsmith", "armor smith" }, label = "Armorsmith" },
+        { terms = { "weaponsmith", "weapon smith" }, label = "Weaponsmith" },
+        { terms = { "hammersmith", "hammer smith" }, label = "Hammersmith" },
+        { terms = { "swordsmith", "sword smith" }, label = "Swordsmith" },
+        { terms = { "axesmith", "axe smith" }, label = "Axesmith" },
+    },
+    ENGINEERING = {
+        { terms = { "gnomish engineering", "gnomish engi", "gnome engi", "gnomish" }, label = "Gnomish" },
+        { terms = { "goblin engineering", "goblin engi", "gob engi", "goblin" }, label = "Goblin" },
+    },
+    LEATHERWORKING = {
+        { terms = { "tribal leatherworking", "tribal lw", "tribal" }, label = "Tribal" },
+        { terms = { "dragonscale leatherworking", "dragonscale lw", "dragonscale" }, label = "Dragonscale" },
+        { terms = { "elemental leatherworking", "elemental lw", "elemental" }, label = "Elemental" },
+    },
+    TAILORING = {
+        { terms = { "mooncloth", "mooncloth tailor" }, label = "Mooncloth" },
+        { terms = { "shadoweave", "shadow weave" }, label = "Shadoweave" },
+        { terms = { "spellfire", "spell fire" }, label = "Spellfire" },
+    },
+    ALCHEMY = {
+        { terms = { "transmute", "transmuter", "transmute master" }, label = "Transmute" },
+        { terms = { "elixir master", "elixir" }, label = "Elixir" },
+        { terms = { "potion master", "pot master" }, label = "Potion" },
+    },
+}
+
+function OTLGM:GetProfessionSpecializationLabel(member, professionKey)
+    local text = self:GetProfessionNormalizedText(member)
+    local options = professionSpecializationMap[professionKey]
+    if not options then return nil end
+    local i, j
+    for i = 1, table.getn(options) do
+        for j = 1, table.getn(options[i].terms or {}) do
+            if ContainsPlain(text, options[i].terms[j]) then return options[i].label end
+        end
+    end
+    return nil
+end
+
 function OTLGM:GetMemberProfessionLabels(member)
     local labels = {}
     local keys = self:GetMemberProfessionKeys(member)
-    local i, j
+    local i, j, baseLabel, specialization
     for i = 1, table.getn(keys) do
+        baseLabel = nil
         for j = 1, table.getn(self.professionDefinitions) do
             if self.professionDefinitions[j].key == keys[i] then
-                table.insert(labels, self.professionDefinitions[j].label)
+                baseLabel = self.professionDefinitions[j].label
                 break
+            end
+        end
+        if baseLabel then
+            specialization = self:GetProfessionSpecializationLabel(member, keys[i])
+            if specialization then
+                table.insert(labels, baseLabel .. " (" .. specialization .. ")")
+            else
+                table.insert(labels, baseLabel)
             end
         end
     end
@@ -528,8 +584,8 @@ function OTLGM:GetMemberBadge(member)
     if rank == "raider" or string.find(rank, "4 - raider", 1, true) then
         return "Interface\\Icons\\INV_Sword_04", member.rank or "Raider", 0.62, 0.36, 0.88, "RAIDER"
     end
-    if string.find(rank, "tormented", 1, true) or string.find(rank, "punished", 1, true) or string.find(rank, "restricted", 1, true) or string.find(member.rank or "", "Замуч", 1, true) or string.find(member.rank or "", "замуч", 1, true) then
-        return "Interface\\Icons\\Spell_Shadow_CurseOfTounges", member.rank or "Tormented", 0.90, 0.18, 0.18, "RESTRICTED"
+    if string.find(rank, "muted", 1, true) or string.find(rank, "mute", 1, true) or string.find(rank, "tormented", 1, true) or string.find(rank, "punished", 1, true) or string.find(rank, "restricted", 1, true) or string.find(member.rank or "", "Замуч", 1, true) or string.find(member.rank or "", "замуч", 1, true) then
+        return "Interface\\Icons\\Spell_Shadow_CurseOfTounges", member.rank or "Muted", 0.90, 0.18, 0.18, "RESTRICTED"
     end
     return nil, nil
 end
@@ -558,7 +614,7 @@ function OTLGM:GetGuildRoleSnapshot()
             result.leadership = result.leadership + 1
             if member.online then result.leadershipOnline = result.leadershipOnline + 1 end
         end
-        if string.find(rank, "tormented", 1, true) or string.find(rank, "punished", 1, true) or string.find(rank, "restricted", 1, true) or string.find(member.rank or "", "Замуч", 1, true) or string.find(member.rank or "", "замуч", 1, true) then
+        if string.find(rank, "muted", 1, true) or string.find(rank, "mute", 1, true) or string.find(rank, "tormented", 1, true) or string.find(rank, "punished", 1, true) or string.find(rank, "restricted", 1, true) or string.find(member.rank or "", "Замуч", 1, true) or string.find(member.rank or "", "замуч", 1, true) then
             result.restricted = result.restricted + 1
         end
     end
@@ -843,16 +899,19 @@ function OTLGM:Scan(reason)
                 end
 
                 if old.level and info.level and info.level > old.level then
-                    local milestone = (math.floor((old.level or 0) / 10) + 1) * 10
-                    while milestone <= info.level and milestone <= 60 do
-                        milestones = milestones + 1
-                        info.lastMilestone = milestone
-                        info.lastMilestoneAt = now
-                        local detail = milestone == 60 and "Reached maximum level 60" or ("Reached level " .. tostring(milestone))
-                        self:AddLog(db, "LEVEL", name, detail, "", "", {
-                            class = info.class, rank = info.rank, levelBefore = old.level, levelAfter = info.level, milestone = milestone,
-                        })
-                        milestone = milestone + 10
+                    local milestoneList = { 20, 40, 60 }
+                    local markerIndex, milestone
+                    for markerIndex = 1, table.getn(milestoneList) do
+                        milestone = milestoneList[markerIndex]
+                        if (old.level or 0) < milestone and info.level >= milestone then
+                            milestones = milestones + 1
+                            info.lastMilestone = milestone
+                            info.lastMilestoneAt = now
+                            local detail = milestone == 60 and "Reached maximum level 60" or ("Reached level " .. tostring(milestone))
+                            self:AddLog(db, "LEVEL", name, detail, "", "", {
+                                class = info.class, rank = info.rank, levelBefore = old.level, levelAfter = info.level, milestone = milestone,
+                            })
+                        end
                     end
                 end
 
@@ -1381,37 +1440,72 @@ function OTLGM:GetDiagnosticsText()
         "Last successful scan: " .. self:Stamp(db.lastScan)
 end
 
-function OTLGM:BroadcastVersion()
-    if not SendAddonMessage or not GetGuildInfo("player") then return end
+function OTLGM:BroadcastVersion(target)
+    if not SendAddonMessage or not GetGuildInfo("player") then return false end
     self.lastVersionBroadcastAt = self:Now()
-    pcall(SendAddonMessage, "OTLGM", "V|" .. self.version, "GUILD")
+    if target and target ~= "" then
+        pcall(SendAddonMessage, "OTLGM", "V|" .. self.version, "WHISPER", target)
+    else
+        pcall(SendAddonMessage, "OTLGM", "V|" .. self.version, "GUILD")
+    end
+    return true
 end
 
 function OTLGM:RequestAddonUserPing()
     if not SendAddonMessage or not GetGuildInfo("player") then return false end
     local now = self:Now()
-    if self.lastAddonUserPingAt and (now - self.lastAddonUserPingAt) < 30 then return false end
+    if self.lastAddonUserPingAt and (now - self.lastAddonUserPingAt) < 10 then
+        if self.RefreshAddonUsersIndicator then self:RefreshAddonUsersIndicator() end
+        return false
+    end
     self.lastAddonUserPingAt = now
     pcall(SendAddonMessage, "OTLGM", "Q|" .. self.version, "GUILD")
+    -- PvE synchronization uses the same hidden addon channel. Triggering both paths
+    -- makes presence detection reliable even on servers that handle guild pings oddly.
+    if self.RequestPveSync then self:RequestPveSync(true) end
     if self.SetStatus then self:SetStatus("Checking for other Order of the Lion addon users...") end
     return true
 end
 
 function OTLGM:RememberAddonUser(sender, version)
+    self:EnsureDB()
     local db = self:GetGuildDB()
     if not db or not sender or sender == "" then return end
     local playerName = UnitName("player") or ""
     if ANormalizeName(sender) == ANormalizeName(playerName) then return end
     db.detectedVersions = db.detectedVersions or {}
-    db.detectedVersions[sender] = { version = version or "Unknown", ts = self:Now() }
-    if version and self:IsVersionNewer(version, OTLGM_DB.settings.latestDetectedVersion or self.version) then
-        OTLGM_DB.settings.latestDetectedVersion = version
+    local key = string.gsub(sender, "%-.*$", "")
+    local existing = db.detectedVersions[key] or db.detectedVersions[sender]
+    local storedVersion = version
+    if not storedVersion or storedVersion == "" or storedVersion == "Detected" then
+        storedVersion = existing and existing.version or "Detected"
+    end
+    db.detectedVersions[key] = { version = storedVersion, ts = self:Now(), sender = sender }
+    if sender ~= key then db.detectedVersions[sender] = nil end
+    if storedVersion ~= "Detected" and self:IsVersionNewer(storedVersion, OTLGM_DB.settings.latestDetectedVersion or self.version) then
+        OTLGM_DB.settings.latestDetectedVersion = storedVersion
     end
 end
 
 function OTLGM:HandleAddonMessage(prefix, message, channel, sender)
     if prefix ~= "OTLGM" or not message or not sender then return false end
     if ANormalizeName(sender) == ANormalizeName(UnitName("player") or "") then return true end
+
+    -- Every valid message proves that the sender is currently running the addon.
+    -- PvE SYNC packets also carry a precise version in field four.
+    local detectedVersion = nil
+    if string.sub(message, 1, 3) == "P1^" then
+        local _, _, syncVersion = string.find(message, "^P1%^SYNC%^[^^]*%^([^%^]+)")
+        detectedVersion = syncVersion
+    end
+    self:RememberAddonUser(sender, detectedVersion)
+
+    if self.HandlePveAddonMessage and string.sub(message, 1, 3) == "P1^" then
+        local handled = self:HandlePveAddonMessage(message, channel, sender)
+        if self.RefreshAddonUsersIndicator then self:RefreshAddonUsersIndicator() end
+        return handled
+    end
+
     local startPos, endPos, version = string.find(message, "^V|(.+)$")
     if version then
         self:RememberAddonUser(sender, version)
@@ -1428,9 +1522,11 @@ function OTLGM:HandleAddonMessage(prefix, message, channel, sender)
         local now = self:Now()
         self.addonReplyTimes = self.addonReplyTimes or {}
         local normalized = ANormalizeName(sender)
-        if not self.addonReplyTimes[normalized] or (now - self.addonReplyTimes[normalized]) >= 30 then
+        if not self.addonReplyTimes[normalized] or (now - self.addonReplyTimes[normalized]) >= 5 then
             self.addonReplyTimes[normalized] = now
-            pcall(SendAddonMessage, "OTLGM", "V|" .. self.version, "GUILD")
+            -- A direct whisper response is more reliable and does not make every
+            -- guild member process a reply intended for one requester.
+            self:BroadcastVersion(sender)
         end
         if self.ui and self.ui.main and self.ui.main:IsVisible() and self.RefreshAddonUsersIndicator then self:RefreshAddonUsersIndicator() end
         return true
@@ -1442,18 +1538,22 @@ function OTLGM:GetDetectedAddonUserList(maxAge)
     local db = self:GetGuildDB()
     local list = {}
     if not db then return list end
-    local cutoff = self:Now() - (maxAge or 86400)
+    local now = self:Now()
+    local cutoff = now - (maxAge or 86400)
     local sender, info
     for sender, info in pairs(db.detectedVersions or {}) do
         if info.ts and info.ts >= cutoff then
             local shortName = string.gsub(sender, "%-.*$", "")
             local member = self:GetMember(shortName)
+            -- A packet received in the last five minutes is itself proof that the
+            -- character is online, even if the local roster snapshot is older.
+            local recentlySeen = (now - (info.ts or 0)) <= 300
             table.insert(list, {
-                sender = sender,
+                sender = info.sender or sender,
                 name = shortName,
-                version = info.version or "Unknown",
+                version = info.version or "Detected",
                 ts = info.ts,
-                online = member and member.online and true or false,
+                online = recentlySeen or (member and member.online and true or false),
                 class = member and member.class or "",
                 rank = member and member.rank or "",
             })
@@ -1475,7 +1575,7 @@ function OTLGM:GetDetectedAddonUsers(maxAge)
     for i = 1, table.getn(list) do
         info = list[i]
         if info.online then online = online + 1 end
-        if self:IsVersionNewer(info.version, latest) then latest = info.version end
+        if info.version ~= "Detected" and self:IsVersionNewer(info.version, latest) then latest = info.version end
     end
     return table.getn(list), latest, online
 end
@@ -1502,7 +1602,7 @@ function OTLGM:ExportBackup()
     local db = self:GetGuildDB()
     if not db then return "OTLGM_BACKUP_V1\nERROR|No guild database" end
     local lines = { "OTLGM_BACKUP_V1", "G|" .. EscapeField(db.realm) .. "|" .. EscapeField(db.name) .. "|" .. tostring(self:Now()) }
-    local settingsKeys = { "scanInterval", "autoScan", "uiMode", "uiScale", "showMinimap", "classColors", "highlightLeadership", "confirmRecruitment" }
+    local settingsKeys = { "scanInterval", "autoScan", "uiMode", "uiScale", "showMinimap", "classColors", "highlightLeadership", "confirmRecruitment", "guildChatChannel", "chatHighlightMentions", "chatTimeSeparators", "chatShowRanks", "settingsSection", "lastWorldRecruitmentAt", "lastWorldRecruitmentLabel", "lastWorldRecruitmentChannel", "worldRecruitmentMinSeconds", "worldRecruitmentRecommendedSeconds" }
     local i, key
     for i = 1, table.getn(settingsKeys) do
         key = settingsKeys[i]

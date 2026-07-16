@@ -2,7 +2,7 @@
 -- Core systems for Vanilla WoW / OctoWoW (Interface 11200)
 
 OTLGM = OTLGM or {}
-OTLGM.version = "1.0.9"
+OTLGM.version = "1.4.1"
 OTLGM.addonName = "OrderOfTheLionGM"
 OTLGM.pendingScan = false
 OTLGM.pendingSilent = true
@@ -64,6 +64,11 @@ OTLGM.recruitmentPresets = {
         label = "Guild Info",
         target = "GUILD",
         text = "[G-Info] Join Discord for news, help, groups & future raids. No mic needed. Discord join = first promotion from starter rank: https://discord.gg/UNacDPrGt2",
+    },
+    ADDONINFO = {
+        label = "Guild Addon",
+        target = "GUILD",
+        text = "[Order of the Lion Addon] Made specifically for our guild to help us stay connected, share experience and play together: improved guild chat, member and profession search, guild information, activity, live Group Finder, raid alerts and a shared guild board. Download: https://github.com/Relyway/OrderOfTheLionGM",
     },
 }
 
@@ -132,6 +137,33 @@ function OTLGM:EnsureDB()
     if settings.customMessageNames == nil then settings.customMessageNames = { "Custom 1", "Custom 2", "Custom 3" } end
     if settings.recruitmentLastSent == nil then settings.recruitmentLastSent = {} end
     if settings.recruitmentReminderSeconds == nil then settings.recruitmentReminderSeconds = 300 end
+    if settings.worldRecruitmentMinSeconds == nil then settings.worldRecruitmentMinSeconds = 600 end
+    if settings.worldRecruitmentRecommendedSeconds == nil then settings.worldRecruitmentRecommendedSeconds = 900 end
+    if settings.guildChatChannel == nil then settings.guildChatChannel = "GUILD" end
+    if settings.guildChatDrafts == nil then settings.guildChatDrafts = { GUILD = "", OFFICER = "" } end
+    if settings.guildChatDrafts.GUILD == nil then settings.guildChatDrafts.GUILD = "" end
+    if settings.guildChatDrafts.OFFICER == nil then settings.guildChatDrafts.OFFICER = "" end
+    if settings.chatHighlightMentions == nil then settings.chatHighlightMentions = true end
+    if settings.chatTimeSeparators == nil then settings.chatTimeSeparators = true end
+    if settings.chatShowRanks == nil then settings.chatShowRanks = true end
+    if settings.settingsSection == nil then settings.settingsSection = "GENERAL" end
+    if settings.worldRecruitmentTimerMigrated == nil then
+        if settings.lastWorldRecruitmentAt == nil then
+            local baseOne = tonumber(settings.recruitmentLastSent.BASE1) or 0
+            local baseTwo = tonumber(settings.recruitmentLastSent.BASE2) or 0
+            if baseOne > 0 or baseTwo > 0 then
+                if baseOne >= baseTwo then
+                    settings.lastWorldRecruitmentAt = baseOne
+                    settings.lastWorldRecruitmentLabel = "Recruit 1"
+                else
+                    settings.lastWorldRecruitmentAt = baseTwo
+                    settings.lastWorldRecruitmentLabel = "Recruit 2"
+                end
+                settings.lastWorldRecruitmentChannel = tostring(settings.worldChannel or "6")
+            end
+        end
+        settings.worldRecruitmentTimerMigrated = true
+    end
     if not settings.customMessageNames[1] then settings.customMessageNames[1] = "Custom 1" end
     if not settings.customMessageNames[2] then settings.customMessageNames[2] = "Custom 2" end
     if not settings.customMessageNames[3] then settings.customMessageNames[3] = "Custom 3" end
@@ -1144,6 +1176,57 @@ function OTLGM:FormatElapsedShort(seconds)
     return tostring(math.floor(seconds / 86400)) .. "d ago"
 end
 
+function OTLGM:FormatWorldRecruitmentElapsed(seconds)
+    seconds = math.max(0, tonumber(seconds) or 0)
+    if seconds < 60 then return "<1m ago" end
+    if seconds < 3600 then return tostring(math.floor(seconds / 60)) .. "m ago" end
+    if seconds < 86400 then
+        local hours = math.floor(seconds / 3600)
+        local minutes = math.floor(math.mod(seconds, 3600) / 60)
+        if minutes > 0 then return tostring(hours) .. "h " .. tostring(minutes) .. "m ago" end
+        return tostring(hours) .. "h ago"
+    end
+    return tostring(math.floor(seconds / 86400)) .. "d ago"
+end
+
+function OTLGM:GetWorldRecruitmentInfo()
+    self:EnsureDB()
+    local settings = OTLGM_DB.settings
+    local timestamp = tonumber(settings.lastWorldRecruitmentAt)
+    local info = {
+        timestamp = timestamp,
+        label = settings.lastWorldRecruitmentLabel or "World recruitment",
+        channel = settings.lastWorldRecruitmentChannel or tostring(settings.worldChannel or "6"),
+        value = "NEVER",
+        detail = "No world recruitment post recorded yet.",
+        state = "NEVER",
+        elapsed = nil,
+    }
+    if not timestamp then return info end
+
+    local elapsed = self:Now() - timestamp
+    if elapsed < 0 then elapsed = 0 end
+    local minimum = tonumber(settings.worldRecruitmentMinSeconds) or 600
+    local recommended = tonumber(settings.worldRecruitmentRecommendedSeconds) or 900
+    if recommended < minimum then recommended = minimum end
+
+    info.elapsed = elapsed
+    info.value = self:FormatWorldRecruitmentElapsed(elapsed)
+    if elapsed < minimum then
+        local waitMinutes = math.ceil((minimum - elapsed) / 60)
+        if waitMinutes < 1 then waitMinutes = 1 end
+        info.state = "WAIT"
+        info.detail = "Wait " .. tostring(waitMinutes) .. "m before posting again."
+    elseif elapsed < recommended then
+        info.state = "WINDOW"
+        info.detail = "Recommended 10-15 min window."
+    else
+        info.state = "READY"
+        info.detail = "Safe to post in world again."
+    end
+    return info
+end
+
 function OTLGM:GetRecruitmentLastSentText(key, compact)
     self:EnsureDB()
     local ts = OTLGM_DB.settings.recruitmentLastSent[key or ""]
@@ -1151,15 +1234,191 @@ function OTLGM:GetRecruitmentLastSentText(key, compact)
     local elapsed = self:Now() - ts
     if elapsed < 0 then elapsed = 0 end
     if compact then return "Sent " .. self:FormatElapsedShort(elapsed) end
-    local ready = elapsed >= (OTLGM_DB.settings.recruitmentReminderSeconds or 300) and " • ready" or ""
-    return "Last sent: " .. date("%d/%m %H:%M", ts) .. " • " .. self:FormatElapsedShort(elapsed) .. ready
+    return "Last sent: " .. date("%d/%m %H:%M", ts) .. " - " .. self:FormatElapsedShort(elapsed)
 end
 
-function OTLGM:MarkRecruitmentSent(key)
+function OTLGM:MarkRecruitmentSent(key, target, label)
     self:EnsureDB()
+    if target ~= "WORLD" then return end
     if not key or key == "" then key = "WORKING" end
-    OTLGM_DB.settings.recruitmentLastSent[key] = self:Now()
+    local now = self:Now()
+    OTLGM_DB.settings.recruitmentLastSent[key] = now
+    OTLGM_DB.settings.lastWorldRecruitmentAt = now
+    OTLGM_DB.settings.lastWorldRecruitmentLabel = label or key
+    OTLGM_DB.settings.lastWorldRecruitmentChannel = tostring(self:GetWorldChannelNumber() or OTLGM_DB.settings.worldChannel or "6")
+    if self.RefreshWorldRecruitmentIndicator then self:RefreshWorldRecruitmentIndicator() end
     if self.RefreshRecruitmentPage then self:RefreshRecruitmentPage() end
+end
+
+function OTLGM:GetGuildChatMessages(channel)
+    channel = channel == "OFFICER" and "OFFICER" or "GUILD"
+    if channel == "OFFICER" then
+        self.officerChatMessages = self.officerChatMessages or {}
+        return self.officerChatMessages
+    end
+
+    local db = self:GetGuildDB()
+    if not db then
+        self.pendingGuildChatMessages = self.pendingGuildChatMessages or {}
+        return self.pendingGuildChatMessages
+    end
+    db.guildChatMessages = db.guildChatMessages or {}
+    if self.pendingGuildChatMessages and table.getn(self.pendingGuildChatMessages) > 0 then
+        local i
+        for i = 1, table.getn(self.pendingGuildChatMessages) do
+            table.insert(db.guildChatMessages, self.pendingGuildChatMessages[i])
+        end
+        while table.getn(db.guildChatMessages) > 150 do table.remove(db.guildChatMessages, 1) end
+        self.pendingGuildChatMessages = {}
+        db.guildChatUnread = (db.guildChatUnread or 0) + (self.pendingGuildChatUnread or 0)
+        self.pendingGuildChatUnread = 0
+    end
+    return db.guildChatMessages
+end
+
+function OTLGM:GetGuildChatChannel()
+    self:EnsureDB()
+    local channel = OTLGM_DB.settings.guildChatChannel or "GUILD"
+    if channel == "OFFICER" and self.IsOfficerMode and not self:IsOfficerMode() then
+        channel = "GUILD"
+        OTLGM_DB.settings.guildChatChannel = channel
+    end
+    return channel
+end
+
+function OTLGM:GetGuildChatUnread(channel)
+    channel = channel == "OFFICER" and "OFFICER" or "GUILD"
+    if channel == "OFFICER" then return self.officerChatUnread or 0 end
+    local db = self:GetGuildDB()
+    if db then return db.guildChatUnread or 0 end
+    return self.pendingGuildChatUnread or 0
+end
+
+function OTLGM:SetGuildChatUnread(channel, count)
+    channel = channel == "OFFICER" and "OFFICER" or "GUILD"
+    count = math.max(0, tonumber(count) or 0)
+    if channel == "OFFICER" then
+        self.officerChatUnread = count
+    else
+        local db = self:GetGuildDB()
+        if db then db.guildChatUnread = count else self.pendingGuildChatUnread = count end
+    end
+end
+
+function OTLGM:GetTotalGuildChatUnread()
+    local total = self:GetGuildChatUnread("GUILD")
+    if self.IsOfficerMode and self:IsOfficerMode() then total = total + self:GetGuildChatUnread("OFFICER") end
+    return total
+end
+
+function OTLGM:IsGuildChatChannelBeingRead(channel)
+    if not self.ui or not self.ui.main or not self.ui.main:IsVisible() then return false end
+    if self.ui.currentPage ~= "guildchat" then return false end
+    if self:GetGuildChatChannel() ~= channel then return false end
+    local offset = self.ui.chatOffsets and (self.ui.chatOffsets[channel] or 0) or 0
+    return offset == 0
+end
+
+function OTLGM:SetGuildChatChannel(channel)
+    channel = channel == "OFFICER" and "OFFICER" or "GUILD"
+    if channel == "OFFICER" and (not self.IsOfficerMode or not self:IsOfficerMode()) then
+        if self.Notify then self:Notify("Officer Chat Unavailable", "Your current guild rank does not expose officer tools to the addon.") end
+        channel = "GUILD"
+    end
+    self:EnsureDB()
+    OTLGM_DB.settings.guildChatChannel = channel
+    self.ui.chatOffsets = self.ui.chatOffsets or { GUILD = 0, OFFICER = 0 }
+    self.ui.chatOffsets[channel] = 0
+    self:SetGuildChatUnread(channel, 0)
+    if self.RefreshGuildChatPage then self:RefreshGuildChatPage() end
+    if self.RefreshGuildChatNavigationBadge then self:RefreshGuildChatNavigationBadge() elseif self.RefreshNavigation then self:RefreshNavigation() end
+end
+
+function OTLGM:CaptureGuildChatMessage(channel, message, sender)
+    channel = channel == "OFFICER" and "OFFICER" or "GUILD"
+    message = Trim(message or "")
+    sender = Trim(sender or "Unknown")
+    if message == "" then return end
+    message = string.gsub(message, "[\r\n]", " ")
+
+    local messages = self:GetGuildChatMessages(channel)
+    local messageTime = self:Now()
+    if self.ui and self.ui.chatOffsets and (self.ui.chatOffsets[channel] or 0) > 0 then
+        self.ui.chatOffsets[channel] = (self.ui.chatOffsets[channel] or 0) + 1
+    end
+    table.insert(messages, {
+        ts = messageTime,
+        sender = sender,
+        text = message,
+        channel = channel,
+    })
+    while table.getn(messages) > 150 do table.remove(messages, 1) end
+
+    local playerName = UnitName and UnitName("player") or ""
+    local ownMessage = NormalizeName(sender) == NormalizeName(playerName)
+    if self:IsGuildChatChannelBeingRead(channel) then
+        self:SetGuildChatUnread(channel, 0)
+    elseif not ownMessage then
+        local previousUnread = self:GetGuildChatUnread(channel)
+        self.guildChatNewMarker = self.guildChatNewMarker or {}
+        if previousUnread <= 0 or not self.guildChatNewMarker[channel] then
+            self.guildChatNewMarker[channel] = messageTime
+        end
+        self:SetGuildChatUnread(channel, previousUnread + 1)
+    end
+
+    if self.ui and self.ui.main and self.ui.main:IsVisible() and self.ui.currentPage == "guildchat" and self.RefreshGuildChatPage then
+        self:RefreshGuildChatPage()
+    end
+    if self.RefreshGuildChatNavigationBadge then self:RefreshGuildChatNavigationBadge() elseif self.RefreshNavigation then self:RefreshNavigation() end
+end
+
+function OTLGM:ClearGuildChatHistory(channel)
+    channel = channel == "OFFICER" and "OFFICER" or "GUILD"
+    self.guildChatNewMarker = self.guildChatNewMarker or {}
+    self.guildChatNewMarker[channel] = nil
+    if channel == "OFFICER" then
+        self.officerChatMessages = {}
+        self.officerChatUnread = 0
+    else
+        self.pendingGuildChatMessages = {}
+        self.pendingGuildChatUnread = 0
+        local db = self:GetGuildDB()
+        if db then
+            db.guildChatMessages = {}
+            db.guildChatUnread = 0
+        end
+    end
+    if self.ui and self.ui.chatOffsets then self.ui.chatOffsets[channel] = 0 end
+    if self.RefreshGuildChatPage then self:RefreshGuildChatPage() end
+    if self.RefreshGuildChatNavigationBadge then self:RefreshGuildChatNavigationBadge() elseif self.RefreshNavigation then self:RefreshNavigation() end
+end
+
+function OTLGM:ClearGuildChatNewMarkers()
+    self.guildChatNewMarker = {}
+end
+
+function OTLGM:SendGuildChatMessage(message, channel)
+    message = Trim(message or "")
+    channel = channel == "OFFICER" and "OFFICER" or "GUILD"
+    if message == "" then
+        if self.Notify then self:Notify("Message Empty", "Write a message before sending.") end
+        return false
+    end
+    if channel == "OFFICER" and (not self.IsOfficerMode or not self:IsOfficerMode()) then
+        if self.Notify then self:Notify("Officer Chat Unavailable", "Your current guild rank cannot use the officer chat page.") end
+        return false
+    end
+
+    local ok, err = pcall(SendChatMessage, message, channel)
+    if not ok then
+        if self.Notify then self:Notify("Chat Message Failed", tostring(err)) end
+        return false
+    end
+    if self.SetStatus then
+        self:SetStatus(channel == "OFFICER" and "Message sent to officer chat." or "Message sent to guild chat.")
+    end
+    return true
 end
 
 function OTLGM:SendMessageText(message, target)
@@ -1217,14 +1476,15 @@ end
 function OTLGM:SendRecruitmentPreset(key)
     local preset = self.recruitmentPresets[key]
     if not preset then return end
-    if self:SendMessageText(preset.text, preset.target) then self:MarkRecruitmentSent(key) end
+    if self:SendMessageText(preset.text, preset.target) then self:MarkRecruitmentSent(key, preset.target, preset.label) end
 end
 
 function OTLGM:SendCurrentRecruitment()
     self:EnsureDB()
     local selected = OTLGM_DB.settings.selectedRecruitment or "WORKING"
-    if self:SendMessageText(OTLGM_DB.settings.recruitmentMessage or "", OTLGM_DB.settings.customTarget or "WORLD") then
-        self:MarkRecruitmentSent(selected)
+    local target = OTLGM_DB.settings.customTarget or "WORLD"
+    if self:SendMessageText(OTLGM_DB.settings.recruitmentMessage or "", target) then
+        self:MarkRecruitmentSent(selected, target, "Working Copy")
     end
 end
 

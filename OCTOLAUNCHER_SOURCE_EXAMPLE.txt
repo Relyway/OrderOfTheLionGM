@@ -1,1 +1,1 @@
-{ git: 'https://octowow.st/git/USERNAME/OrderOfTheLionGM.git' },
+{ git: 'https://github.com/Relyway/OrderOfTheLionGM.git' },

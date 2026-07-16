@@ -1,54 +1,55 @@
-# Публикация Order of the Lion Guild Manager через Git и OctoLauncher
+# Публикация Order of the Lion Guild Manager через GitHub и OctoLauncher
 
 ## Текущая версия
 
 ```text
-1.0.9
+1.4.1
 ```
 
-## Первая публикация
+## Простое обновление через сайт GitHub
 
-```powershell
-git init
-git branch -M main
-git add .
-git commit -m "Release v1.0.9"
-git remote add origin https://АДРЕС-РЕПОЗИТОРИЯ.git
-git push -u origin main
-git tag v1.0.9
-git push origin v1.0.9
-```
-
-## Следующее обновление
-
-Перед новым релизом поменяй версию минимум в:
+1. Распакуй архив `OrderOfTheLionGM-Git-ready-v1.4.1.zip`.
+2. Открой папку `OrderOfTheLionGM` внутри архива.
+3. В текущем репозитории открой **Add file → Upload files**.
+4. Перетащи всё содержимое папки, не создавая новый репозиторий.
+5. В сообщении коммита напиши:
 
 ```text
-Core.lua
-Advanced.lua
-UI.lua
-Events.lua
-OrderOfTheLionGM.toc
-README.txt
-CHANGELOG.txt
+Update to v1.4.1
 ```
 
-После этого:
+6. Нажми **Commit changes**.
+
+Файлы `.toc` и `.lua` должны по-прежнему находиться в корне репозитория.
+
+## Новый GitHub Release
+
+Создай новый релиз, не удаляя старый:
+
+```text
+Tag: v1.4.1
+Title: Order of the Lion Guild Manager v1.4.1
+File: OrderOfTheLionGM-v1.4.1.zip
+```
+
+Отметь его как последний релиз и опубликуй.
+
+## Команды Git для тех, кто использует Git локально
 
 ```powershell
 git add .
-git commit -m "Release vНОВАЯ_ВЕРСИЯ"
+git commit -m "Release v1.4.1"
 git push
-git tag vНОВАЯ_ВЕРСИЯ
-git push origin vНОВАЯ_ВЕРСИЯ
+git tag v1.4.1
+git push origin v1.4.1
 ```
 
 ## OctoLauncher
 
-Пример записи для поддерживаемого списка источников:
+Текущий источник аддона:
 
 ```ts
-{ git: 'https://octowow.st/git/USERNAME/OrderOfTheLionGM.git' },
+{ git: 'https://github.com/Relyway/OrderOfTheLionGM.git' },
 ```
 
-Lua-аддон сам не скачивает обновления из интернета. Для автоматических обновлений нужен источник в OctoLauncher.
+При пользовательской установке OctoLauncher клонирует текущую ветку репозитория. После загрузки файлов v1.4.1 пользователи смогут получить обновление из того же источника.
