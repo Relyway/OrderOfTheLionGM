@@ -1,5 +1,5 @@
 -- Order of the Lion Guild Manager
--- Lightweight guild-to-guild PvE synchronization for Vanilla WoW / OctoWoW - v1.4.1
+-- Lightweight guild-to-guild PvE synchronization for Vanilla WoW / OctoWoW - v1.5.4
 
 OTLGM.pveProtocol = "P1"
 OTLGM.pveRequestLifetime = 3600
@@ -240,7 +240,7 @@ function OTLGM:GetPveUnread(section)
 end
 
 function OTLGM:GetPveUnreadTotal()
-    return self:GetPveUnread("RAIDS") + self:GetPveUnread("GROUPS") + self:GetPveUnread("BOARD")
+    return self:GetPveUnread("RAIDS") + self:GetPveUnread("GROUPS")
 end
 
 function OTLGM:IsPveSectionVisible(section)
@@ -272,6 +272,11 @@ end
 
 function OTLGM:QueuePvePayload(payload, channel, target)
     if not payload or payload == "" then return false end
+    if string.len(payload) > 250 then
+        self.pveDroppedPayloads = (self.pveDroppedPayloads or 0) + 1
+        self.lastPveDroppedSize = string.len(payload)
+        return false
+    end
     self.pveSendQueue = self.pveSendQueue or {}
     if table.getn(self.pveSendQueue) >= 80 then table.remove(self.pveSendQueue, 1) end
     table.insert(self.pveSendQueue, { payload = payload, channel = channel or "GUILD", target = target })
@@ -309,7 +314,7 @@ function OTLGM:SerializePveBoard(record)
 end
 
 function OTLGM:SerializePveRaid(record)
-    return table.concat({ self.pveProtocol, "RAID", record.id, tostring(record.rev or 1), tostring(record.ts or 0), tostring(record.startTs or 0), PveSafeText(record.author, 20), PveSafeText(record.name, 36), PveSafeText(record.location, 32), PveSafeText(record.serverTime, 28), PveSafeText(record.note, 72) }, "^")
+    return table.concat({ self.pveProtocol, "RAID", record.id, tostring(record.rev or 1), tostring(record.ts or 0), tostring(record.startTs or 0), PveSafeText(record.author, 20), PveSafeText(record.name, 36), PveSafeText(record.location, 32), PveSafeText(record.serverTime, 28), PveSafeText(record.note, 58) }, "^")
 end
 
 function OTLGM:GetPveRecordRevision(id)
@@ -587,10 +592,10 @@ end
 function OTLGM:PostPveRaidToGuildChat()
     local raid = self:GetPveActiveRaid()
     if not raid then return false end
-    local text = "[Guild Raid] " .. (raid.name or "Raid") .. " - " .. (raid.serverTime or "time TBA")
+    local text = "[OTLGM Raid Alert] " .. (raid.name or "Raid") .. " - " .. (raid.serverTime or "time TBA")
     if raid.location and raid.location ~= "" then text = text .. " - " .. raid.location end
     if raid.note and raid.note ~= "" then text = text .. ". " .. raid.note end
-    text = text .. " Sign-ups are in Discord."
+    text = text .. " Sign-ups are in Discord. Created with the Order of the Lion guild addon."
     if SendChatMessage then pcall(SendChatMessage, text, "GUILD") return true end
     return false
 end
@@ -831,6 +836,7 @@ function OTLGM:OnPveDataChanged(section, remote)
     if self.RefreshPveNavigationBadge then self:RefreshPveNavigationBadge() end
     if self.ui and self.ui.main and self.ui.main:IsVisible() then
         if self.ui.currentPage == "pve" and self.RefreshPvePage then self:RefreshPvePage() end
+        if self.ui.currentPage == "guildchat" and section == "BOARD" and self.RefreshGuildChatPage then self:RefreshGuildChatPage() end
         if self.ui.currentPage == "home" and self.RefreshHomePage then self:RefreshHomePage() end
         if self.ui.currentPage == "overview" and self.RefreshOverviewPage then self:RefreshOverviewPage() end
     end

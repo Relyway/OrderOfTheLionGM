@@ -1,8 +1,8 @@
 -- Order of the Lion Guild Manager
--- Advanced data, safety and analytics layer for v1.2.2
+-- Advanced data, safety and analytics layer for v1.5.4
 
-OTLGM.version = "1.4.1"
-OTLGM.schemaVersion = 5
+OTLGM.version = "1.5.4"
+OTLGM.schemaVersion = 6
 OTLGM.confirmScanAt = nil
 OTLGM.scanReason = nil
 
@@ -55,28 +55,28 @@ end
 OTLGM.professionDefinitions = {
     {
         key = "ALCHEMY", label = "Alchemy",
-        terms = { "alchemy", "alchemist", "potion maker", "potionmaster", "master of potions", "алхимия", "алхимик", "зельевар", "зелья" },
-        shortTerms = { "alch", "alchy", "alchi", "alc", "pots", "potions", "pot", "flasks", "flask", "transmute", "transmuter", "алх" },
+        terms = { "alchemy", "alchemist", "potion maker", "potionmaster", "master of potions" },
+        shortTerms = { "alch", "alchy", "alchi", "alc", "pots", "potions", "pot", "flasks", "flask", "transmute", "transmuter" },
         typos = { "alchemi", "alchemie", "alchimy", "alcemist", "alchemyst" },
     },
     {
         key = "BLACKSMITHING", label = "Blacksmithing",
-        terms = { "blacksmithing", "blacksmith", "weapon smith", "weaponsmith", "armor smith", "armorsmith", "smithing", "кузнечное дело", "кузнец", "кузня" },
-        shortTerms = { "bsmith", "smith", "weaponsmith", "armorsmith", "weapon smith", "armor smith", "куз" },
+        terms = { "blacksmithing", "blacksmith", "weapon smith", "weaponsmith", "armor smith", "armorsmith", "smithing" },
+        shortTerms = { "bsmith", "smith", "weaponsmith", "armorsmith", "weapon smith", "armor smith" },
         strictTerms = { "bs" },
         typos = { "blacksmithng", "blacksmitting", "blacksmth", "blacksmiting" },
     },
     {
         key = "ENCHANTING", label = "Enchanting",
-        terms = { "enchanting", "enchanter", "enchantments", "disenchanting", "disenchanter", "зачарование", "чарование", "чародей", "чарки", "энчант" },
-        shortTerms = { "ench", "enchant", "disenchant", "disenchanting", "deing", "chant", "chants", "энч", "чарка", "зачар" },
+        terms = { "enchanting", "enchanter", "enchantments", "disenchanting", "disenchanter" },
+        shortTerms = { "ench", "enchant", "disenchant", "disenchanting", "deing", "chant", "chants" },
         strictTerms = { "de", "d/e", "d e" },
         typos = { "enchantng", "enchaning", "enchating", "enchenter" },
     },
     {
         key = "ENGINEERING", label = "Engineering",
-        terms = { "engineering", "engineer", "gnomish engineering", "goblin engineering", "инженерия", "инженер", "гномская инженерия", "гоблинская инженерия" },
-        shortTerms = { "engi", "engy", "engine", "gnomish", "goblin engi", "gob engi", "gnome engi", "инжа", "инж" },
+        terms = { "engineering", "engineer", "gnomish engineering", "goblin engineering" },
+        shortTerms = { "engi", "engy", "engine", "gnomish", "goblin engi", "gob engi", "gnome engi" },
         strictTerms = { "eng" },
         typos = { "enginering", "engeneering", "enginearing", "engeneer" },
     },
@@ -89,40 +89,40 @@ OTLGM.professionDefinitions = {
     },
     {
         key = "HERBALISM", label = "Herbalism",
-        terms = { "herbalism", "herbalist", "herb gathering", "травничество", "травник", "сбор трав", "травы" },
-        shortTerms = { "herb", "herbs", "herbing", "herba", "herbal", "gather herbs", "травка", "трав" },
+        terms = { "herbalism", "herbalist", "herb gathering" },
+        shortTerms = { "herb", "herbs", "herbing", "herba", "herbal", "gather herbs" },
         typos = { "herbalizm", "herbalim", "herbalistm" },
     },
     {
         key = "LEATHERWORKING", label = "Leatherworking",
-        terms = { "leatherworking", "leatherworker", "tribal leatherworking", "dragonscale leatherworking", "elemental leatherworking", "кожевничество", "кожевник", "работа с кожей" },
-        shortTerms = { "leather", "lworker", "tribal lw", "dragonscale lw", "elemental lw", "leath", "кож" },
+        terms = { "leatherworking", "leatherworker", "tribal leatherworking", "dragonscale leatherworking", "elemental leatherworking" },
+        shortTerms = { "leather", "lworker", "tribal lw", "dragonscale lw", "elemental lw", "leath" },
         strictTerms = { "lw" },
         typos = { "leatherwoking", "leatherworkng", "letherworking", "leatherwoker" },
     },
     {
         key = "MINING", label = "Mining",
-        terms = { "mining", "miner", "ore gathering", "горное дело", "горняк", "шахтер", "шахтёр", "добыча руды", "руда" },
-        shortTerms = { "mine", "mines", "ores", "ore", "smelt", "smelting", "smelter", "рудокоп" },
+        terms = { "mining", "miner", "ore gathering" },
+        shortTerms = { "mine", "mines", "ores", "ore", "smelt", "smelting", "smelter" },
         strictTerms = { "min" },
         typos = { "minning", "mineing", "mning" },
     },
     {
         key = "SKINNING", label = "Skinning",
-        terms = { "skinning", "skinner", "hide gathering", "снятие шкур", "шкуродер", "шкуродёр", "шкурник", "шкуры" },
-        shortTerms = { "skin", "skins", "hides", "hide", "skn", "шкур" },
+        terms = { "skinning", "skinner", "hide gathering" },
+        shortTerms = { "skin", "skins", "hides", "hide", "skn" },
         typos = { "skining", "skinnig", "skinnng" },
     },
     {
         key = "TAILORING", label = "Tailoring",
-        terms = { "tailoring", "tailor", "mooncloth tailor", "cloth crafting", "портняжное дело", "портной", "швея", "шитье", "шитьё" },
-        shortTerms = { "tailor", "sewing", "cloth", "tail", "mooncloth", "seamstress", "портняга" },
+        terms = { "tailoring", "tailor", "mooncloth tailor", "cloth crafting" },
+        shortTerms = { "tailor", "sewing", "cloth", "tail", "mooncloth", "seamstress" },
         typos = { "tailorng", "tayloring", "tailering", "taloring" },
     },
     {
         key = "FIRSTAID", label = "First Aid",
-        terms = { "first aid", "firstaid", "bandage maker", "первая помощь", "бинтование", "бинты" },
-        shortTerms = { "bandage", "bandages", "medic", "healer bandages", "бинт", "медик" },
+        terms = { "first aid", "firstaid", "bandage maker" },
+        shortTerms = { "bandage", "bandages", "medic", "healer bandages" },
         strictTerms = { "fa" },
         typos = { "firstiad", "frist aid", "first ade" },
     },
@@ -131,7 +131,7 @@ OTLGM.professionDefinitions = {
 OTLGM.rankInformation = {
     {
         number = "!", name = "Muted", kind = "Restricted",
-        aliases = { "muted", "mute", "tormented", "punished", "restricted", "warning", "замученный", "Замученный" },
+        aliases = { "muted", "mute", "tormented", "punished", "restricted", "warning" },
         receive = "Assigned temporarily by leadership after a serious warning, rule violation or refusal to follow guild decisions.",
         access = "Restricted disciplinary status. Normal guild privileges remain limited until leadership reviews the situation."
     },
@@ -226,6 +226,11 @@ function OTLGM:EnsureDB()
     if settings.nextRecruitIndex == nil then settings.nextRecruitIndex = 1 end
     if settings.latestDetectedVersion == nil then settings.latestDetectedVersion = self.version end
     if settings.customMessageNames == nil then settings.customMessageNames = { "Custom 1", "Custom 2", "Custom 3" } end
+    if settings.guildSectionExpanded == nil then settings.guildSectionExpanded = true end
+    if settings.officerSectionExpanded == nil then settings.officerSectionExpanded = true end
+    if settings.globalSearch == nil then settings.globalSearch = "" end
+    if settings.updateWarningDismissed == nil then settings.updateWarningDismissed = "" end
+    if settings.lowLevelAddonCutoff == nil then settings.lowLevelAddonCutoff = 10 end
 
     OTLGM_DB.version = self.version
 end
@@ -241,6 +246,8 @@ function OTLGM:MigrateGuildDB(db)
     db.memberFlags = db.memberFlags or {}
     db.detectedVersions = db.detectedVersions or {}
     db.unread = db.unread or 0
+    db.crafting = db.crafting or {}
+    db.weeklySnapshots = db.weeklySnapshots or {}
 
     local remainingUnread = db.unread or 0
     local i, eventInfo
@@ -388,19 +395,8 @@ function OTLGM:MarkHistoryRead()
     if self.RefreshHistoryPage then self:RefreshHistoryPage() end
 end
 
-local professionCaseMap = {
-    ["А"]="а", ["Б"]="б", ["В"]="в", ["Г"]="г", ["Д"]="д", ["Е"]="е", ["Ё"]="ё",
-    ["Ж"]="ж", ["З"]="з", ["И"]="и", ["Й"]="й", ["К"]="к", ["Л"]="л", ["М"]="м",
-    ["Н"]="н", ["О"]="о", ["П"]="п", ["Р"]="р", ["С"]="с", ["Т"]="т", ["У"]="у",
-    ["Ф"]="ф", ["Х"]="х", ["Ц"]="ц", ["Ч"]="ч", ["Ш"]="ш", ["Щ"]="щ", ["Ъ"]="ъ",
-    ["Ы"]="ы", ["Ь"]="ь", ["Э"]="э", ["Ю"]="ю", ["Я"]="я",
-}
-
 local function ProfessionLower(text)
-    text = string.lower(text or "")
-    local upper, lower
-    for upper, lower in pairs(professionCaseMap) do text = string.gsub(text, upper, lower) end
-    return text
+    return string.lower(text or "")
 end
 
 local function EscapeProfessionPattern(text)
@@ -550,25 +546,28 @@ end
 
 function OTLGM:GetLeadershipRole(member)
     if not member then return nil, nil end
+    local index = tonumber(member.rankIndex) or 99
+    local rankLabel = member.rank and member.rank ~= "" and member.rank or "Leadership"
+
+    -- Guild ranks are authoritative. Names may be changed by the guild without
+    -- breaking icons or ordering. Rank index 0 is always the guild leader.
+    if index == 0 then
+        return "Interface\\Icons\\INV_Crown_01", rankLabel, 1.0, 0.76, 0.18
+    end
+    if index == 1 then
+        return "Interface\\Icons\\INV_Shield_06", rankLabel, 1.0, 0.50, 0.12
+    end
+    if index == 2 then
+        return "Interface\\Icons\\Spell_Holy_Heal", rankLabel, 0.95, 0.62, 0.18
+    end
+
+    -- Defensive compatibility for old snapshots that predate rank indexes.
     local rank = string.lower(member.rank or "")
-    local index = member.rankIndex or 99
-    if index == 0 or string.find(rank, "lucky luck", 1, true) or string.find(rank, "guild leader", 1, true) or string.find(rank, "guild master", 1, true) then
-        return "Interface\\Icons\\INV_Crown_01", member.rank or "Guild Leader", 1.0, 0.76, 0.18
+    if string.find(rank, "guild leader", 1, true) or string.find(rank, "guild master", 1, true) then
+        return "Interface\\Icons\\INV_Crown_01", rankLabel, 1.0, 0.76, 0.18
     end
-    if string.find(rank, "lionheart", 1, true) then
-        return "Interface\\Icons\\Spell_Holy_AuraOfLight", member.rank or "Lionheart", 1.0, 0.58, 0.12
-    end
-    if string.find(rank, "raid leader", 1, true) or string.find(rank, "raidlead", 1, true) then
-        return "Interface\\Icons\\Ability_Warrior_BattleShout", member.rank or "Raid Leader", 0.95, 0.48, 0.14
-    end
-    if string.find(rank, "officer", 1, true) or string.find(rank, "manager", 1, true) or string.find(rank, "inn keeper", 1, true) or index == 1 then
-        return "Interface\\Icons\\INV_Shield_06", member.rank or "Officer", 1.0, 0.50, 0.12
-    end
-    if string.find(rank, "helper", 1, true) or index == 2 then
-        return "Interface\\Icons\\Spell_Holy_Heal", member.rank or "Helper", 0.95, 0.62, 0.18
-    end
-    if string.find(rank, "leader", 1, true) then
-        return "Interface\\Icons\\INV_Shield_06", member.rank or "Leadership", 1.0, 0.50, 0.12
+    if string.find(rank, "officer", 1, true) or string.find(rank, "helper", 1, true) then
+        return "Interface\\Icons\\INV_Shield_06", rankLabel, 1.0, 0.50, 0.12
     end
     return nil, nil
 end
@@ -584,7 +583,11 @@ function OTLGM:GetMemberBadge(member)
     if rank == "raider" or string.find(rank, "4 - raider", 1, true) then
         return "Interface\\Icons\\INV_Sword_04", member.rank or "Raider", 0.62, 0.36, 0.88, "RAIDER"
     end
-    if string.find(rank, "muted", 1, true) or string.find(rank, "mute", 1, true) or string.find(rank, "tormented", 1, true) or string.find(rank, "punished", 1, true) or string.find(rank, "restricted", 1, true) or string.find(member.rank or "", "Замуч", 1, true) or string.find(member.rank or "", "замуч", 1, true) then
+    if string.find(rank, "muted", 1, true)
+        or string.find(rank, "mute", 1, true)
+        or string.find(rank, "tormented", 1, true)
+        or string.find(rank, "punished", 1, true)
+        or string.find(rank, "restricted", 1, true) then
         return "Interface\\Icons\\Spell_Shadow_CurseOfTounges", member.rank or "Muted", 0.90, 0.18, 0.18, "RESTRICTED"
     end
     return nil, nil
@@ -614,7 +617,11 @@ function OTLGM:GetGuildRoleSnapshot()
             result.leadership = result.leadership + 1
             if member.online then result.leadershipOnline = result.leadershipOnline + 1 end
         end
-        if string.find(rank, "muted", 1, true) or string.find(rank, "mute", 1, true) or string.find(rank, "tormented", 1, true) or string.find(rank, "punished", 1, true) or string.find(rank, "restricted", 1, true) or string.find(member.rank or "", "Замуч", 1, true) or string.find(member.rank or "", "замуч", 1, true) then
+        if string.find(rank, "muted", 1, true)
+            or string.find(rank, "mute", 1, true)
+            or string.find(rank, "tormented", 1, true)
+            or string.find(rank, "punished", 1, true)
+            or string.find(rank, "restricted", 1, true) then
             result.restricted = result.restricted + 1
         end
     end
@@ -742,10 +749,30 @@ function OTLGM:RecordActivitySample(db, total, online)
         activity.allTimePeakAt = now
     end
 
+    local level60, active7 = 0, 0
+    local memberName, memberInfo
+    for memberName, memberInfo in pairs(db.roster or {}) do
+        if (tonumber(memberInfo.level) or 0) >= 60 then level60 = level60 + 1 end
+        if memberInfo.online or (tonumber(memberInfo.offlineDays) or 9999) <= 7 then active7 = active7 + 1 end
+    end
+    day.total = total or day.total or 0
+    day.online = online or day.online or 0
+    day.level60 = level60
+    day.active7 = active7
+    day.lastSampleAt = now
+    db.weeklySnapshots = db.weeklySnapshots or {}
+    db.weeklySnapshots[dayKey] = {
+        ts = now, total = total or 0, online = online or 0, peak = day.peak or online or 0,
+        level60 = level60, active7 = active7,
+    }
+
     local cutoff = now - (90 * 86400)
     local key, item
     for key, item in pairs(activity.days) do
         if item.ts and item.ts < cutoff then activity.days[key] = nil end
+    end
+    for key, item in pairs(db.weeklySnapshots or {}) do
+        if item.ts and item.ts < cutoff then db.weeklySnapshots[key] = nil end
     end
 end
 
@@ -1384,10 +1411,57 @@ function OTLGM:GetLeadershipOnline()
         if member.online and self:IsLeadership(member) then table.insert(list, member) end
     end
     table.sort(list, function(a, b)
-        if (a.rankIndex or 99) ~= (b.rankIndex or 99) then return (a.rankIndex or 99) < (b.rankIndex or 99) end
-        return string.lower(a.name or "") < string.lower(b.name or "")
+        local ar = tonumber(a and a.rankIndex) or 99
+        local br = tonumber(b and b.rankIndex) or 99
+        if ar ~= br then return ar < br end
+        return string.lower((a and a.name) or "") < string.lower((b and b.name) or "")
     end)
     return list
+end
+
+function OTLGM:GetPeriodActivityPeak(daysAgoStart, daysAgoEnd)
+    local db = self:GetGuildDB()
+    if not db or not db.activity then return 0 end
+    local now = self:Now()
+    local newer = now - ((daysAgoStart or 0) * 86400)
+    local older = now - ((daysAgoEnd or 7) * 86400)
+    local peak = 0
+    local key, day
+    for key, day in pairs(db.activity.days or {}) do
+        local ts = day.ts or 0
+        if ts <= newer and ts > older and (day.peak or 0) > peak then peak = day.peak or 0 end
+    end
+    return peak
+end
+
+function OTLGM:GetWeeklyComparison()
+    local db = self:GetGuildDB()
+    local result = { available = false, current = {}, previous = {}, delta = {}, joins = 0, leaves = 0, net = 0, currentPeak = 0, previousPeak = 0 }
+    if not db then return result end
+    local roles = self:GetGuildRoleSnapshot()
+    local active7 = 0
+    local name, member
+    for name, member in pairs(db.roster or {}) do
+        if member.online or (tonumber(member.offlineDays) or 9999) <= 7 then active7 = active7 + 1 end
+    end
+    result.current = { total = db.lastTotal or 0, level60 = roles.level60 or 0, active7 = active7 }
+    result.currentPeak = self:GetPeriodActivityPeak(0, 7)
+    result.previousPeak = self:GetPeriodActivityPeak(7, 14)
+    local stats = self:GetStats(7)
+    result.joins, result.leaves, result.net = stats.joins or 0, stats.leaves or 0, stats.net or 0
+    local target = self:Now() - (7 * 86400)
+    local best, bestDistance
+    local key, snapshot
+    for key, snapshot in pairs(db.weeklySnapshots or {}) do
+        local distance = math.abs((snapshot.ts or 0) - target)
+        if distance <= (2 * 86400) and (not bestDistance or distance < bestDistance) then best, bestDistance = snapshot, distance end
+    end
+    if best then
+        result.available = true
+        result.previous = { total = best.total or 0, level60 = best.level60 or 0, active7 = best.active7 or 0, ts = best.ts }
+        result.delta = { total = result.current.total - result.previous.total, level60 = result.current.level60 - result.previous.level60, active7 = result.current.active7 - result.previous.active7, peak = result.currentPeak - result.previousPeak }
+    end
+    return result
 end
 
 function OTLGM:GenerateWeeklySummary()
@@ -1437,6 +1511,13 @@ function OTLGM:GetDiagnosticsText()
         "Stored scan records: " .. tostring(table.getn(db.scans or {})) .. "\n" ..
         "Activity days: " .. tostring(TableCount(db.activity and db.activity.days or {})) .. "\n" ..
         "Other addon users seen in 24h: " .. tostring(versionUsers) .. " (" .. tostring(versionOnline) .. " online)\n" ..
+        "PvE send queue: " .. tostring(table.getn(self.pveSendQueue or {})) .. "\n" ..
+        "PvE payloads rejected by size guard: " .. tostring(self.pveDroppedPayloads or 0) .. "\n" ..
+        "Community send queue: " .. tostring(table.getn(self.communitySendQueue or {})) .. "\n" ..
+        "Community payloads rejected by size guard: " .. tostring(self.communityDroppedPayloads or 0) .. "\n" ..
+        "Crafting characters: " .. tostring(self.GetCraftingSummary and self:GetCraftingSummary().characters or 0) .. "\n" ..
+        "Shared unique recipes: " .. tostring(self.GetCraftingSummary and self:GetCraftingSummary().uniqueRecipes or 0) .. "\n" ..
+        "Crafting requests: " .. tostring(self.GetCraftingSummary and self:GetCraftingSummary().requests or 0) .. "\n" ..
         "Last successful scan: " .. self:Stamp(db.lastScan)
 end
 
@@ -1500,6 +1581,12 @@ function OTLGM:HandleAddonMessage(prefix, message, channel, sender)
     end
     self:RememberAddonUser(sender, detectedVersion)
 
+    if self.HandleCommunityAddonMessage and string.sub(message, 1, 3) == "C1^" then
+        local handled = self:HandleCommunityAddonMessage(message, channel, sender)
+        if self.RefreshAddonUsersIndicator then self:RefreshAddonUsersIndicator() end
+        return handled
+    end
+
     if self.HandlePveAddonMessage and string.sub(message, 1, 3) == "P1^" then
         local handled = self:HandlePveAddonMessage(message, channel, sender)
         if self.RefreshAddonUsersIndicator then self:RefreshAddonUsersIndicator() end
@@ -1556,6 +1643,8 @@ function OTLGM:GetDetectedAddonUserList(maxAge)
                 online = recentlySeen or (member and member.online and true or false),
                 class = member and member.class or "",
                 rank = member and member.rank or "",
+                level = member and member.level or 0,
+                leadership = member and self:IsLeadership(member) or false,
             })
         end
     end

@@ -1,0 +1,73 @@
+ORDER OF THE LION GM 1.5.4 - IN-GAME ACCEPTANCE CHECKLIST
+
+INSTALL / LOAD
+1. Close WoW completely, replace the old addon folder, and keep WTF/SavedVariables.
+2. Log in and run /otltest.
+3. Confirm addon version 1.5.4, Interface 11200, Systems 1.5.4 loaded, UI loaded, and schema 9.
+4. Confirm no Lua error appears during login, /reload, opening the addon or switching every page.
+
+LEADERSHIP ONLINE / RANKS
+5. Confirm the real guild leader (rank index 0) is the first Leadership Online row.
+6. Confirm the guild leader icon is the same badge shown for that rank in Roster.
+7. Confirm the displayed role text is the real current guild rank name (for example Lucky Luck), not a hard-coded replacement.
+8. Rename-test only if desired: changing the rank name must not change the leader's first position or badge source.
+9. Confirm clicking a Leadership Online row opens whisper and the tooltip does not show Unknown unit.
+
+MODAL WINDOWS
+For each item below, confirm: content is bright/readable, controls are not darkened, the page behind is blocked, X works, the normal action/Close/Cancel button works, and Escape closes only the top window.
+10. New Leadership Announcement.
+11. Read full announcement.
+12. Active / Archived announcements.
+13. New Crafting Request.
+14. Guild Activity and Crafting Activity.
+15. Group Templates.
+16. Notice / message dialog.
+17. Copy Diagnostic Report.
+18. Import / backup dialog.
+19. Confirmation dialog.
+20. First-run onboarding reopened with /otl wizard.
+
+ANNOUNCEMENTS
+21. Publish a post with a title, two paragraphs separated by a blank line, and a normal new line inside the second paragraph.
+22. Include one long unbroken test token and confirm the Home card stays inside its bounds.
+23. Confirm the Home preview is bounded and Read full post shows the complete scrollable text with paragraphs preserved.
+24. Confirm author, publication date and time are clear and do not overlap the body.
+25. Receive or create an unread revision and confirm NEW appears.
+26. Open Read full post and confirm NEW clears only for that revision on that client.
+27. Confirm Like, Seen and Support affect only the selected post.
+28. Confirm Active and Archived tabs show correct counts, paging and useful empty-state text.
+29. For an officer/leader, verify Edit, Archive, Delete and Pin/Notify permissions behave correctly.
+
+PROFESSIONS / LINKS
+30. Open a real profession window so the addon performs a fresh scan.
+31. Select a recipe with a cached crafted-item link and press Link Item.
+32. Confirm the addon opens Guild Chat -> Guild and inserts the actual clickable item hyperlink into the input without sending it.
+33. Select a recipe with a real recipe/enchant link and press Link Recipe.
+34. Confirm the actual clickable recipe hyperlink is inserted without sending it.
+35. Select older/uncached data without a link and confirm the unavailable button is disabled and explains why instead of doing nothing.
+36. Confirm reagents, quantities, category, level/rarity filters, sorting and Online Only still work.
+37. Confirm Cooking and Mining/Smelting remain available after real scans.
+38. Open Full Crafting Activity and verify filters, paging and close controls.
+
+CRAFTING REQUESTS
+39. Open New Crafting Request with an empty item/service field and confirm Post Request is disabled.
+40. Enter a service/item and confirm Post Request becomes enabled.
+41. Test Materials Ready / Need Materials / Discuss, request type, note, Post, Cancel, X and Escape.
+42. Confirm replies/reactions remain attached to the correct request.
+
+UNKNOWN UNIT / CHAT ACTIONS
+43. Ctrl-click several remote and offline names in addon Guild Chat.
+44. Confirm the addon opens/selects them in Roster and no red Unknown unit message appears.
+45. Confirm normal click/whisper, item links, spell links and chat sending still work.
+
+ALL MAIN PAGES
+46. Open and refresh Home, Guild Chat, Search, PvE Hub, Roster, Professions, Activity, Overview, Recruitment, History, Inactive and Settings.
+47. Confirm Guild Board is the third Guild Chat tab and is not duplicated in PvE Hub.
+48. Confirm Raid Alerts and Group Finder still synchronize/apply/invite correctly with another addon user where possible.
+49. Confirm Recruitment displays the current AUTO /n World channel and sends to that detected channel.
+50. Confirm notification category and sound settings persist through /reload.
+
+MIGRATION / PERFORMANCE
+51. Confirm existing roster, history, crafting requests, announcements, reactions and settings survived the upgrade.
+52. Leave the addon enabled during ordinary play and confirm there is no continuous stutter.
+53. Run /reload and repeat Home, one modal, one recipe link and /otltest.

@@ -1,0 +1,42 @@
+ORDER OF THE LION GM 1.5.4 - BUILD VALIDATION
+
+BASELINE
+- Source: verified OrderOfTheLionGM 1.5.3 install archive.
+- Previous experimental 1.5.4 package: not used.
+- Interface target: 11200.
+- SavedVariables schema: 9.
+
+AUTOMATED / MOCKED WOW-API VALIDATION
+- All files listed in OrderOfTheLionGM.toc loaded in exact order.
+- Main UI built successfully.
+- 130 focused runtime assertions passed.
+
+COVERED AREAS
+- Version, schema and module markers.
+- Real rank-index ordering and actual rank label preservation.
+- Leadership Online uses the same guild-rank badge as Roster.
+- Shared modal overlay/stack, all registered modal frames, visible X buttons and top-modal closing.
+- Leadership Announcement composer, reader and Active/Archived browser.
+- Multiline/blank-line announcement storage and network reconstruction.
+- Local NEW/read revision state.
+- Item and recipe link resolution and real insertion into addon Guild Chat.
+- RC2 bounded packets, serialization and receiver reconstruction of itemLink and recipeLink.
+- Crafting Request required-field validation.
+- Group Templates and Activity dialogs.
+- Safe remote guild-name action through Roster; no runtime TargetByName path.
+- Schema-8-to-9 migration preserving roster/history and adding announcementRead.
+- Home, Guild Chat, Search, PvE, Roster, Professions, Activity, Overview, Recruitment, History, Inactive and Settings page refreshes.
+- Diagnostic markers.
+
+STATIC SAFETY REVIEW
+- No new unbounded activity collections.
+- No new high-frequency OnUpdate loop was added.
+- Existing timed work remains the coarse event heartbeat and two debounced search fields.
+- Current network tests enforce addon-message payloads at or below 250 bytes.
+- No direct TargetByName call remains in executable addon code.
+
+ARCHIVE CHECKS
+- Run after packaging: ZIP integrity, correct install top-level folder, Git-ready root layout, TOC file presence and SHA-256 generation.
+
+LIMITATION
+The build environment cannot launch the real OctoWoW/Vanilla client. This validation does not replace the included in-game TEST_CHECKLIST_1.5.4.txt.

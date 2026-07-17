@@ -1,8 +1,8 @@
 -- Order of the Lion Guild Manager
--- Complete Blizzard-like interface for Vanilla WoW / OctoWoW - v1.4.1
+-- Complete Blizzard-like interface for Vanilla WoW / OctoWoW - v1.5.4
 
 OTLGM.fullUILoaded = true
-OTLGM.fullUIVersion = "1.4.1"
+OTLGM.fullUIVersion = "1.5.4"
 
 local NAV_DEFS = {
     { key = "home", label = "Home", section = "primary" },
@@ -653,6 +653,9 @@ function OTLGM:BuildUI()
     self:BuildImportDialog()
     self:BuildConfirmDialog()
     self:BuildFirstRunWizard()
+    self:BuildModalOverlay152()
+    self:BuildAnnouncementDialogs152()
+    self:RegisterStandardModals152()
 
     self.ui.currentPage = OTLGM_DB.settings.openHome and "home" or (OTLGM_DB.settings.lastPage or "home")
     if not self.ui.pages[self.ui.currentPage] then self.ui.currentPage = "home" end
@@ -685,7 +688,7 @@ function OTLGM:ShowNotice(title, body)
     if self.ui.main and not self.ui.main:IsVisible() then self.ui.main:Show() end
     self.ui.noticeDialog.title:SetText(self.colors.gold .. (title or "Order of the Lion") .. self.colors.reset)
     self.ui.noticeDialog.body:SetText(body or "")
-    self.ui.noticeDialog:Show()
+    self:ShowModal152(self.ui.noticeDialog)
 end
 
 function OTLGM:BuildCopyDialog()
@@ -716,7 +719,7 @@ function OTLGM:ShowCopyDialog(title, text)
     if self.ui.main and not self.ui.main:IsVisible() then self.ui.main:Show() end
     self.ui.copyDialog.title:SetText(self.colors.gold .. (title or "Copy Text") .. self.colors.reset)
     self.ui.copyDialog.edit:SetText(text or "")
-    self.ui.copyDialog:Show()
+    self:ShowModal152(self.ui.copyDialog)
     self.ui.copyDialog.edit:SetFocus()
     self.ui.copyDialog.edit:HighlightText()
 end
@@ -779,7 +782,7 @@ function OTLGM:ShowConfirm(title, body, confirmLabel, handler)
     dialog.body:SetText(body or "")
     SetButtonText(dialog.confirm, confirmLabel or "Confirm")
     dialog.confirmHandler = handler
-    dialog:Show()
+    self:ShowModal152(dialog)
 end
 
 function OTLGM:BuildFirstRunWizard()
@@ -833,7 +836,7 @@ end
 function OTLGM:OpenFirstRunWizard()
     if self.ui.main and not self.ui.main:IsVisible() then self.ui.main:Show() end
     self.ui.firstRunWizard.currentStep = 1
-    self.ui.firstRunWizard:Show()
+    self:ShowModal152(self.ui.firstRunWizard)
     self:RefreshWizard()
 end
 
@@ -908,10 +911,12 @@ function OTLGM:RefreshGuildChatNavigationBadge()
     if not chatButton then return end
     local guildUnread = self:GetGuildChatUnread("GUILD")
     local officerUnread = self:IsOfficerMode() and self:GetGuildChatUnread("OFFICER") or 0
-    if guildUnread > 0 or officerUnread > 0 then
+    local boardUnread = self.GetPveUnread and self:GetPveUnread("BOARD") or 0
+    if guildUnread > 0 or officerUnread > 0 or boardUnread > 0 then
         local label = "Guild Chat"
         if guildUnread > 0 then label = label .. "  " .. self.colors.green .. "G" .. tostring(guildUnread > 99 and "99+" or guildUnread) .. self.colors.reset end
         if officerUnread > 0 then label = label .. " " .. self.colors.gold .. "O" .. tostring(officerUnread > 99 and "99+" or officerUnread) .. self.colors.reset end
+        if boardUnread > 0 then label = label .. " " .. self.colors.blue .. "B" .. tostring(boardUnread > 99 and "99+" or boardUnread) .. self.colors.reset end
         SetButtonText(chatButton, label)
     else
         SetButtonText(chatButton, "Guild Chat")
@@ -1130,148 +1135,760 @@ function OTLGM:ToggleUI()
     end
 end
 
-function OTLGM:BuildHomePage(page)
-    CreateText(page, "GameFontNormalLarge", "Welcome to Order of the Lion", 0, -2, 460, "LEFT")
-    CreateHelpButton(page, "Home", "The starting page shows the latest roster state, unread changes, online leadership and clear shortcuts to the guild handbook and main tools.")
-    CreateText(page, "GameFontNormal", "Your guild companion for finding people, reading information and understanding guild activity.", 0, -28, 700, "LEFT")
+function OTLGM:ShowCommunityReactorsTooltip152(owner, targetType, targetId, reaction, label)
+    if not owner or not targetId then return end
+    local names = self.GetCommunityReactors and self:GetCommunityReactors(targetType, targetId, reaction) or {}
+    GameTooltip:SetOwner(owner, "ANCHOR_TOP")
+    GameTooltip:AddLine(label or reaction or "Reaction", 1.0, 0.82, 0.35)
+    if table.getn(names) == 0 then
+        GameTooltip:AddLine("No reactions yet.", 0.65, 0.65, 0.65)
+    else
+        local i
+        local maximum = math.min(12, table.getn(names))
+        for i = 1, maximum do GameTooltip:AddLine(names[i], 1, 1, 1) end
+        if table.getn(names) > maximum then GameTooltip:AddLine("...and " .. tostring(table.getn(names) - maximum) .. " more", 0.60, 0.60, 0.60) end
+    end
+    GameTooltip:Show()
+end
 
-    self.ui.homeCards = {}
-    self.ui.homeCards.members = CreateCard(page, 0, -62, 172, 78, "MEMBERS")
-    self.ui.homeCards.online = CreateCard(page, 182, -62, 172, 78, "ONLINE NOW")
-    self.ui.homeCards.unread = CreateCard(page, 364, -62, 172, 78, "UNREAD CHANGES")
-    self.ui.homeCards.fresh = CreateCard(page, 546, -62, 172, 78, "DATABASE")
 
-    CreateText(page, "GameFontNormal", "Guild essentials", 0, -155, 300, "LEFT")
-    self.ui.homeLinks = {}
-    self.ui.homeLinks.guildinfo = CreateClickableCard(page, 0, -180, 718, 70, "GUILD INFORMATION - START HERE",
-        "Open the complete guild handbook: ranks, how promotions work, leadership responsibilities, MOTD, rules, Discord and useful links.", function() OTLGM:ShowPage("guildinfo") end)
-    SetButtonActionStyle(self.ui.homeLinks.guildinfo, "primary")
-    self.ui.homeLinks.guildinfo.title:ClearAllPoints()
-    self.ui.homeLinks.guildinfo.title:SetPoint("TOPLEFT", self.ui.homeLinks.guildinfo, "TOPLEFT", 54, -11)
-    self.ui.homeLinks.guildinfo.title:SetWidth(644)
-    self.ui.homeLinks.guildinfo.body:ClearAllPoints()
-    self.ui.homeLinks.guildinfo.body:SetPoint("TOPLEFT", self.ui.homeLinks.guildinfo, "TOPLEFT", 54, -35)
-    self.ui.homeLinks.guildinfo.body:SetWidth(644)
-    self.ui.homeLinks.guildinfo.infoIcon = self.ui.homeLinks.guildinfo:CreateTexture(nil, "OVERLAY")
-    self.ui.homeLinks.guildinfo.infoIcon:SetTexture("Interface\\Icons\\INV_Scroll_03")
-    self.ui.homeLinks.guildinfo.infoIcon:SetWidth(30)
-    self.ui.homeLinks.guildinfo.infoIcon:SetHeight(30)
-    self.ui.homeLinks.guildinfo.infoIcon:SetPoint("LEFT", self.ui.homeLinks.guildinfo, "LEFT", 14, 0)
-    self.ui.homeLinks.guildinfo.infoIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+local function GetLeadershipRoleInfo153(member)
+    if not member then return "Leadership", "Interface\\Icons\\INV_Shield_06" end
+    local iconPath, badgeLabel = OTLGM:GetMemberBadge(member)
+    local rankLabel = member.rank and member.rank ~= "" and member.rank or badgeLabel or "Leadership"
+    if not iconPath then
+        local index = tonumber(member.rankIndex) or 99
+        if index == 0 then iconPath = "Interface\\Icons\\INV_Crown_01"
+        elseif index <= 2 then iconPath = "Interface\\Icons\\INV_Shield_06"
+        else iconPath = "Interface\\Icons\\INV_Misc_GroupNeedMore" end
+    end
+    return rankLabel, iconPath
+end
 
-    self.ui.homeLinks.roster = CreateClickableCard(page, 0, -260, 234, 84, "ROSTER",
-        "Find online guildmates, nearby levels, ranks and profession tags.", function() OTLGM:ShowPage("roster") end)
-    self.ui.homeLinks.activity = CreateClickableCard(page, 242, -260, 234, 84, "ACTIVITY",
-        "See online peaks, the heatmap and guild composition.", function() OTLGM:ShowPage("activity") end)
-    self.ui.homeLinks.fourth = CreateClickableCard(page, 484, -260, 234, 84, "PVE HUB",
-        "See raid notices, find groups and share short guild board messages.", function() OTLGM:ShowPage("pve") end)
-
-    local unreadPanel = CreateFrame("Frame", nil, page)
-    unreadPanel:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -356)
-    unreadPanel:SetWidth(350)
-    unreadPanel:SetHeight(144)
-    CreateBackdrop(unreadPanel, 5)
-    unreadPanel:SetBackdropColor(0.035, 0.030, 0.023, 0.98)
-    unreadPanel:SetBackdropBorderColor(0.35, 0.28, 0.17, 1)
-    CreateText(unreadPanel, "GameFontNormalSmall", "IMPORTANT NOTICES", 12, -10, 326, "LEFT")
-    self.ui.homeUnreadSummary = CreateWrappedText(unreadPanel, "GameFontHighlightSmall", "", 12, -32, 326, 70)
-    self.ui.homePveButton = CreateButton(unreadPanel, nil, "Open PvE Hub", 12, -108, 142, 26, function() OTLGM:ShowPage("pve") end)
-    AddButtonIcon(self.ui.homePveButton, "Interface\\Icons\\INV_Misc_Spyglass_03", 14, true)
-    SetButtonActionStyle(self.ui.homePveButton, "utility")
-    self.ui.homeReviewButton = CreateButton(unreadPanel, nil, "Open History", 164, -108, 174, 26, function()
-        if OTLGM:IsOfficerMode() then OTLGM:ShowPage("history") else OTLGM:ShowPage("activity") end
+local function BreakLongTokens154(text, maximumToken)
+    text = tostring(text or "")
+    maximumToken = tonumber(maximumToken) or 44
+    return string.gsub(text, "([^%s]+)", function(token)
+        if string.len(token) <= maximumToken then return token end
+        local parts = {}
+        local at = 1
+        while at <= string.len(token) do
+            table.insert(parts, string.sub(token, at, at + maximumToken - 1))
+            at = at + maximumToken
+        end
+        return table.concat(parts, " ")
     end)
-    AddButtonIcon(self.ui.homeReviewButton, "Interface\\Icons\\INV_Misc_Book_09", 14, true)
+end
+
+local function HomeShort152(text, maximum)
+    text = tostring(text or "")
+    text = string.gsub(text, "\r\n", "\n")
+    text = string.gsub(text, "\r", "\n")
+    text = string.gsub(text, "\t", " ")
+    text = string.gsub(text, "\n\n\n+", "\n\n")
+    text = BreakLongTokens154(text, 42)
+    if string.len(text) > maximum then return string.sub(text, 1, maximum - 3) .. "..." end
+    return text
+end
+
+function OTLGM:BuildHomePage(page)
+    CreateText(page, "GameFontNormalLarge", "Order of the Lion", 0, -2, 420, "LEFT")
+    CreateHelpButton(page, "Home", "Leadership announcements, the next raid, online leadership and a small useful activity feed. Technical database counters are kept in Settings instead of the guild home page.")
+    CreateText(page, "GameFontNormalSmall", "Guild announcements and the information that matters now.", 0, -28, 700, "LEFT")
+
+    local announcements = CreateFrame("Frame", nil, page)
+    announcements:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -56)
+    announcements:SetWidth(450)
+    announcements:SetHeight(460)
+    CreateBackdrop(announcements, 5)
+    announcements:SetBackdropColor(0.026, 0.023, 0.019, 0.995)
+    announcements:SetBackdropBorderColor(0.48, 0.34, 0.15, 1)
+    CreateText(announcements, "GameFontNormal", "LEADERSHIP ANNOUNCEMENTS", 12, -12, 260, "LEFT")
+    self.ui.homeNewAnnouncementButton = CreateButton(announcements, nil, "New Announcement", 300, -8, 138, 28, function()
+        OTLGM:OpenAnnouncementComposer152(nil)
+    end)
+    SetButtonActionStyle(self.ui.homeNewAnnouncementButton, "confirm")
+
+    self.ui.homeAnnouncementRows = {}
+    local i
+    for i = 1, 3 do
+        local capturedIndex = i
+        local row = CreateFrame("Button", nil, announcements)
+        row:SetPoint("TOPLEFT", announcements, "TOPLEFT", 10, -42 - ((i - 1) * 126))
+        row:SetWidth(430)
+        row:SetHeight(118)
+        CreateBackdrop(row, 4)
+        row:SetBackdropColor(0.035, 0.030, 0.023, 0.995)
+        row:SetBackdropBorderColor(0.34, 0.28, 0.18, 1)
+        row:SetScript("OnEnter", function()
+            this:SetBackdropColor(0.075, 0.048, 0.020, 1)
+            this:SetBackdropBorderColor(0.72, 0.48, 0.17, 1)
+        end)
+        row:SetScript("OnLeave", function()
+            this:SetBackdropColor(0.035, 0.030, 0.023, 0.995)
+            this:SetBackdropBorderColor(0.34, 0.28, 0.18, 1)
+            GameTooltip:Hide()
+        end)
+        row:SetScript("OnClick", function()
+            if this.recordId then OTLGM:OpenAnnouncementReader152(this.recordId) end
+        end)
+        row.newText = CreateText(row, "GameFontNormalSmall", "", 10, -9, 42, "LEFT")
+        row.newText:SetTextColor(0.40, 1.0, 0.48)
+        row.titleText = CreateText(row, "GameFontNormal", "", 52, -8, 258, "LEFT")
+        row.metaText = CreateText(row, "GameFontNormalSmall", "", 312, -10, 108, "RIGHT")
+        row.metaText:SetTextColor(0.58, 0.58, 0.58)
+        row.bodyText = CreateWrappedText(row, "GameFontHighlightSmall", "", 10, -31, 410, 47)
+        row.reactionButtons = {}
+        local reactions = { {"LIKE", "Like"}, {"SEEN", "Seen"}, {"SUPPORT", "Support"} }
+        local r
+        for r = 1, table.getn(reactions) do
+            local capturedReaction = reactions[r][1]
+            local capturedLabel = reactions[r][2]
+            local button = CreateButton(row, nil, capturedLabel, 10 + ((r - 1) * 102), -86, 94, 24, function()
+                local target = OTLGM.ui.homeAnnouncementRows[capturedIndex]
+                if target and target.recordId then OTLGM:ReactToAnnouncement152(target.recordId, capturedReaction) OTLGM:RefreshHomePage() end
+            end)
+            SetButtonActionStyle(button, capturedReaction == "SUPPORT" and "confirm" or "utility")
+            button:SetScript("OnEnter", function()
+                this.hovered = true
+                ApplyButtonVisual(this)
+                local target = OTLGM.ui.homeAnnouncementRows[capturedIndex]
+                if target and target.recordId then OTLGM:ShowCommunityReactorsTooltip152(this, "ANN", target.recordId, capturedReaction, capturedLabel) end
+            end)
+            button:SetScript("OnLeave", function() this.hovered = false ApplyButtonVisual(this) GameTooltip:Hide() end)
+            row.reactionButtons[capturedReaction] = button
+        end
+        row.openText = CreateText(row, "GameFontNormalSmall", "Read full post", 330, -94, 88, "RIGHT")
+        row.openText:SetTextColor(0.54, 0.72, 0.94)
+        row:Hide()
+        self.ui.homeAnnouncementRows[i] = row
+    end
+    self.ui.homeNoAnnouncements = CreateWrappedText(announcements, "GameFontNormal", "No leadership announcements have been published yet.\n\nWhen leadership posts an update, it will appear here instead of being mixed with roster history.", 34, -138, 382, 110)
+    self.ui.homeNoAnnouncements:SetTextColor(0.62, 0.62, 0.60)
+    self.ui.homeAnnouncementArchiveButton = CreateButton(announcements, nil, "Open Announcement Archive", 10, -424, 210, 26, function()
+        OTLGM:OpenAnnouncementArchive152()
+    end)
+    SetButtonActionStyle(self.ui.homeAnnouncementArchiveButton, "utility")
+    self.ui.homeAnnouncementHint = CreateText(announcements, "GameFontNormalSmall", "Reactions belong to each individual post.", 230, -432, 208, "RIGHT")
+    self.ui.homeAnnouncementHint:SetTextColor(0.48, 0.48, 0.46)
+    self.ui.homeAnnouncementsPanel = announcements
+
+    local raid = CreateFrame("Frame", nil, page)
+    raid:SetPoint("TOPLEFT", page, "TOPLEFT", 460, -56)
+    raid:SetWidth(258)
+    raid:SetHeight(138)
+    CreateBackdrop(raid, 5)
+    raid:SetBackdropColor(0.035, 0.025, 0.020, 0.995)
+    raid:SetBackdropBorderColor(0.52, 0.18, 0.12, 1)
+    CreateText(raid, "GameFontNormalSmall", "NEXT RAID / IMPORTANT PVE", 12, -10, 234, "LEFT")
+    self.ui.homeRaidText = CreateWrappedText(raid, "GameFontHighlightSmall", "", 12, -34, 234, 70)
+    self.ui.homeRaidButton = CreateButton(raid, nil, "Open PvE Hub", 12, -104, 116, 24, function() OTLGM:ShowPage("pve") end)
+    SetButtonActionStyle(self.ui.homeRaidButton, "raid")
+    self.ui.homeRaidDiscord = CreateText(raid, "GameFontNormalSmall", "Sign-ups: Discord", 136, -111, 110, "RIGHT")
+    self.ui.homeRaidDiscord:SetTextColor(0.55, 0.55, 0.52)
 
     local leaders = CreateFrame("Frame", nil, page)
-    leaders:SetPoint("TOPLEFT", page, "TOPLEFT", 360, -356)
-    leaders:SetWidth(358)
-    leaders:SetHeight(144)
+    leaders:SetPoint("TOPLEFT", page, "TOPLEFT", 460, -204)
+    leaders:SetWidth(258)
+    leaders:SetHeight(142)
     CreateBackdrop(leaders, 5)
-    leaders:SetBackdropColor(0.035, 0.030, 0.023, 0.98)
-    leaders:SetBackdropBorderColor(0.35, 0.28, 0.17, 1)
-    CreateText(leaders, "GameFontNormalSmall", "LEADERSHIP ONLINE - CLICK TO WHISPER", 12, -10, 334, "LEFT")
+    leaders:SetBackdropColor(0.026, 0.023, 0.019, 0.995)
+    leaders:SetBackdropBorderColor(0.40, 0.31, 0.17, 1)
+    CreateText(leaders, "GameFontNormalSmall", "LEADERSHIP ONLINE", 12, -10, 234, "LEFT")
     self.ui.homeLeaderButtons = {}
-    local i
     for i = 1, 4 do
         local capturedIndex = i
-        local button = CreateButton(leaders, nil, "", 12 + ((i - 1) * 84), -38, 78, 88, function()
+        local button = CreateButton(leaders, nil, "", 12, -34 - ((i - 1) * 25), 234, 23, function()
             local target = OTLGM.ui.homeLeaderButtons[capturedIndex]
             if target and target.memberName then OTLGM:WhisperMember(target.memberName) end
         end)
-        button.text:ClearAllPoints()
-        button.text:SetPoint("TOP", button, "TOP", 0, -8)
-        button.text:SetWidth(68)
-        button.rankText = button:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        button.rankText:SetPoint("BOTTOM", button, "BOTTOM", 0, 8)
-        button.rankText:SetWidth(68)
-        button.rankText:SetJustifyH("CENTER")
-        button.rankText:SetTextColor(0.64, 0.62, 0.58)
         button.roleIcon = button:CreateTexture(nil, "OVERLAY")
-        button.roleIcon:SetWidth(20)
-        button.roleIcon:SetHeight(20)
-        button.roleIcon:SetPoint("CENTER", button, "CENTER", 0, 3)
+        button.roleIcon:SetPoint("LEFT", button, "LEFT", 7, 0)
+        button.roleIcon:SetWidth(17)
+        button.roleIcon:SetHeight(17)
+        button.roleIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        button.text:SetJustifyH("LEFT")
+        button.text:ClearAllPoints()
+        button.text:SetPoint("LEFT", button, "LEFT", 30, 0)
+        button.text:SetWidth(198)
+        button:SetScript("OnEnter", function()
+            this.hovered = true
+            ApplyButtonVisual(this)
+            if this.memberName then
+                GameTooltip:SetOwner(this, "ANCHOR_LEFT")
+                GameTooltip:AddLine(this.memberName, 1, 0.82, 0.35)
+                GameTooltip:AddLine((this.roleLabel or "Leadership") .. (this.memberClass and this.memberClass ~= "" and ("  -  " .. this.memberClass) or ""), 1, 1, 1)
+                GameTooltip:AddLine("Click to whisper", 0.55, 0.75, 1.0)
+                GameTooltip:Show()
+            end
+        end)
+        button:SetScript("OnLeave", function() this.hovered = false ApplyButtonVisual(this) GameTooltip:Hide() end)
         button:Hide()
         self.ui.homeLeaderButtons[i] = button
     end
-    self.ui.homeNoLeaders = CreateWrappedText(leaders, "GameFontNormalSmall", "No leadership members are currently shown online.", 16, -54, 326, 48)
+    self.ui.homeNoLeaders = CreateText(leaders, "GameFontNormalSmall", "No leadership detected online.", 16, -70, 226, "LEFT")
     self.ui.homeNoLeaders:SetTextColor(0.55, 0.55, 0.55)
+
+    local recent = CreateFrame("Frame", nil, page)
+    recent:SetPoint("TOPLEFT", page, "TOPLEFT", 460, -356)
+    recent:SetWidth(258)
+    recent:SetHeight(124)
+    CreateBackdrop(recent, 5)
+    recent:SetBackdropColor(0.026, 0.023, 0.019, 0.995)
+    recent:SetBackdropBorderColor(0.36, 0.29, 0.18, 1)
+    CreateText(recent, "GameFontNormalSmall", "RECENT USEFUL ACTIVITY", 12, -10, 150, "LEFT")
+    self.ui.homeUsefulViewAll153 = CreateButton(recent, nil, "View All", 184, -6, 62, 22, function()
+        if OTLGM.OpenActivityDialog153 then OTLGM:OpenActivityDialog153("GUILD", "ALL") end
+    end)
+    SetButtonActionStyle(self.ui.homeUsefulViewAll153, "utility")
+    self.ui.homeRecentPanel153 = recent
+    self.ui.homeUsefulRows = {}
+    for i = 1, 4 do
+        local row = CreateText(recent, "GameFontNormalSmall", "", 12, -34 - ((i - 1) * 21), 234, "LEFT")
+        row:SetTextColor(0.78, 0.78, 0.75)
+        self.ui.homeUsefulRows[i] = row
+    end
+    self.ui.homeUsefulEmpty = CreateWrappedText(recent, "GameFontNormalSmall", "No recent group, request or response activity.", 12, -48, 234, 48)
+    self.ui.homeUsefulEmpty:SetTextColor(0.52, 0.52, 0.50)
+
+    self.ui.homeGuildInfoButton = CreateButton(page, nil, "Guild Information & Rules", 460, -490, 258, 26, function() OTLGM:ShowPage("guildinfo") end)
+    AddButtonIcon(self.ui.homeGuildInfoButton, "Interface\\Icons\\INV_Scroll_03", 14, true)
+    SetButtonActionStyle(self.ui.homeGuildInfoButton, "primary")
 end
 
 function OTLGM:RefreshHomePage()
-    if not self.ui.homeCards then return end
-    local db = self:GetGuildDB()
-    if not db then return end
-    local unread = self:GetUnreadSummary()
-    local freshText, freshColor = self:GetFreshnessText(db.lastScan)
-
-    self.ui.homeCards.members.value:SetText(self.colors.white .. tostring(db.lastTotal or 0) .. self.colors.reset)
-    self.ui.homeCards.members.sub:SetText("Tracked characters")
-    self.ui.homeCards.online.value:SetText(self.colors.green .. tostring(db.lastOnline or 0) .. self.colors.reset)
-    self.ui.homeCards.online.sub:SetText("Latest valid snapshot")
-    self.ui.homeCards.unread.value:SetText((unread.total > 0 and self.colors.gold or self.colors.grey) .. tostring(unread.total) .. self.colors.reset)
-    self.ui.homeCards.unread.sub:SetText(unread.total > 0 and "Open History to review" or "Everything reviewed")
-    self.ui.homeCards.fresh.value:SetText(freshColor .. freshText .. self.colors.reset)
-    self.ui.homeCards.fresh.sub:SetText(db.lastScan and self:Stamp(db.lastScan) or "Run the first update")
-
-    local pveSummary = self.GetPveSummary and self:GetPveSummary() or { requests = 0, board = 0, raid = nil, pending = 0 }
-    local noticeLines = {}
-    if pveSummary.raid and self.IsRaidNoticeEligible and self:IsRaidNoticeEligible() then
-        table.insert(noticeLines, self.colors.red .. "RAID: " .. self.colors.reset .. (pveSummary.raid.name or "Guild Raid") .. " - " .. (pveSummary.raid.serverTime or "time TBA"))
-        table.insert(noticeLines, self:GetPveRaidRemainingText(pveSummary.raid) .. ((pveSummary.raid.location and pveSummary.raid.location ~= "") and (" - " .. pveSummary.raid.location) or ""))
+    if not self.ui or not self.ui.homeAnnouncementRows then return end
+    local announcements = self.GetAnnouncementList152 and self:GetAnnouncementList152(false) or {}
+    if self.CanPublishAnnouncement152 and self:CanPublishAnnouncement152() then self.ui.homeNewAnnouncementButton:Show() else self.ui.homeNewAnnouncementButton:Hide() end
+    local i, row, record, summary
+    for i = 1, table.getn(self.ui.homeAnnouncementRows) do
+        row = self.ui.homeAnnouncementRows[i]
+        record = announcements[i]
+        if record then
+            row.recordId = record.id
+            local prefix = record.pinned and (self.colors.gold .. "[PINNED] " .. self.colors.reset) or ""
+            local titleColor = record.importance == "CRITICAL" and self.colors.red or (record.importance == "IMPORTANT" and self.colors.gold or self.colors.white)
+            local unread = self.IsAnnouncementUnread154 and self:IsAnnouncementUnread154(record.id)
+            row.newText:SetText(unread and "NEW" or "")
+            row.titleText:SetText(prefix .. titleColor .. HomeShort152(record.title, 48) .. self.colors.reset)
+            row.metaText:SetText(self.colors.gold .. date("%d %b %Y", record.createdAt or record.updatedAt or self:Now()) .. self.colors.reset .. "\n" .. date("%H:%M", record.createdAt or record.updatedAt or self:Now()) .. "  " .. (record.author or "Leadership"))
+            row.bodyText:SetText(HomeShort152(record.body, 185))
+            summary = self:GetAnnouncementReactionSummary152(record.id)
+            SetButtonText(row.reactionButtons.LIKE, "Like " .. tostring(summary.LIKE or 0))
+            SetButtonText(row.reactionButtons.SEEN, "Seen " .. tostring(summary.SEEN or 0))
+            SetButtonText(row.reactionButtons.SUPPORT, "Support " .. tostring(summary.SUPPORT or 0))
+            row:Show()
+        else
+            row.recordId = nil
+            if row.newText then row.newText:SetText("") end
+            row:Hide()
+        end
     end
-    table.insert(noticeLines, self.colors.green .. tostring(pveSummary.requests or 0) .. " open group(s)" .. self.colors.reset .. ((pveSummary.pending or 0) > 0 and (" - " .. self.colors.gold .. tostring(pveSummary.pending) .. " applicant(s)" .. self.colors.reset) or ""))
-    table.insert(noticeLines, tostring(pveSummary.board or 0) .. " board post(s)  -  " .. tostring(unread.total or 0) .. " guild change(s)")
-    self.ui.homeUnreadSummary:SetText(table.concat(noticeLines, "\n"))
+    if table.getn(announcements) == 0 then self.ui.homeNoAnnouncements:Show() else self.ui.homeNoAnnouncements:Hide() end
+    local allAnnouncements154 = self:GetAnnouncementList152(true)
+    local archivedCount154 = 0
+    local ai154
+    for ai154 = 1, table.getn(allAnnouncements154) do if allAnnouncements154[ai154].archived then archivedCount154 = archivedCount154 + 1 end end
+    SetButtonText(self.ui.homeAnnouncementArchiveButton, "Announcements  " .. tostring(table.getn(allAnnouncements154)) .. "  |  Archived " .. tostring(archivedCount154))
 
-    self.ui.homeLinks.fourth.title:SetText("PVE HUB")
-    if pveSummary.raid then
-        self.ui.homeLinks.fourth.body:SetText((pveSummary.raid.name or "Guild Raid") .. " - " .. (pveSummary.raid.serverTime or "time TBA") .. ". " .. tostring(pveSummary.requests or 0) .. " open group requests.")
+    local pve = self.GetPveSummary and self:GetPveSummary() or { requests = 0, pending = 0, raid = nil }
+    if pve.raid then
+        self.ui.homeRaidText:SetText(self.colors.red .. (pve.raid.name or "Guild Raid") .. self.colors.reset .. "\n" .. (pve.raid.serverTime or "Time TBA") .. "  " .. (self.GetPveRaidRemainingText and self:GetPveRaidRemainingText(pve.raid) or "") .. "\n" .. tostring(pve.requests or 0) .. " open group(s)")
     else
-        self.ui.homeLinks.fourth.body:SetText(tostring(pveSummary.requests or 0) .. " open group requests, " .. tostring(pveSummary.board or 0) .. " board posts and no active raid notice.")
+        self.ui.homeRaidText:SetText("No active raid notice.\n" .. tostring(pve.requests or 0) .. " open group(s)  |  " .. tostring(pve.pending or 0) .. " pending application(s).")
     end
-    self.ui.homeReviewButton:Show()
-    SetButtonText(self.ui.homeReviewButton, self:IsOfficerMode() and "Open History" or "Open Activity")
 
-    local leaders = self:GetLeadershipOnline()
-    local i
+    local leaders = self:GetLeadershipOnline() or {}
     for i = 1, 4 do
         local button = self.ui.homeLeaderButtons[i]
         local member = leaders[i]
         if member then
+            local roleLabel, roleIcon = GetLeadershipRoleInfo153(member)
             button.memberName = member.name
-            SetButtonText(button, member.name)
-            button.text:SetTextColor(1, 0.82, 0.35)
-            button.rankText:SetText(member.rank or "Leadership")
-            ApplyLeadershipIcon(button.roleIcon, member, true)
+            button.memberClass = member.class
+            button.roleLabel = roleLabel
+            if button.roleIcon then button.roleIcon:SetTexture(roleIcon) end
+            SetButtonText(button, self:GetClassColor(member.class) .. (member.name or "Unknown") .. self.colors.reset .. "  " .. self.colors.grey .. roleLabel .. self.colors.reset)
             button:Show()
-        else
-            button.memberName = nil
-            button:Hide()
-        end
+        else button.memberName = nil button.memberClass = nil button.roleLabel = nil button:Hide() end
     end
     if table.getn(leaders) == 0 then self.ui.homeNoLeaders:Show() else self.ui.homeNoLeaders:Hide() end
 
+    local activity = self.GetUsefulActivity152 and self:GetUsefulActivity152(4) or {}
+    for i = 1, 4 do
+        if activity[i] then
+            self.ui.homeUsefulRows[i]:SetText(self.colors.gold .. "•" .. self.colors.reset .. " " .. HomeShort152(activity[i].title, 39))
+            self.ui.homeUsefulRows[i]:Show()
+        else self.ui.homeUsefulRows[i]:SetText("") self.ui.homeUsefulRows[i]:Hide() end
+    end
+    if table.getn(activity) == 0 then self.ui.homeUsefulEmpty:Show() else self.ui.homeUsefulEmpty:Hide() end
+end
+
+function OTLGM:BuildModalOverlay152()
+    if self.ui.modalOverlay152 then return end
+    local overlay = CreateFrame("Button", "OTLGM_ModalOverlay154", self.ui.main)
+    overlay:SetPoint("TOPLEFT", self.ui.main, "TOPLEFT", 12, -12)
+    overlay:SetPoint("BOTTOMRIGHT", self.ui.main, "BOTTOMRIGHT", -12, 12)
+    overlay:SetFrameStrata("FULLSCREEN_DIALOG")
+    overlay:SetFrameLevel(self.ui.main:GetFrameLevel() + 90)
+    overlay:EnableMouse(true)
+    overlay:SetScript("OnClick", function() end)
+    local shade = CreateSolidTexture(overlay, "BACKGROUND", 0, 0, 0, 0.80)
+    shade:SetAllPoints(overlay)
+    overlay:Hide()
+    self.ui.modalOverlay152 = overlay
+    self.ui.modalFrames152 = self.ui.modalFrames152 or {}
+    self.ui.modalStack154 = self.ui.modalStack154 or {}
+end
+
+local function ModalRemoveFromStack154(stack, frame)
+    local i
+    for i = table.getn(stack or {}), 1, -1 do
+        if stack[i] == frame then table.remove(stack, i) end
+    end
+end
+
+local function RaiseModalChildren154(frame, baseLevel, depth)
+    if not frame then return end
+    depth = tonumber(depth) or 0
+    if frame.SetFrameStrata then frame:SetFrameStrata("FULLSCREEN_DIALOG") end
+    if frame.SetFrameLevel then frame:SetFrameLevel(baseLevel + depth) end
+    if not frame.GetChildren then return end
+    local children = { frame:GetChildren() }
+    local i, child
+    for i = 1, table.getn(children) do
+        child = children[i]
+        if child and child ~= frame then RaiseModalChildren154(child, baseLevel, depth + 2) end
+    end
+end
+
+function OTLGM:AddModalCloseButton154(frame)
+    if not frame or frame.modalCloseButton154 or frame.noCloseButton154 then return end
+    local width = frame.GetWidth and frame:GetWidth() or 400
+    local button = CreateButton(frame, nil, "X", width - 38, -10, 26, 24, function() frame:Hide() end)
+    SetButtonActionStyle(button, "danger")
+    button:SetScript("OnEnter", function()
+        this.hovered = true ApplyButtonVisual(this)
+        GameTooltip:SetOwner(this, "ANCHOR_LEFT")
+        GameTooltip:AddLine("Close", 1, 0.82, 0.35)
+        GameTooltip:AddLine("You can also press Escape.", 0.70, 0.70, 0.70)
+        GameTooltip:Show()
+    end)
+    button:SetScript("OnLeave", function() this.hovered = false ApplyButtonVisual(this) GameTooltip:Hide() end)
+    frame.modalCloseButton154 = button
+end
+
+function OTLGM:RefreshModalOverlay152()
+    if not self.ui or not self.ui.modalOverlay152 then return end
+    local stack = self.ui.modalStack154 or {}
+    local visible = {}
+    local i, frame
+    for i = 1, table.getn(stack) do
+        frame = stack[i]
+        if frame and frame:IsVisible() then table.insert(visible, frame) end
+    end
+    self.ui.modalStack154 = visible
+    if table.getn(visible) == 0 then
+        self.ui.modalOverlay152:Hide()
+        return
+    end
+    self.ui.modalOverlay152:SetFrameStrata("FULLSCREEN_DIALOG")
+    self.ui.modalOverlay152:SetFrameLevel(self.ui.main:GetFrameLevel() + 90)
+    self.ui.modalOverlay152:Show()
+    for i = 1, table.getn(visible) do
+        RaiseModalChildren154(visible[i], self.ui.main:GetFrameLevel() + 120 + (i * 24), 0)
+    end
+end
+
+function OTLGM:RegisterModal152(frame)
+    if not frame then return end
+    self:BuildModalOverlay152()
+    if not frame.modal152Registered then
+        frame.modal152Registered = true
+        table.insert(self.ui.modalFrames152, frame)
+        self:AddModalCloseButton154(frame)
+        local frameName = frame.GetName and frame:GetName() or nil
+        if frameName and frameName ~= "" and UISpecialFrames then
+            local found, i = false, 1
+            for i = 1, table.getn(UISpecialFrames) do if UISpecialFrames[i] == frameName then found = true break end end
+            if not found then table.insert(UISpecialFrames, frameName) end
+        end
+        local oldShow = frame:GetScript("OnShow")
+        local oldHide = frame:GetScript("OnHide")
+        frame:SetScript("OnShow", function()
+            if oldShow then oldShow() end
+            local stack = OTLGM.ui.modalStack154 or {}
+            ModalRemoveFromStack154(stack, frame)
+            table.insert(stack, frame)
+            OTLGM.ui.modalStack154 = stack
+            OTLGM:RefreshModalOverlay152()
+        end)
+        frame:SetScript("OnHide", function()
+            if oldHide then oldHide() end
+            local stack = OTLGM.ui.modalStack154 or {}
+            ModalRemoveFromStack154(stack, frame)
+            OTLGM.ui.modalStack154 = stack
+            OTLGM:RefreshModalOverlay152()
+        end)
+    end
+    RaiseModalChildren154(frame, self.ui.main:GetFrameLevel() + 144, 0)
+end
+
+function OTLGM:ShowModal152(frame)
+    if not frame then return end
+    if self.ui.main and not self.ui.main:IsVisible() then self.ui.main:Show() end
+    self:RegisterModal152(frame)
+    if frame.modalCloseButton154 then
+        frame.modalCloseButton154:ClearAllPoints()
+        frame.modalCloseButton154:SetPoint("TOPLEFT", frame, "TOPLEFT", (frame:GetWidth() or 400) - 38, -10)
+    end
+    frame:Show()
+    self:RefreshModalOverlay152()
+end
+
+function OTLGM:CloseTopModal152()
+    local stack = self.ui and self.ui.modalStack154 or {}
+    local i
+    for i = table.getn(stack), 1, -1 do
+        if stack[i] and stack[i]:IsVisible() then stack[i]:Hide() return true end
+    end
+    return false
+end
+
+function OTLGM:RegisterStandardModals152()
+    local frames = { self.ui.noticeDialog, self.ui.copyDialog, self.ui.importDialog, self.ui.confirmDialog, self.ui.firstRunWizard, self.ui.announcementComposer152, self.ui.announcementReader152, self.ui.announcementArchive152 }
+    local i
+    for i = 1, table.getn(frames) do if frames[i] then self:RegisterModal152(frames[i]) end end
+end
+
+function OTLGM:BuildAnnouncementDialogs152()
+    if self.ui.announcementComposer152 then return end
+    local composer = CreateFrame("Frame", "OTLGM_AnnouncementComposer152", self.ui.main)
+    composer:SetWidth(690)
+    composer:SetHeight(536)
+    composer:SetPoint("CENTER", self.ui.main, "CENTER", 0, 0)
+    CreateBackdrop(composer, 8)
+    composer:SetBackdropColor(0.010, 0.009, 0.008, 1)
+    composer:SetBackdropBorderColor(0.96, 0.68, 0.22, 1)
+    composer.titleLabel = CreateText(composer, "GameFontNormalLarge", "Publish Leadership Announcement", 24, -20, 642, "CENTER")
+    composer.helpText = CreateWrappedText(composer, "GameFontNormalSmall", "Write an official guild post. Paragraphs and line breaks are preserved. Notify Members is optional.", 34, -50, 622, 34)
+    composer.helpText:SetTextColor(0.74, 0.74, 0.72)
+    CreateText(composer, "GameFontNormalSmall", "TITLE", 34, -92, 120, "LEFT")
+    composer.titleEdit = CreateEditBox(composer, "OTLGM_AnnouncementTitle152", 34, -112, 622, 36, false)
+    composer.titleEdit:SetMaxLetters(80)
+    composer.titleEdit:SetTextColor(1, 1, 1)
+    composer.titleEdit:SetBackdropColor(0.025, 0.024, 0.022, 1)
+    composer.titleEdit:SetBackdropBorderColor(0.58, 0.42, 0.20, 1)
+    CreateText(composer, "GameFontNormalSmall", "MESSAGE", 34, -160, 120, "LEFT")
+    composer.bodyEdit = CreateEditBox(composer, "OTLGM_AnnouncementBody152", 34, -180, 622, 220, true)
+    composer.bodyEdit:SetMaxLetters(900)
+    composer.bodyEdit:SetTextColor(1, 1, 1)
+    composer.bodyEdit:SetJustifyV("TOP")
+    composer.bodyEdit:SetBackdropColor(0.025, 0.024, 0.022, 1)
+    composer.bodyEdit:SetBackdropBorderColor(0.58, 0.42, 0.20, 1)
+    local function FocusField(edit, focused)
+        if focused then edit:SetBackdropBorderColor(1.0, 0.72, 0.24, 1)
+        else edit:SetBackdropBorderColor(0.58, 0.42, 0.20, 1) end
+    end
+    composer.titleEdit:SetScript("OnEditFocusGained", function() FocusField(this, true) end)
+    composer.titleEdit:SetScript("OnEditFocusLost", function() FocusField(this, false) end)
+    composer.bodyEdit:SetScript("OnEditFocusGained", function() FocusField(this, true) end)
+    composer.bodyEdit:SetScript("OnEditFocusLost", function() FocusField(this, false) end)
+    CreateText(composer, "GameFontNormalSmall", "IMPORTANCE", 34, -414, 120, "LEFT")
+    composer.importanceButtons = {}
+    local levels = { {"NORMAL", "Normal"}, {"IMPORTANT", "Important"}, {"CRITICAL", "Critical"} }
+    local i
+    for i = 1, table.getn(levels) do
+        local level = levels[i][1]
+        composer.importanceButtons[level] = CreateButton(composer, nil, levels[i][2], 34 + ((i - 1) * 112), -436, 104, 28, function()
+            OTLGM.ui.announcementComposer152.importance = level
+            OTLGM:RefreshAnnouncementComposer152()
+        end)
+        if level == "CRITICAL" then SetButtonActionStyle(composer.importanceButtons[level], "danger") end
+    end
+    composer.notifyButton = CreateButton(composer, nil, "Notify Members", 388, -436, 128, 28, function() composer.notifyFlag = not composer.notifyFlag OTLGM:RefreshAnnouncementComposer152() end)
+    composer.pinButton = CreateButton(composer, nil, "Pin on Home", 526, -436, 130, 28, function() composer.pinned = not composer.pinned OTLGM:RefreshAnnouncementComposer152() end)
+    composer.validationText = CreateText(composer, "GameFontNormalSmall", "Title and message are required.", 34, -480, 370, "LEFT")
+    composer.validationText:SetTextColor(0.82, 0.58, 0.35)
+    composer.postButton = CreateButton(composer, nil, "Publish", 430, -484, 106, 30, function()
+        local ok, result = OTLGM:PublishAnnouncement152(composer.titleEdit:GetText() or "", composer.bodyEdit:GetText() or "", composer.importance, composer.notifyFlag, composer.pinned, composer.editId)
+        if ok then
+            if not composer.editId then OTLGM_DB.settings.announcementDraftTitle153 = "" OTLGM_DB.settings.announcementDraftBody153 = "" end
+            composer:Hide() OTLGM:RefreshHomePage()
+        else
+            composer.validationText:SetText(result or "The announcement could not be published.")
+            OTLGM:ShowNotice("Announcement", result or "The announcement could not be published.")
+        end
+    end)
+    SetButtonActionStyle(composer.postButton, "confirm")
+    composer.cancelButton = CreateButton(composer, nil, "Cancel", 546, -484, 110, 30, function() composer:Hide() end)
+    composer.titleEdit:SetScript("OnTextChanged", function()
+        if OTLGM_DB and OTLGM_DB.settings and not composer.editId then OTLGM_DB.settings.announcementDraftTitle153 = this:GetText() or "" end
+        OTLGM:RefreshAnnouncementComposer152()
+    end)
+    composer.bodyEdit:SetScript("OnTextChanged", function()
+        if OTLGM_DB and OTLGM_DB.settings and not composer.editId then OTLGM_DB.settings.announcementDraftBody153 = this:GetText() or "" end
+        OTLGM:RefreshAnnouncementComposer152()
+    end)
+    composer:SetScript("OnHide", function()
+        if not composer.editId and OTLGM_DB and OTLGM_DB.settings then
+            OTLGM_DB.settings.announcementDraftTitle153 = composer.titleEdit:GetText() or ""
+            OTLGM_DB.settings.announcementDraftBody153 = composer.bodyEdit:GetText() or ""
+        end
+        composer.titleEdit:ClearFocus() composer.bodyEdit:ClearFocus()
+    end)
+    composer:Hide()
+    self.ui.announcementComposer152 = composer
+
+    local reader = CreateFrame("Frame", "OTLGM_AnnouncementReader152", self.ui.main)
+    reader:SetWidth(700)
+    reader:SetHeight(536)
+    reader:SetPoint("CENTER", self.ui.main, "CENTER", 0, 0)
+    CreateBackdrop(reader, 8)
+    reader:SetBackdropColor(0.014, 0.013, 0.011, 1)
+    reader:SetBackdropBorderColor(0.88, 0.58, 0.18, 1)
+    reader.titleText = CreateWrappedText(reader, "GameFontNormalLarge", "Announcement", 28, -22, 570, 48)
+    reader.unreadText = CreateText(reader, "GameFontNormalSmall", "", 604, -28, 50, "RIGHT")
+    reader.unreadText:SetTextColor(0.40, 1.0, 0.48)
+    reader.metaText = CreateWrappedText(reader, "GameFontNormalSmall", "", 28, -72, 644, 38)
+    reader.metaText:SetTextColor(0.72, 0.72, 0.70)
+    local bodyPanel = CreateFrame("Frame", nil, reader)
+    bodyPanel:SetPoint("TOPLEFT", reader, "TOPLEFT", 24, -116)
+    bodyPanel:SetWidth(652)
+    bodyPanel:SetHeight(296)
+    CreateBackdrop(bodyPanel, 5)
+    bodyPanel:SetBackdropColor(0.025, 0.023, 0.020, 1)
+    bodyPanel:SetBackdropBorderColor(0.42, 0.32, 0.18, 1)
+    reader.bodyScroll = CreateFrame("ScrollFrame", "OTLGM_AnnouncementBodyScroll154", bodyPanel)
+    reader.bodyScroll:SetPoint("TOPLEFT", bodyPanel, "TOPLEFT", 12, -12)
+    reader.bodyScroll:SetWidth(608)
+    reader.bodyScroll:SetHeight(272)
+    reader.bodyChild = CreateFrame("Frame", nil, reader.bodyScroll)
+    reader.bodyChild:SetWidth(598)
+    reader.bodyChild:SetHeight(272)
+    reader.bodyText = CreateWrappedText(reader.bodyChild, "GameFontHighlight", "", 2, -2, 588, 268)
+    reader.bodyScroll:SetScrollChild(reader.bodyChild)
+    reader.bodySlider = CreateSlider(bodyPanel, "OTLGM_AnnouncementBodySlider154", 628, -12, 272, function()
+        if OTLGM.updatingAnnouncementScroll154 then return end
+        reader.bodyScroll:SetVerticalScroll(this:GetValue() or 0)
+    end)
+    AttachMouseWheel(reader.bodyScroll, function(delta)
+        local current = reader.bodySlider:GetValue() or 0
+        reader.bodySlider:SetValue(math.max(0, current - (delta * 36)))
+    end)
+    reader.reactionButtons = {}
+    local reactions = { {"LIKE", "Like"}, {"SEEN", "Seen"}, {"SUPPORT", "Support"} }
+    for i = 1, table.getn(reactions) do
+        local reaction = reactions[i][1]
+        local label = reactions[i][2]
+        local button = CreateButton(reader, nil, label, 28 + ((i - 1) * 112), -430, 104, 28, function()
+            if reader.recordId then OTLGM:ReactToAnnouncement152(reader.recordId, reaction) OTLGM:RefreshAnnouncementReader152() OTLGM:RefreshHomePage() end
+        end)
+        button:SetScript("OnEnter", function()
+            this.hovered = true ApplyButtonVisual(this)
+            if reader.recordId then OTLGM:ShowCommunityReactorsTooltip152(this, "ANN", reader.recordId, reaction, label) end
+        end)
+        button:SetScript("OnLeave", function() this.hovered = false ApplyButtonVisual(this) GameTooltip:Hide() end)
+        reader.reactionButtons[reaction] = button
+    end
+    reader.editButton = CreateButton(reader, nil, "Edit", 392, -430, 72, 28, function() local id = reader.recordId reader:Hide() OTLGM:OpenAnnouncementComposer152(id) end)
+    reader.archiveButton = CreateButton(reader, nil, "Archive", 472, -430, 84, 28, function()
+        if reader.recordId then local record = OTLGM:GetAnnouncement152(reader.recordId) OTLGM:SetAnnouncementArchived152(reader.recordId, not (record and record.archived)) reader:Hide() OTLGM:RefreshHomePage() end
+    end)
+    reader.deleteButton = CreateButton(reader, nil, "Delete", 564, -430, 84, 28, function()
+        if not reader.recordId then return end
+        local id = reader.recordId
+        OTLGM:ShowConfirm("Delete Announcement", "Delete this leadership announcement from connected addon users?", "Delete", function() OTLGM:DeleteAnnouncement152(id) reader:Hide() OTLGM:RefreshHomePage() end)
+    end)
+    SetButtonActionStyle(reader.deleteButton, "danger")
+    reader.closeButton = CreateButton(reader, nil, "Close", 544, -484, 104, 30, function() reader:Hide() end)
+    reader:Hide()
+    self.ui.announcementReader152 = reader
+
+    local archive = CreateFrame("Frame", "OTLGM_AnnouncementArchive152", self.ui.main)
+    archive:SetWidth(680)
+    archive:SetHeight(520)
+    archive:SetPoint("CENTER", self.ui.main, "CENTER", 0, 0)
+    CreateBackdrop(archive, 8)
+    archive:SetBackdropColor(0.014, 0.013, 0.011, 1)
+    archive:SetBackdropBorderColor(0.78, 0.52, 0.17, 1)
+    archive.titleText = CreateText(archive, "GameFontNormalLarge", "Announcements", 24, -20, 632, "CENTER")
+    archive.mode154 = "ACTIVE"
+    archive.activeButton = CreateButton(archive, nil, "Active", 24, -56, 120, 28, function() archive.mode154 = "ACTIVE" OTLGM:OpenAnnouncementArchive152("ACTIVE") end)
+    archive.archivedButton = CreateButton(archive, nil, "Archived", 152, -56, 120, 28, function() archive.mode154 = "ARCHIVED" OTLGM:OpenAnnouncementArchive152("ARCHIVED") end)
+    SetButtonActionStyle(archive.activeButton, "utility") SetButtonActionStyle(archive.archivedButton, "utility")
+    archive.rows = {}
+    for i = 1, 11 do
+        local row = CreateButton(archive, nil, "", 24, -94 - ((i - 1) * 32), 632, 30, function()
+            if this.recordId then archive:Hide() OTLGM:OpenAnnouncementReader152(this.recordId) end
+        end)
+        row.text:SetJustifyH("LEFT") row.text:ClearAllPoints() row.text:SetPoint("LEFT", row, "LEFT", 10, 0) row.text:SetWidth(612)
+        row:Hide() archive.rows[i] = row
+    end
+    archive.emptyText = CreateWrappedText(archive, "GameFontNormal", "", 40, -190, 600, 80)
+    archive.emptyText:SetTextColor(0.62, 0.62, 0.60)
+    archive.offset154 = 0
+    archive.previousButton = CreateButton(archive, nil, "Previous", 300, -472, 90, 30, function()
+        archive.offset154 = math.max(0, (archive.offset154 or 0) - table.getn(archive.rows))
+        OTLGM:OpenAnnouncementArchive152(archive.mode154)
+    end)
+    archive.pageText = CreateText(archive, "GameFontNormalSmall", "", 396, -481, 72, "CENTER")
+    archive.nextButton = CreateButton(archive, nil, "Next", 474, -472, 66, 30, function()
+        archive.offset154 = (archive.offset154 or 0) + table.getn(archive.rows)
+        OTLGM:OpenAnnouncementArchive152(archive.mode154)
+    end)
+    archive.closeButton = CreateButton(archive, nil, "Close", 548, -472, 108, 30, function() archive:Hide() end)
+    archive:Hide()
+    self.ui.announcementArchive152 = archive
+    self:RegisterStandardModals152()
+end
+
+function OTLGM:RefreshAnnouncementComposer152()
+    local dialog = self.ui and self.ui.announcementComposer152
+    if not dialog then return end
+    local key, button
+    for key, button in pairs(dialog.importanceButtons or {}) do SetButtonSelected(button, key == dialog.importance) end
+    SetButtonSelected(dialog.notifyButton, dialog.notifyFlag)
+    SetButtonSelected(dialog.pinButton, dialog.pinned)
+    SetButtonText(dialog.notifyButton, dialog.notifyFlag and "Notify: ON" or "Notify Members")
+    SetButtonText(dialog.pinButton, dialog.pinned and "Pinned: ON" or "Pin on Home")
+    SetButtonText(dialog.postButton, dialog.editId and "Save Changes" or "Publish")
+
+    local title = string.gsub(dialog.titleEdit:GetText() or "", "^%s*(.-)%s*$", "%1")
+    local body = string.gsub(dialog.bodyEdit:GetText() or "", "^%s*(.-)%s*$", "%1")
+    local ready = title ~= "" and body ~= ""
+    if ready then
+        dialog.validationText:SetText("Ready to publish. Notifications are sent only when Notify Members is enabled.")
+        dialog.validationText:SetTextColor(0.45, 0.82, 0.48)
+    elseif title == "" and body == "" then
+        dialog.validationText:SetText("Title and message are required.")
+        dialog.validationText:SetTextColor(0.72, 0.46, 0.30)
+    elseif title == "" then
+        dialog.validationText:SetText("Enter a title before publishing.")
+        dialog.validationText:SetTextColor(0.90, 0.48, 0.30)
+    else
+        dialog.validationText:SetText("Enter the announcement message before publishing.")
+        dialog.validationText:SetTextColor(0.90, 0.48, 0.30)
+    end
+    SetButtonEnabled(dialog.postButton, ready, ready and nil or "Fill in both the title and message.")
+end
+
+function OTLGM:OpenAnnouncementComposer152(id)
+    if not self.ui.announcementComposer152 then self:BuildAnnouncementDialogs152() end
+    local dialog = self.ui.announcementComposer152
+    if not self.CanPublishAnnouncement152 or not self:CanPublishAnnouncement152() then self:ShowNotice("Leadership Announcement", "Only guild leadership can publish official announcements.") return end
+    local record = id and self:GetAnnouncement152(id) or nil
+    dialog.editId = record and record.id or nil
+    local draftTitle = OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.announcementDraftTitle153 or ""
+    local draftBody = OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.announcementDraftBody153 or ""
+    dialog.titleEdit:SetText(record and record.title or draftTitle)
+    dialog.bodyEdit:SetText(record and record.body or draftBody)
+    dialog.importance = record and record.importance or "NORMAL"
+    dialog.notifyFlag = record and record.notifyFlag and true or false
+    dialog.pinned = record and record.pinned and true or false
+    self:RefreshAnnouncementComposer152()
+    self:ShowModal152(dialog)
+    dialog:SetFrameStrata("FULLSCREEN_DIALOG")
+    dialog.titleEdit:SetFrameLevel(dialog:GetFrameLevel() + 8)
+    dialog.bodyEdit:SetFrameLevel(dialog:GetFrameLevel() + 8)
+    local key, button
+    for key, button in pairs(dialog.importanceButtons or {}) do button:SetFrameLevel(dialog:GetFrameLevel() + 8) end
+    dialog.notifyButton:SetFrameLevel(dialog:GetFrameLevel() + 8)
+    dialog.pinButton:SetFrameLevel(dialog:GetFrameLevel() + 8)
+    dialog.postButton:SetFrameLevel(dialog:GetFrameLevel() + 8)
+    dialog.cancelButton:SetFrameLevel(dialog:GetFrameLevel() + 8)
+    dialog.titleEdit:SetFocus()
+end
+
+function OTLGM:RefreshAnnouncementReader152()
+    local reader = self.ui and self.ui.announcementReader152
+    local record = reader and reader.recordId and self:GetAnnouncement152(reader.recordId) or nil
+    if not reader or not record then return end
+    local color = record.importance == "CRITICAL" and self.colors.red or (record.importance == "IMPORTANT" and self.colors.gold or self.colors.white)
+    reader.titleText:SetText(color .. BreakLongTokens154(record.title or "Announcement", 48) .. self.colors.reset)
+    reader.unreadText:SetText(self.IsAnnouncementUnread154 and self:IsAnnouncementUnread154(record.id) and "NEW" or "")
+    local published = date("%d %B %Y at %H:%M", record.createdAt or self:Now())
+    local edited = tonumber(record.updatedAt) and tonumber(record.createdAt) and tonumber(record.updatedAt) > tonumber(record.createdAt) + 5
+    local meta = "Published by " .. (record.author or "Leadership") .. "  •  " .. published
+    if edited then meta = meta .. "\nEdited " .. date("%d %B %Y at %H:%M", record.updatedAt) end
+    if record.pinned then meta = self.colors.gold .. "PINNED" .. self.colors.reset .. "  •  " .. meta end
+    meta = meta .. "  •  " .. (record.importance or "NORMAL")
+    reader.metaText:SetText(meta)
+    local displayBody = BreakLongTokens154(record.body and record.body ~= "" and record.body or "No message text is stored for this announcement.", 52)
+    reader.bodyText:SetText(displayBody)
+    local measured = 268
+    if reader.bodyText.GetStringHeight then measured = math.max(268, (reader.bodyText:GetStringHeight() or 260) + 14) end
+    reader.bodyText:SetHeight(measured)
+    reader.bodyChild:SetHeight(measured)
+    local maximum = math.max(0, measured - 272)
+    OTLGM.updatingAnnouncementScroll154 = true
+    reader.bodySlider:SetMinMaxValues(0, maximum)
+    reader.bodySlider:SetValue(0)
+    reader.bodyScroll:SetVerticalScroll(0)
+    OTLGM.updatingAnnouncementScroll154 = nil
+    if maximum > 0 then reader.bodySlider:Show() else reader.bodySlider:Hide() end
+    local summary = self:GetAnnouncementReactionSummary152(record.id)
+    SetButtonText(reader.reactionButtons.LIKE, "Like " .. tostring(summary.LIKE or 0))
+    SetButtonText(reader.reactionButtons.SEEN, "Seen " .. tostring(summary.SEEN or 0))
+    SetButtonText(reader.reactionButtons.SUPPORT, "Support " .. tostring(summary.SUPPORT or 0))
+    local canEdit = self:CanPublishAnnouncement152()
+    if canEdit then reader.editButton:Show() reader.archiveButton:Show() reader.deleteButton:Show() else reader.editButton:Hide() reader.archiveButton:Hide() reader.deleteButton:Hide() end
+    SetButtonText(reader.archiveButton, record.archived and "Restore" or "Archive")
+end
+
+function OTLGM:OpenAnnouncementReader152(id)
+    if not self.ui.announcementReader152 then self:BuildAnnouncementDialogs152() end
+    local record = self:GetAnnouncement152(id)
+    if not record then return end
+    self.ui.announcementReader152.recordId = id
+    self:RefreshAnnouncementReader152()
+    self:ShowModal152(self.ui.announcementReader152)
+    if self.MarkAnnouncementRead154 then self:MarkAnnouncementRead154(id) end
+    self.ui.announcementReader152.unreadText:SetText("")
+    if self.RefreshHomePage then self:RefreshHomePage() end
+end
+
+function OTLGM:OpenAnnouncementArchive152(mode)
+    if not self.ui.announcementArchive152 then self:BuildAnnouncementDialogs152() end
+    local dialog = self.ui.announcementArchive152
+    local requestedMode154 = mode == "ARCHIVED" and "ARCHIVED" or (mode == "ACTIVE" and "ACTIVE" or dialog.mode154 or "ACTIVE")
+    if requestedMode154 ~= dialog.mode154 then dialog.offset154 = 0 end
+    dialog.mode154 = requestedMode154
+    local all = self:GetAnnouncementList152(true)
+    local active, archived = {}, {}
+    local i, record
+    for i = 1, table.getn(all) do
+        if all[i].archived then table.insert(archived, all[i]) else table.insert(active, all[i]) end
+    end
+    local list = dialog.mode154 == "ARCHIVED" and archived or active
+    SetButtonSelected(dialog.activeButton, dialog.mode154 == "ACTIVE")
+    SetButtonSelected(dialog.archivedButton, dialog.mode154 == "ARCHIVED")
+    SetButtonText(dialog.activeButton, "Active " .. tostring(table.getn(active)))
+    SetButtonText(dialog.archivedButton, "Archived " .. tostring(table.getn(archived)))
+    dialog.titleText:SetText(self.colors.gold .. "Announcements" .. self.colors.reset)
+    local perPage154 = table.getn(dialog.rows)
+    local maximumOffset154 = math.max(0, table.getn(list) - perPage154)
+    if (dialog.offset154 or 0) > maximumOffset154 then dialog.offset154 = math.floor(maximumOffset154 / perPage154) * perPage154 end
+    local offset154 = dialog.offset154 or 0
+    for i = 1, table.getn(dialog.rows) do
+        record = list[offset154 + i]
+        if record then
+            dialog.rows[i].recordId = record.id
+            local marker = self.IsAnnouncementUnread154 and self:IsAnnouncementUnread154(record.id) and "[NEW] " or ""
+            SetButtonText(dialog.rows[i], marker .. date("%d %b %Y  %H:%M", record.createdAt or record.updatedAt or self:Now()) .. "  " .. HomeShort152(record.title, 56) .. "  —  " .. (record.author or "Leadership"))
+            dialog.rows[i]:Show()
+        else dialog.rows[i].recordId = nil dialog.rows[i]:Hide() end
+    end
+    if table.getn(list) == 0 then
+        dialog.emptyText:SetText(dialog.mode154 == "ARCHIVED" and "No archived announcements yet." or "No active announcements have been published yet.")
+        dialog.emptyText:Show()
+    else dialog.emptyText:SetText("") dialog.emptyText:Hide() end
+    local page154 = math.floor((dialog.offset154 or 0) / perPage154) + 1
+    local pages154 = math.max(1, math.ceil(table.getn(list) / perPage154))
+    dialog.pageText:SetText(tostring(page154) .. " / " .. tostring(pages154))
+    SetButtonEnabled(dialog.previousButton, (dialog.offset154 or 0) > 0, "Already on the first page.")
+    SetButtonEnabled(dialog.nextButton, (dialog.offset154 or 0) + perPage154 < table.getn(list), "Already on the last page.")
+    self:ShowModal152(dialog)
 end
 
 function OTLGM:BuildOverviewPage(page)
@@ -2956,11 +3573,11 @@ end
 function OTLGM:TargetGuildChatMember(sender)
     local shortName = string.gsub(sender or "", "%-.*$", "")
     if shortName == "" then return end
-    if TargetByName then
-        local ok = pcall(TargetByName, shortName, true)
-        if ok then return end
-    end
-    self:Notify("Target Unavailable", "The client could not target " .. shortName .. ". The player may be too far away or this client may not expose TargetByName.")
+    -- TargetByName prints the client-level red "Unknown unit." error for remote
+    -- guild members. Open the reliable roster entry instead of invoking it.
+    self:ShowPage("roster")
+    self:SelectRosterMember(shortName)
+    if self.SetStatus then self:SetStatus("Opened " .. shortName .. " in the guild roster.") end
 end
 
 function OTLGM:SaveGuildChatDraft(channel)
@@ -2999,17 +3616,26 @@ function OTLGM:IsGuildChatLinkTargetActive()
     return false
 end
 
-function OTLGM:InsertGuildChatLink(link)
-    if not link or link == "" or not self:IsGuildChatLinkTargetActive() then return false end
-    local edit = self.ui.guildChatEdit
+function OTLGM:InsertGuildChatLink(link, force)
+    if not link or link == "" then return false end
+    if not force and not self:IsGuildChatLinkTargetActive() then return false end
+    local edit = self.ui and self.ui.guildChatEdit
+    if not edit then return false end
     edit:SetFocus()
     self.guildChatEditFocused = true
     local current = edit:GetText() or ""
     local prefix = ""
     if current ~= "" and string.sub(current, -1) ~= " " then prefix = " " end
-    if edit.Insert then edit:Insert(prefix .. link) else edit:SetText(current .. prefix .. link) end
+    if edit.Insert then edit:Insert(prefix .. link .. " ") else edit:SetText(current .. prefix .. link .. " ") end
     self:SaveGuildChatDraft(self:GetGuildChatChannel())
     return true
+end
+
+function OTLGM:OpenGuildChatWithLink154(link)
+    if not link or link == "" then return false end
+    self:ShowPage("guildchat")
+    if self.SelectGuildChatView152 then self:SelectGuildChatView152("GUILD") else self:SetGuildChatChannel("GUILD") end
+    return self:InsertGuildChatLink(link, true)
 end
 
 function OTLGM:EnsureGuildChatLinkHook()
@@ -3421,14 +4047,18 @@ function OTLGM:BuildGuildChatPage(page)
     self.ui.chatOffsets = self.ui.chatOffsets or { GUILD = 0, OFFICER = 0 }
     self.ui.chatChannelButtons = {}
     self.ui.chatChannelButtons.GUILD = CreateButton(page, nil, "Guild", 0, -34, 128, 30, function()
-        OTLGM:SelectGuildChatChannel("GUILD")
+        OTLGM:SelectGuildChatView152("GUILD")
     end)
     AddButtonIcon(self.ui.chatChannelButtons.GUILD, "Interface\\Icons\\INV_Letter_15", 14, true)
     self.ui.chatChannelButtons.OFFICER = CreateButton(page, nil, "Officer", 136, -34, 128, 30, function()
-        OTLGM:SelectGuildChatChannel("OFFICER")
+        OTLGM:SelectGuildChatView152("OFFICER")
     end)
     AddButtonIcon(self.ui.chatChannelButtons.OFFICER, "Interface\\Icons\\INV_Shield_06", 14, true)
-    self.ui.chatUnreadText = CreateText(page, "GameFontNormalSmall", "", 276, -43, 250, "LEFT")
+    self.ui.chatChannelButtons.BOARD = CreateButton(page, nil, "Guild Board", 272, -34, 128, 30, function()
+        OTLGM:SelectGuildChatView152("BOARD")
+    end)
+    AddButtonIcon(self.ui.chatChannelButtons.BOARD, "Interface\\Icons\\INV_Misc_Note_01", 14, true)
+    self.ui.chatUnreadText = CreateText(page, "GameFontNormalSmall", "", 408, -43, 112, "LEFT")
     self.ui.chatUnreadText:SetTextColor(0.66, 0.66, 0.66)
     self.ui.chatNewestButton = CreateButton(page, nil, "Newest", 534, -34, 84, 30, function()
         local channel = OTLGM:GetGuildChatChannel()
@@ -3540,7 +4170,7 @@ function OTLGM:BuildGuildChatPage(page)
             GameTooltip:AddLine(" ")
             GameTooltip:AddLine("Click: whisper", 0.58, 0.58, 0.58)
             GameTooltip:AddLine("Shift-click: insert [Name]", 0.58, 0.58, 0.58)
-            GameTooltip:AddLine("Ctrl-click: target player", 0.58, 0.58, 0.58)
+            GameTooltip:AddLine("Ctrl-click: view in Roster", 0.58, 0.58, 0.58)
             GameTooltip:AddLine("Right-click: more actions", 0.58, 0.58, 0.58)
             GameTooltip:Show()
         end)
@@ -3699,6 +4329,176 @@ function OTLGM:BuildGuildChatPage(page)
     end)
     menu:Hide()
     self.ui.chatNameMenu = menu
+    self:BuildGuildBoardChat152(page)
+end
+
+function OTLGM:SelectGuildChatView152(view)
+    self:EnsureDB()
+    view = view == "BOARD" and "BOARD" or (view == "OFFICER" and "OFFICER" or "GUILD")
+    if view == "OFFICER" and not self:IsOfficerMode() then view = "GUILD" end
+    OTLGM_DB.settings.guildChatView = view
+    if view ~= "BOARD" then self:SetGuildChatChannel(view) end
+    self:RefreshGuildChatPage()
+    self:RefreshNavigation()
+end
+
+function OTLGM:ShowGuildBoardChatLayout152(showBoard)
+    local normalFrames = { self.ui.chatList, self.ui.guildChatEdit, self.ui.guildChatSendButton, self.ui.chatNewestButton, self.ui.chatClearButton, self.ui.chatUnreadText }
+    local i
+    for i = 1, table.getn(normalFrames) do
+        if normalFrames[i] then if showBoard then normalFrames[i]:Hide() else normalFrames[i]:Show() end end
+    end
+    if self.ui.guildBoardChatPanel152 then if showBoard then self.ui.guildBoardChatPanel152:Show() else self.ui.guildBoardChatPanel152:Hide() end end
+end
+
+function OTLGM:BuildGuildBoardChat152(page)
+    if self.ui.guildBoardChatPanel152 then return end
+    local panel = CreateFrame("Frame", nil, page)
+    panel:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -72)
+    panel:SetWidth(718)
+    panel:SetHeight(452)
+    panel:Hide()
+
+    local list = CreateFrame("Frame", nil, panel)
+    list:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, 0)
+    list:SetWidth(334)
+    list:SetHeight(452)
+    CreateBackdrop(list, 5)
+    list:SetBackdropColor(0.020, 0.018, 0.015, 0.995)
+    list:SetBackdropBorderColor(0.42, 0.30, 0.14, 1)
+    CreateText(list, "GameFontNormalSmall", "GUILD BOARD POSTS", 12, -10, 200, "LEFT")
+    self.ui.guildBoardChatRows152 = {}
+    local i
+    for i = 1, 8 do
+        local row = CreateButton(list, nil, "", 10, -34 - ((i - 1) * 37), 314, 35, function()
+            if this.postData then OTLGM.ui.guildBoardSelected152 = this.postData.id OTLGM:RefreshGuildBoardChat152() end
+        end)
+        row.text:Hide()
+        row.titleText = CreateText(row, "GameFontNormalSmall", "", 8, -6, 206, "LEFT")
+        row.metaText = CreateText(row, "GameFontNormalSmall", "", 218, -6, 86, "RIGHT")
+        row.metaText:SetTextColor(0.52, 0.52, 0.52)
+        row.previewText = CreateText(row, "GameFontHighlightSmall", "", 8, -20, 296, "LEFT")
+        row:Hide()
+        self.ui.guildBoardChatRows152[i] = row
+    end
+    self.ui.guildBoardPrev152 = CreateButton(list, nil, "<", 246, -334, 36, 24, function() OTLGM.ui.guildBoardOffset152 = math.max(0, (OTLGM.ui.guildBoardOffset152 or 0) - 8) OTLGM:RefreshGuildBoardChat152() end)
+    self.ui.guildBoardNext152 = CreateButton(list, nil, ">", 288, -334, 36, 24, function() OTLGM.ui.guildBoardOffset152 = (OTLGM.ui.guildBoardOffset152 or 0) + 8 OTLGM:RefreshGuildBoardChat152() end)
+    CreateText(list, "GameFontNormalSmall", "NEW COMMUNITY POST", 12, -370, 190, "LEFT")
+    self.ui.guildBoardNewEdit152 = CreateEditBox(list, "OTLGM_GuildBoardNew152", 10, -392, 230, 48, true)
+    self.ui.guildBoardNewEdit152:SetMaxLetters(180)
+    self.ui.guildBoardPostButton152 = CreateButton(list, nil, "Post", 248, -392, 76, 48, function()
+        local ok, result = OTLGM:CreatePveBoardPost(OTLGM.ui.guildBoardNewEdit152:GetText())
+        if ok then OTLGM.ui.guildBoardNewEdit152:SetText("") OTLGM.ui.guildBoardOffset152 = 0 OTLGM:RefreshGuildBoardChat152()
+        else OTLGM:ShowNotice("Guild Board", result or "The post could not be created.") end
+    end)
+    SetButtonActionStyle(self.ui.guildBoardPostButton152, "confirm")
+
+    local detail = CreateFrame("Frame", nil, panel)
+    detail:SetPoint("TOPLEFT", panel, "TOPLEFT", 344, 0)
+    detail:SetWidth(374)
+    detail:SetHeight(452)
+    CreateBackdrop(detail, 5)
+    detail:SetBackdropColor(0.026, 0.023, 0.019, 0.995)
+    detail:SetBackdropBorderColor(0.42, 0.30, 0.14, 1)
+    CreateText(detail, "GameFontNormalSmall", "SELECTED POST", 12, -10, 350, "LEFT")
+    self.ui.guildBoardDetailTitle152 = CreateWrappedText(detail, "GameFontNormal", "Select a Guild Board post", 12, -38, 350, 42)
+    self.ui.guildBoardDetailMeta152 = CreateText(detail, "GameFontNormalSmall", "", 12, -82, 350, "LEFT")
+    self.ui.guildBoardDetailMeta152:SetTextColor(0.58, 0.58, 0.58)
+    local body = CreateFrame("Frame", nil, detail)
+    body:SetPoint("TOPLEFT", detail, "TOPLEFT", 10, -108)
+    body:SetWidth(354)
+    body:SetHeight(174)
+    CreateBackdrop(body, 4)
+    body:SetBackdropColor(0.018, 0.017, 0.015, 1)
+    body:SetBackdropBorderColor(0.30, 0.26, 0.18, 1)
+    self.ui.guildBoardDetailBody152 = CreateWrappedText(body, "GameFontHighlight", "", 12, -12, 330, 148)
+    self.ui.guildBoardReactionButtons152 = {}
+    local reactions = { {"HEART", "Heart"}, {"FUNNY", "Funny"}, {"SEEN", "Seen"} }
+    for i = 1, table.getn(reactions) do
+        local reaction = reactions[i][1]
+        local label = reactions[i][2]
+        local button = CreateButton(detail, nil, label, 12 + ((i - 1) * 112), -296, 104, 28, function()
+            local id = OTLGM.ui.guildBoardSelected152
+            if id then OTLGM:SetCommunityReaction("BOARD", id, reaction, false) OTLGM:RefreshGuildBoardChat152() end
+        end)
+        button:SetScript("OnEnter", function()
+            this.hovered = true ApplyButtonVisual(this)
+            local id = OTLGM.ui.guildBoardSelected152
+            if id then OTLGM:ShowCommunityReactorsTooltip152(this, "BOARD", id, reaction, label) end
+        end)
+        button:SetScript("OnLeave", function() this.hovered = false ApplyButtonVisual(this) GameTooltip:Hide() end)
+        self.ui.guildBoardReactionButtons152[reaction] = button
+    end
+    self.ui.guildBoardWhisper152 = CreateButton(detail, nil, "Whisper", 12, -342, 82, 28, function()
+        local posts = OTLGM:GetPveBoardPosts()
+        local i
+        for i = 1, table.getn(posts) do if posts[i].id == OTLGM.ui.guildBoardSelected152 then OTLGM:OpenGuildChatWhisper(posts[i].author) return end end
+    end)
+    self.ui.guildBoardShare152 = CreateButton(detail, nil, "Share to /g", 102, -342, 98, 28, function()
+        local posts = OTLGM:GetPveBoardPosts()
+        local i
+        for i = 1, table.getn(posts) do if posts[i].id == OTLGM.ui.guildBoardSelected152 then OTLGM:SharePveBoardToGuildChat(posts[i]) return end end
+    end)
+    self.ui.guildBoardDelete152 = CreateButton(detail, nil, "Delete", 208, -342, 78, 28, function()
+        local id = OTLGM.ui.guildBoardSelected152
+        if id then OTLGM:DeletePveBoardPost(id, false) OTLGM.ui.guildBoardSelected152 = nil OTLGM:RefreshGuildBoardChat152() end
+    end)
+    SetButtonActionStyle(self.ui.guildBoardDelete152, "danger")
+    self.ui.guildBoardSync152 = CreateButton(detail, nil, "Sync", 294, -342, 68, 28, function() OTLGM:RequestPveSync(true) end)
+    SetButtonActionStyle(self.ui.guildBoardSync152, "utility")
+    self.ui.guildBoardInfo152 = CreateWrappedText(detail, "GameFontNormalSmall", "Guild Board is for community posts. Official leadership announcements are published on Home. Posts expire automatically and reactions are stored per post.", 12, -390, 350, 48)
+    self.ui.guildBoardInfo152:SetTextColor(0.56, 0.56, 0.54)
+    self.ui.guildBoardChatPanel152 = panel
+end
+
+function OTLGM:RefreshGuildBoardChat152()
+    if not self.ui.guildBoardChatPanel152 then return end
+    local posts = self:GetPveBoardPosts() or {}
+    local offset = math.max(0, tonumber(self.ui.guildBoardOffset152) or 0)
+    local maximum = math.max(0, table.getn(posts) - 8)
+    if offset > maximum then offset = maximum end
+    self.ui.guildBoardOffset152 = offset
+    local i, row, post
+    for i = 1, 8 do
+        row = self.ui.guildBoardChatRows152[i]
+        post = posts[offset + i]
+        if post then
+            row.postData = post
+            row.titleText:SetText(self:GetClassColor(post.class) .. HomeShort152(post.author or "Unknown", 18) .. self.colors.reset)
+            row.metaText:SetText(date("%d %b %H:%M", post.ts or self:Now()))
+            row.previewText:SetText(HomeShort152(post.text, 48))
+            SetButtonSelected(row, self.ui.guildBoardSelected152 == post.id)
+            row:Show()
+        else row.postData = nil row:Hide() end
+    end
+    SetButtonEnabled(self.ui.guildBoardPrev152, offset > 0, "This is the first page.")
+    SetButtonEnabled(self.ui.guildBoardNext152, offset < maximum, "There are no more posts.")
+    local selected
+    for i = 1, table.getn(posts) do if posts[i].id == self.ui.guildBoardSelected152 then selected = posts[i] break end end
+    if not selected and posts[1] then selected = posts[1] self.ui.guildBoardSelected152 = selected.id end
+    if selected then
+        self.ui.guildBoardDetailTitle152:SetText(self.colors.gold .. (selected.author or "Guild Member") .. self.colors.reset)
+        self.ui.guildBoardDetailMeta152:SetText(date("%d %B %Y  %H:%M", selected.ts or self:Now()) .. "  |  expires automatically")
+        self.ui.guildBoardDetailBody152:SetText(selected.text or "")
+        local summary = self:GetCommunityReactionSummary("BOARD", selected.id)
+        SetButtonText(self.ui.guildBoardReactionButtons152.HEART, "Heart " .. tostring(summary.HEART or 0))
+        SetButtonText(self.ui.guildBoardReactionButtons152.FUNNY, "Funny " .. tostring(summary.FUNNY or 0))
+        SetButtonText(self.ui.guildBoardReactionButtons152.SEEN, "Seen " .. tostring(summary.SEEN or 0))
+        SetButtonEnabled(self.ui.guildBoardWhisper152, true)
+        SetButtonEnabled(self.ui.guildBoardShare152, true)
+        SetButtonEnabled(self.ui.guildBoardDelete152, self:CanModifyPveRecord(selected), "Only the author or leadership can delete this post.")
+    else
+        self.ui.guildBoardDetailTitle152:SetText(self.colors.grey .. "Select a Guild Board post" .. self.colors.reset)
+        self.ui.guildBoardDetailMeta152:SetText("")
+        self.ui.guildBoardDetailBody152:SetText("No posts are available yet. Create the first community post on the left.")
+        SetButtonText(self.ui.guildBoardReactionButtons152.HEART, "Heart 0")
+        SetButtonText(self.ui.guildBoardReactionButtons152.FUNNY, "Funny 0")
+        SetButtonText(self.ui.guildBoardReactionButtons152.SEEN, "Seen 0")
+        SetButtonEnabled(self.ui.guildBoardWhisper152, false, "Select a post first.")
+        SetButtonEnabled(self.ui.guildBoardShare152, false, "Select a post first.")
+        SetButtonEnabled(self.ui.guildBoardDelete152, false, "Select a post first.")
+    end
+    self:MarkPveSectionRead("BOARD")
 end
 
 function OTLGM:SetGuildChatScrollOffset(value)
@@ -3742,12 +4542,21 @@ function OTLGM:RefreshGuildChatPage()
     if not self.ui or not self.ui.chatRows or not self.ui.chatSlider then return end
     self:EnsureDB()
     self:EnsureGuildChatLinkHook()
-    local channel = self:GetGuildChatChannel()
+    local view = OTLGM_DB.settings.guildChatView or self:GetGuildChatChannel()
     local officer = self:IsOfficerMode()
-    self:ApplyGuildChatLayout(channel)
-    SetButtonSelected(self.ui.chatChannelButtons.GUILD, channel == "GUILD")
-    SetButtonSelected(self.ui.chatChannelButtons.OFFICER, channel == "OFFICER")
+    if view == "OFFICER" and not officer then view = "GUILD" OTLGM_DB.settings.guildChatView = "GUILD" end
+    SetButtonSelected(self.ui.chatChannelButtons.GUILD, view == "GUILD")
+    SetButtonSelected(self.ui.chatChannelButtons.OFFICER, view == "OFFICER")
+    SetButtonSelected(self.ui.chatChannelButtons.BOARD, view == "BOARD")
     SetButtonEnabled(self.ui.chatChannelButtons.OFFICER, officer, "Officer chat is available only to guild ranks with officer permissions.")
+    if view == "BOARD" then
+        self:ShowGuildBoardChatLayout152(true)
+        self:RefreshGuildBoardChat152()
+        return
+    end
+    self:ShowGuildBoardChatLayout152(false)
+    local channel = self:GetGuildChatChannel()
+    self:ApplyGuildChatLayout(channel)
 
     if self.ui.loadedGuildChatDraftChannel ~= channel then self:LoadGuildChatDraft(channel) end
     if self.ui.chatNameMenu then self.ui.chatNameMenu:Hide() end
@@ -3973,7 +4782,7 @@ function OTLGM:BuildPvePage(page)
     testBadge:SetBackdropBorderColor(0.82, 0.52, 0.14, 1)
     local badgeText = CreateText(testBadge, "GameFontNormalSmall", "GUILD NETWORK", 0, -6, 104, "CENTER")
     badgeText:SetTextColor(1.0, 0.78, 0.28)
-    CreateHelpButton(page, "PvE Hub", "This page exchanges short requests, raid notices and board posts directly between online guildmates who use the addon. It does not replace Discord sign-ups. Data is sent only when something changes or when a player requests synchronization.")
+    CreateHelpButton(page, "PvE Hub", "This page exchanges Group Finder requests and raid notices between online guildmates who use the addon. Guild Board community posts are now displayed in Guild Chat. Official raid sign-ups remain in Discord.")
     CreateText(page, "GameFontNormalSmall", "Live guild coordination between installed addon copies. No constant roster polling and no public chat spam.", 0, -28, 720, "LEFT")
 
     self.ui.pveTabButtons = {}
@@ -4628,18 +5437,23 @@ function OTLGM:BuildRecruitmentPage(page)
     worldCard.detail = CreateWrappedText(worldCard, "GameFontNormalSmall", "", 112, -25, 154, 21)
     worldCard.meta = CreateText(worldCard, "GameFontNormalSmall", "", 112, -45, 188, "LEFT")
     worldCard.meta:SetTextColor(0.52, 0.52, 0.52)
-    CreateText(worldCard, "GameFontNormalSmall", "CHANNEL", 202, -7, 54, "RIGHT")
+    CreateText(worldCard, "GameFontNormalSmall", "WORLD", 202, -7, 54, "RIGHT")
     CreateText(worldCard, "GameFontNormalLarge", "/", 260, -4, 12, "LEFT")
     local channel = CreateEditBox(worldCard, "OTLGM_ChannelEdit", 272, -3, 34, 27, false)
     channel:SetMaxLetters(2)
     channel:SetScript("OnTextChanged", function()
+        if OTLGM.updatingWorldChannelEdit153 then return end
         local text = this:GetText() or ""
         local digits = string.gsub(text, "%D", "")
         if digits ~= text then this:SetText(digits) return end
-        OTLGM_DB.settings.worldChannel = digits
+        if not (OTLGM_DB.settings.worldChannelAuto153 and OTLGM_DB.settings.worldChannelDetected153) then
+            OTLGM_DB.settings.worldChannel = digits
+        end
         OTLGM:RefreshRecruitmentPage()
     end)
     channel:SetScript("OnEnterPressed", function() this:ClearFocus() end)
+    worldCard.autoText = CreateText(worldCard, "GameFontNormalSmall", "Detecting World...", 202, -44, 98, "RIGHT")
+    worldCard.autoText:SetTextColor(0.55, 0.55, 0.52)
     self.ui.channelEdit = channel
     self.ui.worldRecruitmentCard = worldCard
 
@@ -4809,10 +5623,17 @@ function OTLGM:RefreshWorldRecruitmentIndicator()
         card:SetBackdropBorderColor(0.50, 0.36, 0.16, 1)
     end
 
+    local channelText, channelName, automatic = self:GetWorldChannelDisplay153()
+    if card.autoText then
+        card.autoText:SetText(automatic and ("AUTO " .. channelText) or (channelText == "Not joined" and "NOT JOINED" or ("MANUAL " .. channelText)))
+        if automatic then card.autoText:SetTextColor(0.42, 0.94, 0.48)
+        elseif channelText == "Not joined" then card.autoText:SetTextColor(1.0, 0.42, 0.30)
+        else card.autoText:SetTextColor(1.0, 0.78, 0.22) end
+    end
     if info.timestamp then
         card.meta:SetText((info.label or "World post") .. " -> /" .. tostring(info.channel or "?") .. " at " .. date("%H:%M", info.timestamp))
     else
-        card.meta:SetText("Recommended interval: 10-15 min")
+        card.meta:SetText(automatic and ("Detected: " .. tostring(channelName or "World")) or "Recommended interval: 10-15 min")
     end
 end
 
@@ -4821,9 +5642,16 @@ function OTLGM:RefreshRecruitmentPage()
     self:EnsureDB()
     local selected = OTLGM_DB.settings.selectedRecruitment or "BASE1"
     local i, key, button
-    if self.ui.channelEdit:GetText() ~= tostring(OTLGM_DB.settings.worldChannel or "6") then
-        self.ui.channelEdit:SetText(tostring(OTLGM_DB.settings.worldChannel or "6"))
+    local detectedChannel, detectedName, automatic = self:DetectWorldChannel153(false)
+    local shownChannel = detectedChannel or tonumber(OTLGM_DB.settings.worldChannel) or 6
+    if self.ui.channelEdit:GetText() ~= tostring(shownChannel) then
+        self.updatingWorldChannelEdit153 = true
+        self.ui.channelEdit:SetText(tostring(shownChannel))
+        self.updatingWorldChannelEdit153 = nil
     end
+    self.ui.channelEdit:EnableMouse(not automatic)
+    self.ui.channelEdit:SetTextColor(automatic and 0.42 or 1.0, automatic and 0.94 or 0.82, automatic and 0.48 or 0.30)
+    self.ui.channelEdit:SetBackdropBorderColor(automatic and 0.20 or 0.50, automatic and 0.64 or 0.36, automatic and 0.28 or 0.16, 1)
 
     local presetKeys = { "BASE1", "BASE2", "GUILDINFO", "ADDONINFO" }
     for i = 1, table.getn(presetKeys) do
@@ -5039,7 +5867,7 @@ function OTLGM:BuildSettingsPage(page)
     local pveSettings = MakePanel()
     self.ui.settingsPanels.PVE = pveSettings
     CreateText(pveSettings, "GameFontNormal", "PVE HUB NETWORK", 14, -14, 680, "LEFT")
-    local pveInfo = CreateWrappedText(pveSettings, "GameFontNormalSmall", "Groups, join applications, raid notices and board posts travel directly between online guildmates who have the addon installed. The addon sends data only when something changes, when a user joins, or when Sync Now is pressed.", 14, -42, 680, 66)
+    local pveInfo = CreateWrappedText(pveSettings, "GameFontNormalSmall", "Groups, join applications and raid notices travel directly between online guildmates who have the addon installed. Guild Board posts use the same safe network but are displayed in Guild Chat. Data is sent only when something changes or Sync Now is requested.", 14, -42, 680, 66)
     pveInfo:SetTextColor(0.66, 0.66, 0.66)
     self.ui.settingChecks.pveRaidPopups = CreateCheck(pveSettings, "OTLGM_SettingPveRaidPopups", "Show popup notifications for published raids and reminders", 14, -124, function()
         OTLGM_DB.settings.pveRaidPopups = this:GetChecked() and true or false
@@ -5079,7 +5907,7 @@ function OTLGM:BuildSettingsPage(page)
     end)
     CreateButton(data, nil, "Import Backup", 148, -304, 126, 30, function()
         OTLGM.ui.importDialog.edit:SetText("")
-        OTLGM.ui.importDialog:Show()
+        OTLGM:ShowModal152(OTLGM.ui.importDialog)
         OTLGM.ui.importDialog.edit:SetFocus()
     end)
     CreateButton(data, nil, "First-Run Guide", 282, -304, 126, 30, function() OTLGM:OpenFirstRunWizard() end)

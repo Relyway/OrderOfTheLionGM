@@ -140,6 +140,11 @@ function OTLGM:UpdateMinimapBadge()
     if not self.ui.minimapButton or not self.ui.minimapButton.badge then return end
     local db = self:GetGuildDB()
     local count = db and db.unread or 0
+    if self.GetGuildChatUnread then count = count + self:GetGuildChatUnread("GUILD") + (self:IsOfficerMode() and self:GetGuildChatUnread("OFFICER") or 0) end
+    if self.GetPveUnreadTotal then count = count + self:GetPveUnreadTotal() end
+    if self.GetPveUnread then count = count + self:GetPveUnread("BOARD") end
+    if self.GetCraftingUnread then count = count + self:GetCraftingUnread("RECIPES") + self:GetCraftingUnread("REQUESTS") end
+    if self.GetTotalNotificationUnread152 then count = count + self:GetTotalNotificationUnread152() end
     if count and count > 0 then
         if count > 99 then count = 99 end
         self.ui.minimapButton.badge.text:SetText(tostring(count))

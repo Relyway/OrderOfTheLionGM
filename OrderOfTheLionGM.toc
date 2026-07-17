@@ -1,12 +1,15 @@
 ## Interface: 11200
 ## Title: |cffffcc66Order of the Lion|r |cffffffffGuild Manager|r |cff75d66bOctoWoW|r
-## Notes: |cffffffffGuild chat, roster, professions, PvE Group Finder, raid notices, guild board, activity and officer tools.|r
-## Author: |cffffcc66Hikol(Luck)|r, |cffffffffOrder of the Lion|r
-## Version: |cff75d66b1.4.1|r
+## Notes: |cffffffffGuild chat, roster, Crafting Network, PvE coordination, activity and officer tools.|r
+## Author: |cffffcc66Hikol|r |cffaaaaaa(mrhikol / Lucks)|r, |cffffffffOrder of the Lion|r
+## Version: |cff75d66b1.5.4|r
 ## SavedVariables: OTLGM_DB
 Core.lua
 Advanced.lua
 PVE.lua
+Crafting.lua
+Systems152.lua
 UI.lua
+UINext.lua
 Minimap.lua
 Events.lua

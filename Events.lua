@@ -1,5 +1,5 @@
 -- Order of the Lion Guild Manager
--- Safe events, diagnostics and controlled roster refresh - v1.4.1
+-- Safe events, diagnostics and controlled roster refresh - v1.5.4
 
 SLASH_OTLGM1 = "/otl"
 SLASH_OTLGM2 = "/liongm"
@@ -62,17 +62,25 @@ SlashCmdList["OTLGMTEST"] = function()
     PrintLine("UI marker=" .. tostring(OTLGM and OTLGM.fullUILoaded) .. ", BuildUI=" .. tostring(OTLGM and OTLGM.BuildUI ~= nil) .. ", ToggleUI=" .. tostring(OTLGM and OTLGM.ToggleUI ~= nil))
     PrintLine("Minimap=" .. tostring(OTLGM and OTLGM.BuildMinimapButton ~= nil) .. ", RequestScan=" .. tostring(OTLGM and OTLGM.RequestScan ~= nil))
     PrintLine("Guild chat=" .. tostring(OTLGM and OTLGM.CaptureGuildChatMessage ~= nil) .. ", World timer=" .. tostring(OTLGM and OTLGM.GetWorldRecruitmentInfo ~= nil) .. ", PvE sync=" .. tostring(OTLGM and OTLGM.HandlePveAddonMessage ~= nil))
+    PrintLine("Crafting=" .. tostring(OTLGM and OTLGM.ScanCurrentProfession ~= nil) .. ", Community sync=" .. tostring(OTLGM and OTLGM.HandleCommunityAddonMessage ~= nil))
+    PrintLine("Systems 1.5.4=" .. tostring(OTLGM and OTLGM.systems152Loaded) .. ", Announcements=" .. tostring(OTLGM and OTLGM.PublishAnnouncement152 ~= nil) .. ", UI module 1.5.4=" .. tostring(OTLGM and OTLGM.nextUILoaded))
+    PrintLine("UI built 1.5.4=" .. tostring(OTLGM and OTLGM.ui153Loaded) .. ", Home 1.5.4=" .. tostring(OTLGM and OTLGM.ui and OTLGM.ui.home152DirectLayout))
+    PrintLine("World auto-detect=" .. tostring(OTLGM and OTLGM.DetectWorldChannel153 ~= nil) .. ", Activity dialogs=" .. tostring(OTLGM and OTLGM.BuildActivityDialogs153 ~= nil) .. ", Profession filters=" .. tostring(OTLGM and OTLGM.GetCraftingCategory153 ~= nil))
 end
 
 local eventFrame = CreateFrame("Frame", "OTLGM_EventFrame")
 eventFrame:RegisterEvent("VARIABLES_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
+eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+eventFrame:RegisterEvent("CHANNEL_NOTICE")
 eventFrame:RegisterEvent("PLAYER_GUILD_UPDATE")
 eventFrame:RegisterEvent("GUILD_ROSTER_UPDATE")
 eventFrame:RegisterEvent("CHAT_MSG_SYSTEM")
 eventFrame:RegisterEvent("CHAT_MSG_ADDON")
 eventFrame:RegisterEvent("CHAT_MSG_GUILD")
 eventFrame:RegisterEvent("CHAT_MSG_OFFICER")
+eventFrame:RegisterEvent("TRADE_SKILL_SHOW")
+eventFrame:RegisterEvent("CRAFT_SHOW")
 
 eventFrame:SetScript("OnEvent", function()
     if event == "VARIABLES_LOADED" then
@@ -91,9 +99,17 @@ eventFrame:SetScript("OnEvent", function()
         end
         if OTLGM.BroadcastVersion then OTLGM:BroadcastVersion() end
         if OTLGM.InitializePveSync then OTLGM:InitializePveSync() end
+        if OTLGM.EnsureCraftingDB then OTLGM:EnsureCraftingDB() end
+        if OTLGM.RequestCraftingSync then OTLGM.craftingInitialSyncAt = OTLGM:Now() + 12 end
+        if OTLGM.RequestAnnouncementSync152 then OTLGM.announcementInitialSyncAt = OTLGM:Now() + 16 end
+        if OTLGM.DetectWorldChannel153 then OTLGM:DetectWorldChannel153(true) end
+        if not OTLGM.systems152Loaded then PrintLine("Systems152.lua did not load; 1.5.4 features are unavailable.", true) end
         if not OTLGM.fullUILoaded or not OTLGM.ToggleUI then
             PrintLine("Full UI did not load. Type /otltest for details.", true)
         end
+    elseif event == "PLAYER_ENTERING_WORLD" or event == "CHANNEL_NOTICE" then
+        if OTLGM and OTLGM.DetectWorldChannel153 then OTLGM:DetectWorldChannel153(true) end
+        if OTLGM and OTLGM.ui and OTLGM.ui.currentPage == "recruitment" and OTLGM.RefreshRecruitmentPage then OTLGM:RefreshRecruitmentPage() end
     elseif event == "CHAT_MSG_SYSTEM" then
         if OTLGM and OTLGM.TryCaptureSystemGuildAction then OTLGM:TryCaptureSystemGuildAction(arg1) end
     elseif event == "CHAT_MSG_ADDON" then
@@ -102,9 +118,15 @@ eventFrame:SetScript("OnEvent", function()
         if OTLGM and OTLGM.CaptureGuildChatMessage then OTLGM:CaptureGuildChatMessage("GUILD", arg1, arg2) end
     elseif event == "CHAT_MSG_OFFICER" then
         if OTLGM and OTLGM.CaptureGuildChatMessage then OTLGM:CaptureGuildChatMessage("OFFICER", arg1, arg2) end
+    elseif event == "TRADE_SKILL_SHOW" then
+        if OTLGM and OTLGM.ScanCurrentProfession then OTLGM:ScanCurrentProfession("TRADE") end
+    elseif event == "CRAFT_SHOW" then
+        if OTLGM and OTLGM.ScanCurrentProfession then OTLGM:ScanCurrentProfession("CRAFT") end
     elseif event == "PLAYER_GUILD_UPDATE" then
         if OTLGM and OTLGM.BroadcastVersion then OTLGM:BroadcastVersion() end
         if OTLGM and OTLGM.RequestPveSync then OTLGM:RequestPveSync(true) end
+        if OTLGM and OTLGM.RequestCraftingSync then OTLGM:RequestCraftingSync(true) end
+        if OTLGM and OTLGM.RequestAnnouncementSync152 then OTLGM:RequestAnnouncementSync152(true) end
         if OTLGM and OTLGM.RefreshNavigation then OTLGM:RefreshNavigation() end
     elseif event == "GUILD_ROSTER_UPDATE" then
         if OTLGM and OTLGM.pendingScan then
@@ -136,6 +158,16 @@ eventFrame:SetScript("OnUpdate", function()
     end
 
     if OTLGM.ProcessPveSendQueue then OTLGM:ProcessPveSendQueue() end
+    if OTLGM.ProcessCommunitySendQueue then OTLGM:ProcessCommunitySendQueue() end
+    if OTLGM.ProcessCraftingTimers then OTLGM:ProcessCraftingTimers() end
+    if OTLGM.craftingInitialSyncAt and OTLGM:Now() >= OTLGM.craftingInitialSyncAt then
+        OTLGM.craftingInitialSyncAt = nil
+        if OTLGM.RequestCraftingSync then OTLGM:RequestCraftingSync(false) end
+    end
+    if OTLGM.announcementInitialSyncAt and OTLGM:Now() >= OTLGM.announcementInitialSyncAt then
+        OTLGM.announcementInitialSyncAt = nil
+        if OTLGM.RequestAnnouncementSync152 then OTLGM:RequestAnnouncementSync152(false) end
+    end
     if OTLGM.pveSyncAt and OTLGM:Now() >= OTLGM.pveSyncAt then
         OTLGM.pveSyncAt = nil
         if OTLGM.RequestPveSync then OTLGM:RequestPveSync(true) end
@@ -145,7 +177,11 @@ eventFrame:SetScript("OnUpdate", function()
         OTLGM.pveMaintenanceElapsed = 0
         if OTLGM.PurgePveData then OTLGM:PurgePveData(false) end
         if OTLGM.CheckPveRaidReminders then OTLGM:CheckPveRaidReminders() end
+        if OTLGM.PurgeCraftingData then OTLGM:PurgeCraftingData(false) end
+        if OTLGM.RefreshDateIndicator then OTLGM:RefreshDateIndicator() end
         if OTLGM.ui and OTLGM.ui.main and OTLGM.ui.main:IsVisible() and OTLGM.ui.currentPage == "pve" and OTLGM.RefreshPvePage then OTLGM:RefreshPvePage() end
+        if OTLGM.ui and OTLGM.ui.main and OTLGM.ui.main:IsVisible() and OTLGM.ui.currentPage == "professions" and OTLGM.RefreshProfessionsPage then OTLGM:RefreshProfessionsPage() end
+        if OTLGM.ui and OTLGM.ui.main and OTLGM.ui.main:IsVisible() and OTLGM.ui.currentPage == "home" and OTLGM.RefreshHomePage then OTLGM:RefreshHomePage() end
     end
 
     local visible = OTLGM.ui and OTLGM.ui.main and OTLGM.ui.main:IsVisible()

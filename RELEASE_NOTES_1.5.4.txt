@@ -1,0 +1,23 @@
+ORDER OF THE LION GM 1.5.4
+
+This is the final corrective pass built from the verified 1.5.3 baseline. The earlier experimental 1.5.4 archive is not used by this package.
+
+HIGHLIGHTS
+- Leadership Online now uses real guild rank indexes and the same badges as Roster. The true rank-index 0 guild leader is first even if the rank is renamed.
+- One shared modal stack keeps the dark overlay behind every window. All registered modals receive a visible X, correct Escape behavior and usable controls.
+- Announcements preserve paragraphs, support long text safely, show clearer dates and local NEW state, and use working Active/Archived views.
+- Link Item and Link Recipe now insert actual hyperlinks into the addon Guild Chat draft rather than merely changing pages.
+- Current profession synchronization carries item and recipe links in bounded RC2 packets.
+- The unsafe TargetByName path was removed to prevent the client-level red "Unknown unit." message from remote guild names.
+- All 1.5.3 profession filters, activity readers, World-channel detection, notifications, Cooking, Guild Board and PvE systems remain intact.
+- SavedVariables schema is now 9 and migrates existing data defensively.
+
+VALIDATION
+- Loaded all Lua modules in exact TOC order.
+- Completed 130 focused runtime assertions in a mocked WoW API environment.
+- Verified every main page opens and refreshes.
+- Verified all registered modal frames and their X buttons remain above the overlay.
+- Verified multiline announcement synchronization and RC2 link synchronization with packet-size guards.
+- Verified schema-8-to-9 migration preserves roster and history data.
+
+The real OctoWoW client is not available in the build environment. Keep WTF/SavedVariables and use the included in-game acceptance checklist after installation.

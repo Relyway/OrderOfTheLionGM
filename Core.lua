@@ -2,7 +2,7 @@
 -- Core systems for Vanilla WoW / OctoWoW (Interface 11200)
 
 OTLGM = OTLGM or {}
-OTLGM.version = "1.4.1"
+OTLGM.version = "1.5.4"
 OTLGM.addonName = "OrderOfTheLionGM"
 OTLGM.pendingScan = false
 OTLGM.pendingSilent = true
@@ -36,17 +36,18 @@ OTLGM.classHex = {
 
 OTLGM.professionDefinitions = {
     { key = "ALCHEMY", label = "Alchemy", terms = { "alchemy", "alchemist" } },
+    { key = "COOKING", label = "Cooking", terms = { "cooking", "cook" } },
     { key = "BLACKSMITHING", label = "Blacksmithing", terms = { "blacksmith", "blacksmithing" } },
     { key = "ENCHANTING", label = "Enchanting", terms = { "enchanting", "enchanter" } },
     { key = "ENGINEERING", label = "Engineering", terms = { "engineering", "engineer" } },
+    { key = "JEWELCRAFTING", label = "Jewelcrafting", terms = { "jewelcrafting", "jewelcrafter", "jc" } },
     { key = "HERBALISM", label = "Herbalism", terms = { "herbalism", "herbalist" } },
     { key = "LEATHERWORKING", label = "Leatherworking", terms = { "leatherworking", "leatherworker" } },
     { key = "MINING", label = "Mining", terms = { "mining", "miner" } },
     { key = "SKINNING", label = "Skinning", terms = { "skinning", "skinner" } },
     { key = "TAILORING", label = "Tailoring", terms = { "tailoring", "tailor" } },
-    { key = "COOKING", label = "Cooking", terms = { "cooking", "cook" } },
-    { key = "FISHING", label = "Fishing", terms = { "fishing", "fisher" } },
 }
+
 
 
 OTLGM.recruitmentPresets = {
@@ -1153,8 +1154,71 @@ function OTLGM:ResetGuildData()
     end
 end
 
+function OTLGM:DetectWorldChannel153(force)
+    self:EnsureDB()
+    local now = self:Now()
+    if not force and self.worldChannelDetectedAt153 and now - self.worldChannelDetectedAt153 < 10 then
+        local cached = tonumber(OTLGM_DB.settings.worldChannelDetected153)
+        if cached and cached > 0 then return cached, OTLGM_DB.settings.worldChannelName153 or "World", true end
+    end
+    self.worldChannelDetectedAt153 = now
+
+    local function IsWorldName(name)
+        name = string.lower(Trim(name or ""))
+        name = string.gsub(name, "[%s%-%_]", "")
+        if name == "world" or name == "worldchat" or name == "global" or name == "globalchat" then return true end
+        if string.find(name, "world", 1, true) and not string.find(name, "defense", 1, true) then return true end
+        return false
+    end
+
+    local candidates = { "World", "world", "WORLD", "World Chat", "Global", "Global Chat" }
+    local i, id, channelName
+    if GetChannelName then
+        for i = 1, table.getn(candidates) do
+            local ok, resolvedId, resolvedName = pcall(GetChannelName, candidates[i])
+            if ok and tonumber(resolvedId) and tonumber(resolvedId) > 0 then
+                id = math.floor(tonumber(resolvedId))
+                channelName = resolvedName or candidates[i]
+                if IsWorldName(channelName) or IsWorldName(candidates[i]) then
+                    OTLGM_DB.settings.worldChannelDetected153 = tostring(id)
+                    OTLGM_DB.settings.worldChannelName153 = tostring(channelName or "World")
+                    OTLGM_DB.settings.worldChannelAuto153 = true
+                    OTLGM_DB.settings.worldChannel = tostring(id)
+                    return id, channelName, true
+                end
+            end
+        end
+    end
+
+    if GetChannelList then
+        local values = { GetChannelList() }
+        i = 1
+        while i <= table.getn(values) do
+            id = tonumber(values[i])
+            channelName = values[i + 1]
+            if id and id > 0 and IsWorldName(channelName) then
+                id = math.floor(id)
+                OTLGM_DB.settings.worldChannelDetected153 = tostring(id)
+                OTLGM_DB.settings.worldChannelName153 = tostring(channelName or "World")
+                OTLGM_DB.settings.worldChannelAuto153 = true
+                OTLGM_DB.settings.worldChannel = tostring(id)
+                return id, channelName, true
+            end
+            i = i + 3
+        end
+    end
+
+    OTLGM_DB.settings.worldChannelDetected153 = nil
+    OTLGM_DB.settings.worldChannelName153 = nil
+    OTLGM_DB.settings.worldChannelAuto153 = false
+    return nil, nil, false
+end
+
 function OTLGM:GetWorldChannelNumber()
     self:EnsureDB()
+    local detected = self:DetectWorldChannel153(false)
+    if detected then return detected end
+
     local text = OTLGM_DB.settings.worldChannel or "6"
     if self.ui and self.ui.channelEdit and self.ui.channelEdit.GetText then
         local liveText = self.ui.channelEdit:GetText() or ""
@@ -1166,6 +1230,14 @@ function OTLGM:GetWorldChannelNumber()
     number = math.floor(number)
     OTLGM_DB.settings.worldChannel = tostring(number)
     return number
+end
+
+function OTLGM:GetWorldChannelDisplay153()
+    local channel, name, automatic = self:DetectWorldChannel153(false)
+    if channel then return "/" .. tostring(channel), name or "World", automatic end
+    local fallback = tonumber(OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.worldChannel)
+    if fallback and fallback > 0 then return "/" .. tostring(math.floor(fallback)), "Manual", false end
+    return "Not joined", "World", false
 end
 
 function OTLGM:FormatElapsedShort(seconds)
