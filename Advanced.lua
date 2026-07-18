@@ -1,7 +1,7 @@
 -- Order of the Lion Guild Manager
--- Advanced data, safety and analytics layer for v1.5.4
+-- Advanced data, safety and analytics layer for v1.5.6
 
-OTLGM.version = "1.5.4"
+OTLGM.version = "1.5.6"
 OTLGM.schemaVersion = 6
 OTLGM.confirmScanAt = nil
 OTLGM.scanReason = nil

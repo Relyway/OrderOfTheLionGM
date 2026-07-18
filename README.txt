@@ -1,219 +1,109 @@
-Order of the Lion Guild Manager v1.5.4
+ORDER OF THE LION GUILD MANAGER v1.5.7
+OctoWoW / Vanilla interface 11200
+Created for Order of the Lion by Hikol
+Discord: mrhikol | In-game: Lucks
 
-Custom guild companion for Order of the Lion on OctoWoW.
-Client target: Vanilla / Interface 11200.
-Created by Hikol | Discord: mrhikol | In-game: Lucks
+PURPOSE
+-------
+OrderOfTheLionGM is the official guild companion for roster management, guild
+communication, leadership announcements, PvE coordination, professions,
+crafting requests, activity and officer tools.
+
+VERSION 1.5.7 HIGHLIGHTS
+------------------------
+1.5.7 focuses on reliable shared profession data, persistent icons, a cleaner
+raid planner, readable activity and predictable player interaction.
+
+CRAFTING RELIABILITY AND ICONS
+------------------------------
+- Local profession scans read recipe and reagent textures directly from the
+  open Trade Skill or Craft window.
+- Valid textures are stored on the recipe and in a bounded fallback cache.
+- RC3 transfers recipe icons, reagent icons, links, quality and materials.
+- The new manifest sync compares each profession by owner, profession, hash,
+  recipe count and data completeness before requesting a full snapshot.
+- Only missing, changed or more complete professions are transferred.
+- A complete cached profession may be relayed to a late client when the
+  original crafter is offline.
+- Incomplete snapshots never replace an existing complete profession.
+- Existing recipe data stays visible while synchronization is running.
+- Old incomplete records may need one fresh scan by a current-version client;
+  once received, their real textures remain stored instead of reverting to red
+  squares or disappearing with a cold item cache.
+
+PROFESSIONS INTERACTION
+-----------------------
+- Left-click a specific crafter to whisper that exact character.
+- Right-click a crafter for Whisper, Invite to Group and View in Roster.
+- Invite is disabled for offline crafters.
+- The general recipe menu no longer duplicates the crafter whisper action.
+- Recipe/item links, qualities, materials, filters, categories, Cooking and
+  Crafting Requests from earlier versions remain available.
+
+RAID PLANNER
+------------
+- The legacy Publish Raid Notice controls are fully hidden under the planner.
+- Multiple independent raid events remain supported.
+- Creation, editing, duplication, cancellation and permanent deletion remain
+  separate actions.
+- The editor shows a live weekday, full date and [HH:MM ST] preview.
+- Leadership may mark a raid as MAIN RAID.
+- Main raids use a distinct icon, gold treatment and pinned schedule position.
+- Home still lists the next three active raids in chronological order.
+- Cancelled raids remain visibly marked in Upcoming until their scheduled time
+  has passed, then remain available in the cancelled history.
+- Everyone may read raids and mark Seen. Ready is limited to approved raid
+  guild ranks and explains the Discord registration requirement.
+
+ANNOUNCEMENTS AND ACTIVITY
+--------------------------
+- New Announcement always opens with empty Title and Message fields.
+- Editing an existing announcement still loads its current content.
+- Guild Activity includes Important and Publications filters.
+- Raid, announcement, group, crafting, reply and reaction entries use distinct
+  prefixes and colors for faster scanning.
+
+GUILD CHAT MENUS
+----------------
+- Incoming messages no longer close the player context menu.
+- Right-clicking the same player again closes it.
+- Right-clicking another player switches the menu target.
+- Click outside, Escape, an action, or a tab change closes the menu.
+- The outside-click shield stays active even after the message list refreshes.
+
+OPTIMIZATION
+------------
+- No new permanent OnUpdate loop was added.
+- UI refreshes remain event-driven and affect only the relevant open page.
+- Manifest exchange is compact; full recipe snapshots are requested only when
+  required.
+- Network queues and packet sizes remain bounded for Vanilla addon messages.
+- Icon-cache cleanup runs through the existing heartbeat only once per six
+  hours and trims only the fallback index, never the icons stored on recipes.
+- Raid metadata travels in a separate compact packet so core raid packets stay
+  below the 250-byte addon-message limit.
 
 INSTALLATION
+------------
 1. Close World of Warcraft completely.
 2. Delete the old Interface\AddOns\OrderOfTheLionGM folder.
-3. Extract the new OrderOfTheLionGM folder into Interface\AddOns.
-4. Keep WTF / SavedVariables for the first normal upgrade test.
-5. Log in and run /otltest.
-
-IMPORTANT BASELINE NOTE
-This build is the corrective 1.5.4 assembled from the verified 1.5.3 source. The earlier experimental 1.5.4 archive is not the basis of this package.
-
-MAIN 1.5.4 CHANGES
-- Rebuilt the shared modal stack so the dark overlay remains behind each open window while its text, fields and buttons stay readable and clickable.
-- Added a visible X to every registered modal, preserved each window's normal action/Close/Cancel button, and made Escape close the top modal first.
-- Fixed Leadership Online to use the existing authoritative guild-rank system and the same rank badges used by Roster.
-- The real rank-index 0 guild leader is always shown first, while the actual in-game rank name is preserved. Renaming the rank does not break its order or icon.
-- Added announcement read state, NEW labels, clearer publication dates, preserved paragraphs and a scrolling full-post reader.
-- Reworked the announcement archive into Active and Archived views with real counts, paging and clear empty states.
-- Made Link Item and Link Recipe perform real actions: they open the addon's Guild Chat and insert the selected hyperlink into the message field without sending it automatically.
-- Added recipe-link synchronization to current RC2 profession snapshots while retaining compatibility with older data.
-- Removed the unsafe remote TargetByName action that could produce the red client message "Unknown unit.".
-- Kept the profession categories, filters, activity readers, Cooking support, World-channel detection, notifications, Guild Board and PvE features from 1.5.3.
-- Advanced SavedVariables schema to version 9 with defensive migration of existing data.
-
-LEADERSHIP ONLINE
-Leadership Online no longer depends on hard-coded rank names such as "Lucky Luck".
-
-It uses:
-- the real guild rank index supplied by the roster;
-- the existing GetMemberBadge / Roster badge mapping;
-- the actual current in-game rank label;
-- rank-index ordering before name ordering.
-
-As a result, the rank-index 0 guild leader is first and has the same icon as in Roster. Future rank renames do not change that behavior.
-
-MODAL WINDOWS
-The shared modal system covers:
-- Leadership Announcement composer;
-- full announcement reader;
-- announcement Active/Archived browser;
-- New Crafting Request;
-- Guild Activity and Crafting Activity;
-- Group Templates;
-- Notice, Copy, Import and Confirmation dialogs;
-- first-run onboarding.
-
-For every registered modal:
-- the background page is darkened by a separate overlay;
-- the modal and all child controls are raised above that overlay;
-- a visible X is available;
-- the normal semantic button remains available (Close, Cancel, OK, Start, Publish, Post, and so on);
-- Escape closes the top modal before the main addon window.
-
-HOME AND ANNOUNCEMENTS
-Home is built around:
-- Leadership Announcements;
-- Next Raid / Important PvE;
-- Leadership Online;
-- Recent Useful Activity;
-- Guild Information & Rules.
-
-Leadership can publish official posts with:
-- title and multi-line message;
-- Normal / Important / Critical importance;
-- optional Notify Members;
-- optional Pin on Home;
-- Like / Seen / Support reactions stored per post;
-- full reader, editing, archive and deletion where permissions allow.
-
-Announcement behavior in 1.5.4:
-- blank lines and paragraphs are preserved locally and across addon synchronization;
-- long unbroken text is made safe for display without altering the stored message;
-- Home shows a bounded preview while Read full post opens the full scrolling text;
-- date and time are displayed separately from the body;
-- NEW is local to each player and each announcement revision;
-- opening the full post marks that revision as read;
-- Active and Archived records are separated and paged.
-
-PROFESSIONS AND WORKING LINKS
-A profession is attached to a character only after the addon successfully scans an opened profession window. Guild notes are not the source of truth.
-
-The Recipes view retains:
-- profession-specific categories;
-- required-level filter;
-- rarity filter;
-- sort controls;
-- Online: All / Only;
-- reagent details and quantities;
-- online-first crafters;
-- full Crafting Activity.
-
-Link Item:
-1. Resolves the selected crafted item hyperlink from scanned/shared data or the local item cache.
-2. Opens the addon's Guild Chat on the Guild tab.
-3. Inserts the item hyperlink into the input field.
-4. Leaves the message unsent so the player can add text.
-
-Link Recipe:
-1. Uses the actual recipe/enchant hyperlink captured by the profession scan or received through RC2.
-2. Opens the addon's Guild Chat and inserts that hyperlink.
-3. Is visibly disabled with an explanatory tooltip when no recipe link is available.
-
-Current RC2 recipe records can carry both itemLink and recipeLink. Older RC2/RCP records still load defensively; links unavailable in older or uncached data are not fabricated.
-
-SUPPORTED CRAFTING WINDOWS
-- Alchemy
-- Blacksmithing
-- Cooking
-- Enchanting
-- Engineering
-- Jewelcrafting when exposed by the server/client
-- Leatherworking
-- Tailoring
-- Mining / Smelting
-
-PROFESSION CATEGORIES AND FILTERS
-Enchanting:
-- Weapon, Chest, Bracers, Gloves, Boots, Cloak, Shield, Legs, Other
-
-Alchemy:
-- Potions, Elixirs, Flasks, Transmutes, Oils, Other
-
-Blacksmithing:
-- Weapons, Armor, Shields, Tools, Special
-
-Tailoring:
-- Armor, Bags, Shirts, Cloth, Special
-
-Leatherworking:
-- Leather Armor, Mail Armor, Armor Kits, Bags, Special
-
-Engineering:
-- Devices, Explosives, Goggles, Scopes, Ammo, Pets, Materials
-
-Cooking:
-- Food Buffs, Restoration, Drinks, Special
-
-Jewelcrafting:
-- Gems, Rings, Necklaces, Trinkets, Materials
-
-Mining / Smelting:
-- Bars, Alloys, Special
-
-Additional controls:
-- Required level: Any, 1-20, 21-40, 41-59, 60, Unknown
-- Rarity: Any, Common, Uncommon, Rare, Epic, Unknown
-- Sort: Online, Name, Level, Rarity, Recent, Crafter count
-- Online: All / Only
-
-When item information is not cached, the recipe remains visible under Unknown instead of disappearing.
-
-FULL ACTIVITY READERS
-Home -> Recent Useful Activity -> View All opens Guild Activity with filters for:
-- All
-- Groups
-- Crafting
-- Replies
-- Reactions
-
-Professions -> Recent Crafting -> Open Full Activity opens Crafting Activity with filters for:
-- All
-- Recipes
-- Requests
-- Replies
-- Reactions
-
-Both readers are paged, capped and show time, full useful text and a destination page where available.
-
-WORLD CHANNEL DETECTION
-Recruitment resolves the joined World / World Chat / Global channel from the current client channel list instead of assuming a permanent /5 or /6.
-
-Examples:
-- AUTO /5
-- AUTO /6
-- MANUAL /6 only when automatic detection is unavailable and a saved fallback exists
-
-The send buttons use the currently resolved channel number.
-
-NOTIFICATIONS
-Each category has independent visual and sound settings:
-- Raid Alerts
-- Leadership Announcements
-- Group Finder
-- Applications / Responses
-- Crafting Requests
-- Reactions / Replies
-- Background Activity
-
-Notify Members remains an explicit leadership choice. Routine roster scans, joins and leaves remain quiet by default.
-
-GUILD CHAT / BOARD / PVE
-- Guild Chat top tabs: Guild, Officer, Guild Board.
-- Guild Board supports community posts and per-post reactions.
-- PvE Hub contains Raid Alerts and Group Finder.
-- Raid reactions are not official Discord sign-ups.
-- Official raid sign-ups remain in Discord.
-- Ctrl-clicking a remote guild-chat name opens that member in Roster instead of calling TargetByName.
-
-ESCAPE BEHAVIOR
-- In normal supported chat/search fields, Escape clears non-empty text first.
-- When a modal is open, Escape closes the top modal before the addon.
-- Every modal also has a visible X, so mouse-only closing is always available.
+3. Extract the install archive into Interface\AddOns.
+4. Confirm this path exists:
+   Interface\AddOns\OrderOfTheLionGM\OrderOfTheLionGM.toc
+5. Do not delete the WTF folder when updating.
 
 COMMANDS
-/otl - open or close the addon
-/otl scan - request a manual roster update
-/otl minimap - toggle the minimap button
-/otl wizard - reopen onboarding
-/otltest - print module and loading diagnostics
+--------
+/otl          Open or close the addon
+/otl scan     Update the guild roster
+/otl minimap  Show or hide the minimap button
+/otl wizard   Open the first-run guide
+/otl backup   Export a backup
+/otltest      Print module diagnostics
 
-VALIDATION NOTE
-The final source was loaded in exact TOC order in a mocked WoW API environment and completed 130 focused assertions. The suite covered every main page, authoritative rank ordering/badges, all registered modal layers and X buttons, multiline announcement transfer, NEW/read state, archive modes, working Item/Recipe link insertion, RC2 packet bounds/reassembly, Crafting Request validation, schema-8-to-9 migration and diagnostics.
-
-The build environment cannot launch the real OctoWoW client. Complete TEST_CHECKLIST_1.5.4.txt during the first in-game acceptance test.
+LIVE ACCEPTANCE
+---------------
+The build environment validates Lua syntax, module load order, full UI
+construction and isolated multi-client data transfer. It cannot launch the
+real OctoWoW client. Use TEST_CHECKLIST_1.5.7.txt for final in-game acceptance,
+preferably with two accounts using the current version.

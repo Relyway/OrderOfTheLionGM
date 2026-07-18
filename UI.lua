@@ -1,8 +1,8 @@
 -- Order of the Lion Guild Manager
--- Complete Blizzard-like interface for Vanilla WoW / OctoWoW - v1.5.4
+-- Complete Blizzard-like interface for Vanilla WoW / OctoWoW - v1.5.6
 
 OTLGM.fullUILoaded = true
-OTLGM.fullUIVersion = "1.5.4"
+OTLGM.fullUIVersion = "1.5.6"
 
 local NAV_DEFS = {
     { key = "home", label = "Home", section = "primary" },
@@ -1280,12 +1280,20 @@ function OTLGM:BuildHomePage(page)
     CreateBackdrop(raid, 5)
     raid:SetBackdropColor(0.035, 0.025, 0.020, 0.995)
     raid:SetBackdropBorderColor(0.52, 0.18, 0.12, 1)
-    CreateText(raid, "GameFontNormalSmall", "NEXT RAID / IMPORTANT PVE", 12, -10, 234, "LEFT")
-    self.ui.homeRaidText = CreateWrappedText(raid, "GameFontHighlightSmall", "", 12, -34, 234, 70)
-    self.ui.homeRaidButton = CreateButton(raid, nil, "Open PvE Hub", 12, -104, 116, 24, function() OTLGM:ShowPage("pve") end)
+    CreateText(raid, "GameFontNormalSmall", "NEXT RAID", 12, -9, 108, "LEFT")
+    self.ui.homeRaidText = CreateWrappedText(raid, "GameFontHighlightSmall", "", 12, -27, 234, 39)
+    CreateText(raid, "GameFontNormalSmall", "ACTIVE GROUPS", 12, -67, 108, "LEFT")
+    self.ui.homeGroupsText155 = CreateWrappedText(raid, "GameFontHighlightSmall", "", 12, -84, 234, 20)
+    self.ui.homeRaidButton = CreateButton(raid, nil, "Raid Alerts", 12, -108, 104, 22, function()
+        OTLGM_DB.settings.pveSection = "RAIDS"
+        OTLGM:ShowPage("pve")
+    end)
     SetButtonActionStyle(self.ui.homeRaidButton, "raid")
-    self.ui.homeRaidDiscord = CreateText(raid, "GameFontNormalSmall", "Sign-ups: Discord", 136, -111, 110, "RIGHT")
-    self.ui.homeRaidDiscord:SetTextColor(0.55, 0.55, 0.52)
+    self.ui.homeGroupsButton155 = CreateButton(raid, nil, "Group Finder", 124, -108, 122, 22, function()
+        OTLGM_DB.settings.pveSection = "GROUPS"
+        OTLGM:ShowPage("pve")
+    end)
+    SetButtonActionStyle(self.ui.homeGroupsButton155, "utility")
 
     local leaders = CreateFrame("Frame", nil, page)
     leaders:SetPoint("TOPLEFT", page, "TOPLEFT", 460, -204)
@@ -1356,6 +1364,30 @@ function OTLGM:BuildHomePage(page)
     SetButtonActionStyle(self.ui.homeGuildInfoButton, "primary")
 end
 
+function OTLGM:RefreshHomePveSummary155()
+    if not self.ui or not self.ui.homeRaidText then return end
+    local pve = self.GetPveSummary and self:GetPveSummary() or { requests = 0, pending = 0, raid = nil }
+    if pve.raid then
+        self.ui.homeRaidText:SetText(self.colors.red .. HomeShort152(pve.raid.name or "Guild Raid", 30) .. self.colors.reset .. "\n" ..
+            (pve.raid.serverTime or "Time TBA") .. "  " .. (self.GetPveRaidRemainingText and self:GetPveRaidRemainingText(pve.raid) or ""))
+    else
+        self.ui.homeRaidText:SetText(self.colors.grey .. "No raid scheduled" .. self.colors.reset .. "\nSign-ups remain in Discord")
+    end
+    if self.ui.homeGroupsText155 then
+        local requests = self.GetPveRequests and self:GetPveRequests() or {}
+        local first = requests[1]
+        if first then
+            local need = {}
+            if (tonumber(first.needTank) or 0) > 0 then table.insert(need, "T" .. tostring(first.needTank)) end
+            if (tonumber(first.needHeal) or 0) > 0 then table.insert(need, "H" .. tostring(first.needHeal)) end
+            if (tonumber(first.needDps) or 0) > 0 then table.insert(need, "D" .. tostring(first.needDps)) end
+            self.ui.homeGroupsText155:SetText(self.colors.green .. tostring(table.getn(requests)) .. " open" .. self.colors.reset .. "  " .. HomeShort152(first.activity or "Group", 18) .. (table.getn(need) > 0 and ("  [" .. table.concat(need, " ") .. "]") or ""))
+        else
+            self.ui.homeGroupsText155:SetText(self.colors.grey .. "No open groups" .. self.colors.reset .. ((pve.pending or 0) > 0 and ("  •  " .. tostring(pve.pending) .. " pending") or ""))
+        end
+    end
+end
+
 function OTLGM:RefreshHomePage()
     if not self.ui or not self.ui.homeAnnouncementRows then return end
     local announcements = self.GetAnnouncementList152 and self:GetAnnouncementList152(false) or {}
@@ -1391,12 +1423,7 @@ function OTLGM:RefreshHomePage()
     for ai154 = 1, table.getn(allAnnouncements154) do if allAnnouncements154[ai154].archived then archivedCount154 = archivedCount154 + 1 end end
     SetButtonText(self.ui.homeAnnouncementArchiveButton, "Announcements  " .. tostring(table.getn(allAnnouncements154)) .. "  |  Archived " .. tostring(archivedCount154))
 
-    local pve = self.GetPveSummary and self:GetPveSummary() or { requests = 0, pending = 0, raid = nil }
-    if pve.raid then
-        self.ui.homeRaidText:SetText(self.colors.red .. (pve.raid.name or "Guild Raid") .. self.colors.reset .. "\n" .. (pve.raid.serverTime or "Time TBA") .. "  " .. (self.GetPveRaidRemainingText and self:GetPveRaidRemainingText(pve.raid) or "") .. "\n" .. tostring(pve.requests or 0) .. " open group(s)")
-    else
-        self.ui.homeRaidText:SetText("No active raid notice.\n" .. tostring(pve.requests or 0) .. " open group(s)  |  " .. tostring(pve.pending or 0) .. " pending application(s).")
-    end
+    self:RefreshHomePveSummary155()
 
     local leaders = self:GetLeadershipOnline() or {}
     for i = 1, 4 do
@@ -4348,6 +4375,8 @@ function OTLGM:ShowGuildBoardChatLayout152(showBoard)
     for i = 1, table.getn(normalFrames) do
         if normalFrames[i] then if showBoard then normalFrames[i]:Hide() else normalFrames[i]:Show() end end
     end
+    -- Officer Online belongs only to the Officer chat layout. It must never remain above Guild Board.
+    if self.ui.officerOnlinePanel and showBoard then self.ui.officerOnlinePanel:Hide() end
     if self.ui.guildBoardChatPanel152 then if showBoard then self.ui.guildBoardChatPanel152:Show() else self.ui.guildBoardChatPanel152:Hide() end end
 end
 
@@ -4826,8 +4855,25 @@ function OTLGM:BuildPvePage(page)
     self.ui.pveRaidName = CreateText(raidCard, "GameFontNormalLarge", "No active raid notice", 58, -34, 376, "LEFT")
     self.ui.pveRaidTime = CreateText(raidCard, "GameFontNormal", "", 58, -61, 376, "LEFT")
     self.ui.pveRaidLocation = CreateText(raidCard, "GameFontNormalSmall", "", 58, -84, 376, "LEFT")
-    self.ui.pveRaidNote = CreateWrappedText(raidCard, "GameFontHighlightSmall", "", 440, -34, 260, 58)
-    self.ui.pveRaidOrganizer = CreateText(raidCard, "GameFontNormalSmall", "", 440, -94, 260, "LEFT")
+    self.ui.pveRaidNote = CreateWrappedText(raidCard, "GameFontHighlightSmall", "", 58, -101, 370, 16)
+    self.ui.pveRaidOrganizer = CreateText(raidCard, "GameFontNormalSmall", "", 440, -10, 260, "LEFT")
+    self.ui.pveRaidOrganizer:SetTextColor(0.68, 0.68, 0.66)
+    self.ui.pveRaidUpcomingButtons155 = {}
+    local upcomingIndex155
+    for upcomingIndex155 = 1, 3 do
+        local capturedUpcoming155 = upcomingIndex155
+        local upcomingButton155 = CreateButton(raidCard, nil, "", 440, -28 - ((upcomingIndex155 - 1) * 27), 260, 24, function()
+            local target = OTLGM.ui.pveRaidUpcomingButtons155[capturedUpcoming155]
+            if target and target.raidData155 then
+                OTLGM.ui.pveRaidSelectedId155 = target.raidData155.id
+                OTLGM:PopulateRaidEditor155(target.raidData155)
+                OTLGM:RefreshPveRaidsPanel()
+            end
+        end)
+        SetButtonActionStyle(upcomingButton155, "utility")
+        upcomingButton155:Hide()
+        self.ui.pveRaidUpcomingButtons155[upcomingIndex155] = upcomingButton155
+    end
 
     local raidEditor = CreateFrame("Frame", nil, raids)
     raidEditor:SetPoint("TOPLEFT", raids, "TOPLEFT", 0, -132)
@@ -4847,56 +4893,94 @@ function OTLGM:BuildPvePage(page)
     CreateText(raidEditor, "GameFontNormalSmall", "LOCATION / MEETING POINT", 330, -42, 230, "LEFT")
     self.ui.pveRaidLocationEdit = CreateEditBox(raidEditor, "OTLGM_PveRaidLocation", 330, -58, 374, 30, false)
     self.ui.pveRaidLocationEdit:SetMaxLetters(32)
-    CreateText(raidEditor, "GameFontNormalSmall", "STARTS IN MINUTES", 14, -98, 160, "LEFT")
-    self.ui.pveRaidMinutesEdit = CreateEditBox(raidEditor, "OTLGM_PveRaidMinutes", 14, -114, 90, 30, false)
-    self.ui.pveRaidMinutesEdit:SetMaxLetters(5)
-    self.ui.pveRaidMinutesEdit:SetText("60")
-    local quickMinutes = { {60, "60m"}, {30, "30m"}, {15, "15m"}, {0, "Now"} }
-    self.ui.pveRaidMinuteButtons = {}
+    CreateText(raidEditor, "GameFontNormalSmall", "DAY / START TIME (SERVER TIME)", 14, -98, 250, "LEFT")
+    self.ui.pveRaidDayEdit155 = CreateEditBox(raidEditor, "OTLGM_PveRaidDay155", 14, -114, 42, 30, false)
+    self.ui.pveRaidDayEdit155:SetMaxLetters(2)
+    self.ui.pveRaidDayEdit155:SetText("0")
+    self.ui.pveRaidDayButtons155 = {}
+    local dayOptions155 = { {0, "Today"}, {1, "Tomorrow"}, {2, "+2d"} }
     local quickIndex
-    for quickIndex = 1, table.getn(quickMinutes) do
-        local capturedMinutes = quickMinutes[quickIndex][1]
-        self.ui.pveRaidMinuteButtons[quickIndex] = CreateButton(raidEditor, nil, quickMinutes[quickIndex][2], 112 + ((quickIndex - 1) * 58), -114, 52, 30, function()
-            OTLGM.ui.pveRaidMinutesEdit:SetText(tostring(capturedMinutes))
+    for quickIndex = 1, table.getn(dayOptions155) do
+        local capturedDay155 = dayOptions155[quickIndex][1]
+        self.ui.pveRaidDayButtons155[quickIndex] = CreateButton(raidEditor, nil, dayOptions155[quickIndex][2], 62 + ((quickIndex - 1) * 68), -114, 64, 30, function()
+            OTLGM.ui.pveRaidDayEdit155:SetText(tostring(capturedDay155))
         end)
     end
-    CreateText(raidEditor, "GameFontNormalSmall", "NOTE", 350, -98, 70, "LEFT")
-    self.ui.pveRaidNoteEdit = CreateEditBox(raidEditor, "OTLGM_PveRaidNote", 350, -114, 354, 54, true)
-    self.ui.pveRaidNoteEdit:SetMaxLetters(72)
+    self.ui.pveRaidHourEdit155 = CreateEditBox(raidEditor, "OTLGM_PveRaidHour155", 270, -114, 42, 30, false)
+    self.ui.pveRaidHourEdit155:SetMaxLetters(2)
+    CreateText(raidEditor, "GameFontNormalLarge", ":", 315, -118, 10, "CENTER")
+    self.ui.pveRaidMinuteEdit155 = CreateEditBox(raidEditor, "OTLGM_PveRaidMinute155", 328, -114, 42, 30, false)
+    self.ui.pveRaidMinuteEdit155:SetMaxLetters(2)
+    local defaultHour155, defaultMinute155
+    if GetGameTime then defaultHour155, defaultMinute155 = GetGameTime() end
+    defaultHour155 = tonumber(defaultHour155) or tonumber(date("%H", OTLGM:Now())) or 20
+    defaultMinute155 = tonumber(defaultMinute155) or tonumber(date("%M", OTLGM:Now())) or 0
+    defaultHour155 = math.mod(defaultHour155 + 1, 24)
+    self.ui.pveRaidHourEdit155:SetText(string.format("%02d", defaultHour155))
+    self.ui.pveRaidMinuteEdit155:SetText(string.format("%02d", defaultMinute155))
+    self.ui.pveRaidRecurring155 = "ONCE"
+    self.ui.pveRaidRecurringButton155 = CreateButton(raidEditor, nil, "Once", 382, -114, 92, 30, function()
+        OTLGM.ui.pveRaidRecurring155 = OTLGM.ui.pveRaidRecurring155 == "WEEKLY" and "ONCE" or "WEEKLY"
+        SetButtonText(OTLGM.ui.pveRaidRecurringButton155, OTLGM.ui.pveRaidRecurring155 == "WEEKLY" and "Weekly" or "Once")
+        SetButtonSelected(OTLGM.ui.pveRaidRecurringButton155, OTLGM.ui.pveRaidRecurring155 == "WEEKLY")
+    end)
+    CreateText(raidEditor, "GameFontNormalSmall", "REMIND MIN", 486, -98, 88, "LEFT")
+    self.ui.pveRaidReminderEdit155 = CreateEditBox(raidEditor, "OTLGM_PveRaidReminder155", 486, -114, 54, 30, false)
+    self.ui.pveRaidReminderEdit155:SetMaxLetters(4)
+    self.ui.pveRaidReminderEdit155:SetText("60")
+    CreateText(raidEditor, "GameFontNormalSmall", "before start", 548, -122, 100, "LEFT")
 
-    self.ui.pveRaidPublishButton = CreateButton(raidEditor, nil, "Publish / Update", 14, -180, 142, 32, function()
-        local ok, result = OTLGM:PublishPveRaid(OTLGM.ui.pveRaidNameEdit:GetText(), OTLGM.ui.pveRaidLocationEdit:GetText(), OTLGM.ui.pveRaidMinutesEdit:GetText(), OTLGM.ui.pveRaidNoteEdit:GetText())
-        if ok then OTLGM:SetStatus("Raid notice published to online addon users.") OTLGM:RefreshPvePage()
-        else OTLGM:ShowNotice("Raid Notice", result or "Could not publish the raid notice.") end
+    CreateText(raidEditor, "GameFontNormalSmall", "NOTE", 14, -154, 70, "LEFT")
+    self.ui.pveRaidNoteEdit = CreateEditBox(raidEditor, "OTLGM_PveRaidNote", 14, -170, 690, 42, true)
+    self.ui.pveRaidNoteEdit:SetMaxLetters(48)
+
+    self.ui.pveRaidPublishButton = CreateButton(raidEditor, nil, "Save Raid", 14, -222, 118, 32, function()
+        local ok, result = OTLGM:PublishPveRaidEvent155(
+            OTLGM.ui.pveRaidNameEdit:GetText(), OTLGM.ui.pveRaidLocationEdit:GetText(), OTLGM.ui.pveRaidDayEdit155:GetText(),
+            OTLGM.ui.pveRaidHourEdit155:GetText(), OTLGM.ui.pveRaidMinuteEdit155:GetText(), OTLGM.ui.pveRaidNoteEdit:GetText(),
+            OTLGM.ui.pveRaidRecurring155, OTLGM.ui.pveRaidReminderEdit155:GetText(), OTLGM.ui.pveRaidSelectedId155)
+        if ok then
+            OTLGM.ui.pveRaidSelectedId155 = result and result.id or nil
+            OTLGM:SetStatus("Raid event saved and shared with online addon users.")
+            OTLGM:RefreshPvePage()
+        else OTLGM:ShowNotice("Raid Event", result or "Could not save the raid event.") end
     end)
     SetButtonActionStyle(self.ui.pveRaidPublishButton, "confirm")
-    self.ui.pveRaidGuildPostButton = CreateButton(raidEditor, nil, "Post to /g", 166, -180, 112, 32, function()
-        if not OTLGM:PostPveRaidToGuildChat() then OTLGM:ShowNotice("Raid Notice", "Publish a raid notice first.") end
+    self.ui.pveRaidNewButton155 = CreateButton(raidEditor, nil, "New Event", 140, -222, 104, 32, function()
+        OTLGM.ui.pveRaidSelectedId155 = nil
+        OTLGM:PopulateRaidEditor155(nil)
+        OTLGM:RefreshPveRaidsPanel()
     end)
-    self.ui.pveRaidClearButton = CreateButton(raidEditor, nil, "Clear Notice", 288, -180, 112, 32, function()
-        OTLGM:ShowConfirm("Clear Raid Notice", "Remove the active raid notice from connected addon users?", "Clear", function() OTLGM:ClearPveRaid() end)
+    self.ui.pveRaidGuildPostButton = CreateButton(raidEditor, nil, "Post to /g", 252, -222, 104, 32, function()
+        if not OTLGM:PostPveRaidToGuildChat(OTLGM.ui.pveRaidSelectedId155) then OTLGM:ShowNotice("Raid Event", "Select or publish a raid event first.") end
     end)
-
-    CreateText(raidEditor, "GameFontNormalSmall", "QUICK ADDON NOTIFICATIONS", 14, -226, 250, "LEFT")
-    local reminderData = { {60, "Raid in 1h"}, {30, "Raid in 30m"}, {15, "Raid in 15m"}, {0, "Starting now"} }
-    self.ui.pveRaidReminderButtons = {}
-    for quickIndex = 1, table.getn(reminderData) do
-        local capturedMinutes = reminderData[quickIndex][1]
-        self.ui.pveRaidReminderButtons[quickIndex] = CreateButton(raidEditor, nil, reminderData[quickIndex][2], 14 + ((quickIndex - 1) * 132), -244, 122, 30, function()
-            if not OTLGM:SendPveRaidNotice(capturedMinutes) then OTLGM:ShowNotice("Raid Notice", "Publish a raid notice first.") end
+    self.ui.pveRaidReminderNow155 = CreateButton(raidEditor, nil, "Remind Now", 364, -222, 104, 32, function()
+        if not OTLGM:SendPveRaidNotice(0, OTLGM.ui.pveRaidSelectedId155) then OTLGM:ShowNotice("Raid Event", "Select or publish a raid event first.") end
+    end)
+    SetButtonActionStyle(self.ui.pveRaidReminderNow155, "utility")
+    self.ui.pveRaidClearButton = CreateButton(raidEditor, nil, "Remove", 476, -222, 104, 32, function()
+        local id = OTLGM.ui.pveRaidSelectedId155
+        if not id then OTLGM:ShowNotice("Raid Event", "Select an event first.") return end
+        OTLGM:ShowConfirm("Remove Raid Event", "Remove this raid event from connected addon users?", "Remove", function()
+            OTLGM:ClearPveRaid(id)
+            OTLGM.ui.pveRaidSelectedId155 = nil
+            OTLGM:PopulateRaidEditor155(nil)
         end)
-        SetButtonActionStyle(self.ui.pveRaidReminderButtons[quickIndex], "utility")
-    end
+    end)
+    SetButtonActionStyle(self.ui.pveRaidClearButton, "danger")
+    self.ui.pveRaidMinutesEdit = self.ui.pveRaidDayEdit155
+    self.ui.pveRaidMinuteButtons = self.ui.pveRaidDayButtons155
+    self.ui.pveRaidReminderButtons = {}
 
     self.ui.pveRaidMemberPanel = CreateFrame("Frame", nil, raids)
     self.ui.pveRaidMemberPanel:SetPoint("TOPLEFT", raids, "TOPLEFT", 0, -132)
     self.ui.pveRaidMemberPanel:SetWidth(718)
-    self.ui.pveRaidMemberPanel:SetHeight(118)
+    self.ui.pveRaidMemberPanel:SetHeight(184)
     CreateBackdrop(self.ui.pveRaidMemberPanel, 5)
     self.ui.pveRaidMemberPanel:SetBackdropColor(0.030, 0.026, 0.020, 0.99)
     self.ui.pveRaidMemberPanel:SetBackdropBorderColor(0.38, 0.28, 0.15, 1)
-    CreateText(self.ui.pveRaidMemberPanel, "GameFontNormal", "Raid Information", 14, -14, 260, "LEFT")
-    self.ui.pveRaidMemberInfoText = CreateWrappedText(self.ui.pveRaidMemberPanel, "GameFontNormalSmall", "", 14, -42, 684, 60)
+    CreateText(self.ui.pveRaidMemberPanel, "GameFontNormalLarge", "Raid Information", 14, -14, 300, "LEFT")
+    self.ui.pveRaidMemberInfoText = CreateWrappedText(self.ui.pveRaidMemberPanel, "GameFontNormal", "", 14, -46, 684, 122)
     self.ui.pveRaidMemberInfoText:SetTextColor(0.72, 0.72, 0.72)
 
     -- GROUP FINDER
@@ -5216,20 +5300,62 @@ function OTLGM:GetPveBoardPostByID(id)
     return nil
 end
 
+function OTLGM:PopulateRaidEditor155(raid)
+    if not self.ui or not self.ui.pveRaidNameEdit then return end
+    self.ui.pveRaidEditorLoadedId155 = raid and raid.id or nil
+    self.ui.pveRaidNameEdit:SetText(raid and (raid.name or "") or "")
+    self.ui.pveRaidLocationEdit:SetText(raid and (raid.location or "") or "")
+    self.ui.pveRaidNoteEdit:SetText(raid and (raid.note or "") or "")
+    local dayOffset = 0
+    if raid and raid.startTs then dayOffset = math.max(0, math.min(28, math.floor(((raid.startTs - self:Now()) + 86399) / 86400))) end
+    if self.ui.pveRaidDayEdit155 then self.ui.pveRaidDayEdit155:SetText(tostring(dayOffset)) end
+    local hour = raid and tonumber(raid.stHour) or nil
+    local minute = raid and tonumber(raid.stMinute) or nil
+    if not hour and raid then
+        local _, _, parsedHour, parsedMinute = string.find(raid.serverTime or "", "(%d%d):(%d%d)")
+        hour = tonumber(parsedHour); minute = tonumber(parsedMinute)
+    end
+    if not hour then if GetGameTime then hour, minute = GetGameTime() end hour = math.mod((tonumber(hour) or 19) + 1, 24) end
+    if self.ui.pveRaidHourEdit155 then self.ui.pveRaidHourEdit155:SetText(string.format("%02d", hour or 20)) end
+    if self.ui.pveRaidMinuteEdit155 then self.ui.pveRaidMinuteEdit155:SetText(string.format("%02d", minute or 0)) end
+    self.ui.pveRaidRecurring155 = raid and raid.recurring == "WEEKLY" and "WEEKLY" or "ONCE"
+    if self.ui.pveRaidRecurringButton155 then
+        SetButtonText(self.ui.pveRaidRecurringButton155, self.ui.pveRaidRecurring155 == "WEEKLY" and "Weekly" or "Once")
+        SetButtonSelected(self.ui.pveRaidRecurringButton155, self.ui.pveRaidRecurring155 == "WEEKLY")
+    end
+    if self.ui.pveRaidReminderEdit155 then self.ui.pveRaidReminderEdit155:SetText(tostring(raid and raid.reminderMinutes or 60)) end
+end
+
 function OTLGM:RefreshPveRaidsPanel()
-    local raid = self:GetPveActiveRaid()
+    local raids = self.GetPveRaids and self:GetPveRaids() or {}
+    local selected
+    local i
+    for i = 1, table.getn(raids) do if raids[i].id == self.ui.pveRaidSelectedId155 then selected = raids[i] break end end
+    if not selected then selected = raids[1] self.ui.pveRaidSelectedId155 = selected and selected.id or nil end
+    local raid = selected or self:GetPveActiveRaid()
     if raid then
         self.ui.pveRaidName:SetText(self.colors.gold .. (raid.name or "Guild Raid") .. self.colors.reset)
-        self.ui.pveRaidTime:SetText(self.colors.green .. (raid.serverTime or "Time TBA") .. self.colors.reset .. "  -  " .. self:GetPveRaidRemainingText(raid))
+        local timeLabel = self.GetPveRaidServerTime155 and self:GetPveRaidServerTime155(raid) or (raid.serverTime or "Time TBA")
+        self.ui.pveRaidTime:SetText(self.colors.green .. timeLabel .. self.colors.reset .. "  -  " .. self:GetPveRaidRemainingText(raid))
         self.ui.pveRaidLocation:SetText((raid.location and raid.location ~= "" and ("Meeting: " .. raid.location) or "Meeting point not specified"))
-        self.ui.pveRaidNote:SetText(raid.note and raid.note ~= "" and raid.note or "No additional note. Sign-ups remain in Discord.")
-        self.ui.pveRaidOrganizer:SetText("Published by " .. self:GetClassColor((self:GetMember(raid.author) or {}).class) .. (raid.author or "Unknown") .. self.colors.reset)
+        self.ui.pveRaidNote:SetText(raid.note and raid.note ~= "" and raid.note or "Sign-ups remain in Discord.")
     else
-        self.ui.pveRaidName:SetText(self.colors.grey .. "No active raid notice" .. self.colors.reset)
-        self.ui.pveRaidTime:SetText("Leadership can publish the next raid time here.")
-        self.ui.pveRaidLocation:SetText("Sign-ups remain strictly in Discord.")
-        self.ui.pveRaidNote:SetText("Connected addon users will receive the announcement and lightweight local reminders.")
-        self.ui.pveRaidOrganizer:SetText("")
+        self.ui.pveRaidName:SetText(self.colors.grey .. "No raid events scheduled" .. self.colors.reset)
+        self.ui.pveRaidTime:SetText("Leadership can publish an exact Server Time below.")
+        self.ui.pveRaidLocation:SetText("One-time and weekly events are supported.")
+        self.ui.pveRaidNote:SetText("Sign-ups remain in Discord.")
+    end
+    self.ui.pveRaidOrganizer:SetText("UPCOMING RAIDS  •  " .. tostring(table.getn(raids)))
+    for i = 1, table.getn(self.ui.pveRaidUpcomingButtons155 or {}) do
+        local button = self.ui.pveRaidUpcomingButtons155[i]
+        local event = raids[i]
+        if event then
+            button.raidData155 = event
+            local label = HomeShort152(event.name or "Raid", 19) .. "  •  " .. (self.GetPveRaidServerTime155 and self:GetPveRaidServerTime155(event) or (event.serverTime or "TBA"))
+            SetButtonText(button, label)
+            SetButtonSelected(button, selected and selected.id == event.id)
+            button:Show()
+        else button.raidData155 = nil button:Hide() end
     end
 
     local officer = self:IsOfficerMode()
@@ -5237,24 +5363,23 @@ function OTLGM:RefreshPveRaidsPanel()
     if officer then
         self.ui.pveRaidEditor:Show()
         if self.ui.pveRaidMemberPanel then self.ui.pveRaidMemberPanel:Hide() end
+        if self.ui.pveRaidEditorLoadedId155 ~= (selected and selected.id or nil) then self:PopulateRaidEditor155(selected) end
     else
         self.ui.pveRaidEditor:Hide()
         if self.ui.pveRaidMemberPanel then self.ui.pveRaidMemberPanel:Show() end
         local eligible = self.IsRaidNoticeEligible and self:IsRaidNoticeEligible()
-        if raid then
-            self.ui.pveRaidMemberInfoText:SetText((eligible and (self.colors.green .. "Raid alerts are enabled for your Raider rank." .. self.colors.reset) or (self.colors.grey .. "Your current rank does not receive raid popup reminders." .. self.colors.reset)) .. "\nOfficial sign-ups remain in Discord. Use this page for the current time, meeting point and raid notice only.")
+        if eligible then
+            self.ui.pveRaidMemberInfoText:SetText(self.colors.green .. "RAID NOTIFICATIONS ENABLED" .. self.colors.reset .. "\nYou will receive reminders for published raid events. Official sign-ups remain in Discord.")
         else
-            self.ui.pveRaidMemberInfoText:SetText("No raid is currently published. Official raid sign-ups remain in Discord.")
+            self.ui.pveRaidMemberInfoText:SetText(self.colors.red .. "RAID NOTIFICATIONS LOCKED" .. self.colors.reset .. "\nYour current guild role does not receive raid popup reminders.\n\nJoin the Order of the Lion Discord, register using your in-game character name, and receive an approved raid role. You can still read every raid event on this page.")
         end
     end
-    local controls = { self.ui.pveRaidNameEdit, self.ui.pveRaidLocationEdit, self.ui.pveRaidMinutesEdit, self.ui.pveRaidNoteEdit, self.ui.pveRaidPublishButton, self.ui.pveRaidGuildPostButton, self.ui.pveRaidClearButton }
-    local i
-    for i = 1, table.getn(self.ui.pveRaidMinuteButtons or {}) do table.insert(controls, self.ui.pveRaidMinuteButtons[i]) end
-    for i = 1, table.getn(self.ui.pveRaidReminderButtons or {}) do table.insert(controls, self.ui.pveRaidReminderButtons[i]) end
-    for i = 1, table.getn(controls) do if officer then controls[i]:Show() else controls[i]:Hide() end end
-    SetButtonEnabled(self.ui.pveRaidGuildPostButton, raid ~= nil, "Publish a raid notice first.")
-    SetButtonEnabled(self.ui.pveRaidClearButton, raid ~= nil, "There is no active raid notice.")
-    for i = 1, table.getn(self.ui.pveRaidReminderButtons or {}) do SetButtonEnabled(self.ui.pveRaidReminderButtons[i], raid ~= nil, "Publish a raid notice first.") end
+    local controls = { self.ui.pveRaidNameEdit, self.ui.pveRaidLocationEdit, self.ui.pveRaidDayEdit155, self.ui.pveRaidHourEdit155, self.ui.pveRaidMinuteEdit155, self.ui.pveRaidRecurringButton155, self.ui.pveRaidReminderEdit155, self.ui.pveRaidNoteEdit, self.ui.pveRaidPublishButton, self.ui.pveRaidNewButton155, self.ui.pveRaidGuildPostButton, self.ui.pveRaidReminderNow155, self.ui.pveRaidClearButton }
+    for i = 1, table.getn(self.ui.pveRaidDayButtons155 or {}) do table.insert(controls, self.ui.pveRaidDayButtons155[i]) end
+    for i = 1, table.getn(controls) do if controls[i] then if officer then controls[i]:Show() else controls[i]:Hide() end end end
+    SetButtonEnabled(self.ui.pveRaidGuildPostButton, selected ~= nil, "Select or publish a raid event first.")
+    SetButtonEnabled(self.ui.pveRaidReminderNow155, selected ~= nil, "Select or publish a raid event first.")
+    SetButtonEnabled(self.ui.pveRaidClearButton, selected ~= nil, "Select a raid event first.")
 end
 
 function OTLGM:RefreshPveGroupsPanel()
@@ -5324,7 +5449,9 @@ function OTLGM:RefreshPveGroupsPanel()
 
     if own then
         local applications = self:GetPveApplications(selected.id, true)
-        self.ui.pveRequestSelectedText:SetText(selectedHeader .. "\n" .. tostring(table.getn(applications)) .. " pending join request(s). Select a candidate below.")
+        local filled = tonumber(selected.current) or 1
+        local maximumSize = tonumber(selected.maxSize) or 5
+        self.ui.pveRequestSelectedText:SetText(selectedHeader .. "\nFilled " .. tostring(filled) .. "/" .. tostring(maximumSize) .. "  •  " .. tostring(table.getn(applications)) .. " pending request(s). Select a candidate below.")
         local validSelected = false
         for i = 1, table.getn(self.ui.pveApplicantButtons or {}) do
             local app = applications[i]
@@ -5353,20 +5480,40 @@ function OTLGM:RefreshPveGroupsPanel()
         self.ui.pveApplicantDeclineButton:Show()
         self.ui.pveApplicantWhisperButton:Show()
         self.ui.pveRequestDeleteButton:Show()
-        SetButtonEnabled(self.ui.pveApplicantAcceptButton, self.ui.pveSelectedApplication ~= nil, "Select a candidate first.")
+        local canAccept, acceptReason = false, "Select a candidate first."
+        if selectedApplication and self.CanAcceptPveApplication155 then canAccept, acceptReason = self:CanAcceptPveApplication155(selectedApplication) end
+        SetButtonEnabled(self.ui.pveApplicantAcceptButton, selectedApplication ~= nil and canAccept, acceptReason or "This role is already filled.")
         SetButtonEnabled(self.ui.pveApplicantDeclineButton, self.ui.pveSelectedApplication ~= nil, "Select a candidate first.")
         SetButtonEnabled(self.ui.pveApplicantWhisperButton, self.ui.pveSelectedApplication ~= nil, "Select a candidate first.")
         SetButtonEnabled(self.ui.pveRequestDeleteButton, true)
     else
         local ownApplication = self:GetOwnPveApplication(selected.id)
         local appStatus = ownApplication and ownApplication.status or nil
-        local statusLine = "Leader role: " .. PveRoleLabel(selected.role) .. "   Open: T " .. tostring(selected.needTank or 0) .. " / H " .. tostring(selected.needHeal or 0) .. " / D " .. tostring(selected.needDps or 0)
-        if appStatus then statusLine = statusLine .. "   Your request: " .. appStatus end
+        local filled = tonumber(selected.current) or 1
+        local maximumSize = tonumber(selected.maxSize) or 5
+        local statusLine = "Filled " .. tostring(filled) .. "/" .. tostring(maximumSize) .. "  •  Needs: T " .. tostring(selected.needTank or 0) .. " / H " .. tostring(selected.needHeal or 0) .. " / D " .. tostring(selected.needDps or 0)
+        if appStatus then statusLine = statusLine .. "  •  Your request: " .. appStatus end
         self.ui.pveRequestSelectedText:SetText(selectedHeader .. "\n" .. statusLine)
         for i = 1, table.getn(self.ui.pveJoinControls or {}) do self.ui.pveJoinControls[i]:Show() end
         self.ui.pveRequestDeleteButton:Hide()
-        local canJoin = status == "OPEN" and (not ownApplication or ownApplication.status == "DECLINED" or ownApplication.status == "CANCELLED")
-        SetButtonEnabled(self.ui.pveRequestJoinButton, canJoin, appStatus == "PENDING" and "Your request is waiting for the leader." or (appStatus == "ACCEPTED" and "You were already accepted." or "This group is not open."))
+        local roleAvailability = {
+            TANK = (tonumber(selected.needTank) or 0) > 0,
+            HEAL = (tonumber(selected.needHeal) or 0) > 0,
+            DPS = (tonumber(selected.needDps) or 0) > 0,
+        }
+        roleAvailability.ANY = roleAvailability.TANK or roleAvailability.HEAL or roleAvailability.DPS
+        for key, button in pairs(self.ui.pveJoinRoleButtons or {}) do
+            SetButtonEnabled(button, roleAvailability[key], "This group no longer needs that role.")
+        end
+        if not roleAvailability[joinRole] then
+            if roleAvailability.TANK then joinRole = "TANK" elseif roleAvailability.HEAL then joinRole = "HEAL" elseif roleAvailability.DPS then joinRole = "DPS" else joinRole = "ANY" end
+            OTLGM_DB.settings.pveJoinRole = joinRole
+            for key, button in pairs(self.ui.pveJoinRoleButtons or {}) do SetButtonSelected(button, key == joinRole) end
+        end
+        local canJoin = status == "OPEN" and roleAvailability[joinRole] and (not ownApplication or ownApplication.status == "DECLINED" or ownApplication.status == "CANCELLED")
+        local joinReason = "This group is not open or no slot remains for that role."
+        if appStatus == "PENDING" then joinReason = "Your request is waiting for the leader." elseif appStatus == "ACCEPTED" then joinReason = "You were already accepted." end
+        SetButtonEnabled(self.ui.pveRequestJoinButton, canJoin, joinReason)
         SetButtonEnabled(self.ui.pveRequestCancelAppButton, ownApplication and ownApplication.status == "PENDING", "There is no pending request to cancel.")
         SetButtonEnabled(self.ui.pveRequestWhisperButton, true)
     end

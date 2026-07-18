@@ -1,15 +1,88 @@
-OrderOfTheLionGM 1.5.4
+OrderOfTheLionGM 1.5.7
+=========================
 
-- Rebuilt the modal layer so overlays always stay below modal controls.
-- Added a visible X and Escape support to every registered modal window.
-- Fixed Leadership Online to use authoritative guild rank indexes and the same icons as Roster.
-- Guild leader (rank index 0) is always listed first, independent of rank naming.
-- Added announcement read state, NEW labels, clearer dates, paragraph preservation and scrolling full posts.
-- Reworked Announcements into Active and Archived views with real empty states.
-- Made Link Item and Link Recipe insert the selected link into the addon Guild Chat draft.
-- Recipe links are now included in profession synchronization for updated clients.
-- Removed unsafe remote TargetByName calls that could print Unknown unit.
-- Added Crafting Request validation and retained all profession filters/activity improvements.
+CRAFTING ICONS AND RELIABILITY
+- Added persistent bounded caches for recipe and reagent textures.
+- Local scans prefer direct Trade Skill/Craft window texture APIs.
+- RC3 preserves recipe icons, reagent icons, links, quality and materials.
+- Added manifest sync comparing owner/profession/hash/count and completeness.
+- Requests only missing, changed or more complete profession snapshots.
+- Allows targeted relay of a complete cached profession when its owner is offline.
+- Existing complete data remains visible until a replacement snapshot is whole.
+- Same-hash incomplete icon/material data can upgrade from a better source.
+
+PROFESSIONS INTERACTION
+- Left-click a crafter to whisper that exact character.
+- Right-click a crafter for Whisper, Invite to Group and View in Roster.
+- Invite is disabled while the crafter is offline.
+- Removed duplicated generic crafter-whisper action.
+
+RAID PLANNER
+- Fully hides legacy raid publication controls and text.
+- Added live weekday/full-date/[HH:MM ST] preview.
+- Added distinct Main Raid icon, styling and pinned planner position.
+- Home lists up to three active raids chronologically and marks Main Raids.
+- Cancelled events remain visibly marked in Upcoming until scheduled time.
+- Seen remains available to all; Ready requires approved raid rank.
+- Main/cancellation metadata travels in a separate bounded packet.
+
+ANNOUNCEMENTS / ACTIVITY / CHAT
+- New Announcement always opens with an empty form.
+- Added Important and Publications activity filters.
+- Added colored RAID/POST/GROUP/CRAFT/REPLY/REACT activity labels.
+- Guild Chat player menu survives incoming messages.
+- Repeat right-click, outside click, Escape, action or tab switch closes it.
+
+OPTIMIZATION
+- No new permanent polling loop.
+- Manifest packets and RC3 chunks remain under the Vanilla 250-byte limit.
+- Icon-cache cleanup runs infrequently and trims only fallback indexes.
+- SavedVariables schema updated to 12.
+
+OrderOfTheLionGM 1.5.6
+
+RAID PLANNER
+- Replaced the permanent Raid Alerts editor with an Upcoming / Cancelled / Past schedule and a separate detail panel.
+- Create Raid always generates a new event ID; Edit updates only the selected event.
+- Added exact Server Time, gathering time, one-time/weekly recurrence and per-event reminder lead time.
+- Added Duplicate, Post to /g, Remind, Cancel and Permanent Delete under a compact More menu.
+- Added schedule paging and mouse-wheel navigation for larger raid lists.
+- Added 30-day raid deletion tombstones and fixed the legacy active-raid pointer that could restore a cancelled/deleted event after synchronization.
+
+PROFESSIONS AND CRAFTING
+- Rebuilt mismatched legacy profession keys into stable internal keys so recipes appear in their actual profession, not only All Professions.
+- Simplified the page with a compact search clear control, a collapsible Filters panel, visible common categories and a More category menu.
+- Kept Request This Craft as the primary action and grouped Whisper, Link Item, Link Recipe and Crafting Activity under More.
+- Added clear unavailable states for missing item/recipe links or a missing selected crafter.
+- Preserved RC3 metadata, quality colours, reagent recovery, fallback icons and immediate event-driven refresh from 1.5.5.
+
+SHARED ACTIVITY
+- Added privacy-safe sharing of online-count observations between addon users.
+- Records at most one local sample per 15-minute interval and never sends roster names, classes or zones.
+- Added anonymous source IDs, interval de-duplication, average/peak calculations, coverage percentage and source count.
+- Replaced a potentially huge interval history response with at most one compact hourly packet per day (14 packets per responding client).
+- Added a manual Shared Activity sync button and automatic initial recovery sync.
+
+VISIBLE OPERATION STATES
+- Update Roster, Crafting Sync, PvE Sync and Shared Activity Sync now disable while working and reject repeated clicks.
+- Added visible Updating/Syncing, Complete and Retry states with clearer status text.
+- Added a roster timeout so an unanswered server request does not appear active forever.
+
+GUILD CHAT
+- The right-click player menu now survives incoming Guild Chat refreshes and remains usable during busy conversation.
+- The menu still closes normally after an action, manual dismissal, Escape or leaving the chat view.
+
+NETWORK AND PERFORMANCE
+- Kept one bounded one-second heartbeat instead of adding new continuous OnUpdate scanners.
+- Shared activity sends one live packet per changed interval and compact history only for initial/manual recovery.
+- Filters remain local and never trigger network traffic.
+- Open pages refresh only after their underlying logical object changes or a complete snapshot finishes.
+- Preserved bounded PvE/Community queues, item-cache retries, histories and cleanup windows.
+
+DATA AND DIAGNOSTICS
+- Advanced SavedVariables schema to 11 with defensive migration of existing 1.5.x data.
+- Added /otltest markers for Quality 1.5.6, Raid Planner and Shared Activity.
+- Updated README, release notes, acceptance checklist and validation report.
 
 Order of the Lion Guild Manager
 

@@ -1,10 +1,10 @@
 -- Order of the Lion Guild Manager
--- v1.5.4 data systems: announcements, notification preferences and safe migration
+-- v1.5.6 data systems: announcements, notification preferences and safe migration
 -- Vanilla WoW / OctoWoW (Interface 11200)
 
 OTLGM.systems152Loaded = true
-OTLGM.systems152Version = "1.5.4"
-OTLGM.schemaVersion = 9
+OTLGM.systems152Version = "1.5.6"
+OTLGM.schemaVersion = 11
 OTLGM.announcementProtocol = "A3"
 
 local BaseEnsureDB152 = OTLGM.EnsureDB
@@ -210,6 +210,7 @@ function OTLGM:MigrateGuildDB(db)
     db.notificationSeen = db.notificationSeen or {}
     db.notificationUnread = db.notificationUnread or {}
     db.recentUsefulActivity = db.recentUsefulActivity or {}
+    db.announcementSync = db.announcementSync or { requested = 0, received = 0, rejected = 0, completed = 0 }
     local category
     for category in pairs(notificationDefaults152) do
         if db.notificationUnread[category] == nil then db.notificationUnread[category] = 0 end
@@ -394,40 +395,31 @@ end
 
 function OTLGM:QueueAnnouncementRecord152(record, target)
     if not record or not self.QueueCommunityPayload or not S152ValidID(record.id) then return false end
-    -- Title and body travel in one escaped stream. This keeps META small and
-    -- guarantees that even a title containing only delimiter characters can be
-    -- reconstructed without exceeding the Vanilla addon-message ceiling.
     local contentWire = S152Escape(record.title, 80, false) .. "~" .. S152Escape(record.body, 900, true)
-    local chunkSize = 145
-    local chunks = {}
-    local at = 1
-    while at <= string.len(contentWire) do
-        table.insert(chunks, string.sub(contentWire, at, at + chunkSize - 1))
-        at = at + chunkSize
-    end
+    local chunkSize = 155
+    local chunks, at = {}, 1
+    while at <= string.len(contentWire) do table.insert(chunks, string.sub(contentWire, at, at + chunkSize - 1)) at = at + chunkSize end
     if table.getn(chunks) == 0 then table.insert(chunks, "~") end
     if table.getn(chunks) > 24 then return false end
-
     local payloads = {}
     local meta = table.concat({
         self.announcementProtocol, "META", record.id, tostring(record.revision or 1),
         tostring(record.createdAt or self:Now()), tostring(record.updatedAt or record.createdAt or self:Now()),
         S152Escape(record.author, 28, false, 72), S152Escape(record.importance, 12, false, 24),
-        record.notifyFlag and "1" or "0", record.pinned and "1" or "0", record.archived and "1" or "0",
-        tostring(table.getn(chunks))
+        record.notifyFlag and "1" or "0", record.pinned and "1" or "0", record.archived and "1" or "0", tostring(table.getn(chunks)), tostring(record.authorRankIndex or 99)
     }, "^")
     if string.len(meta) > 250 then return false end
     table.insert(payloads, meta)
     local i
-    for i = 1, table.getn(chunks) do
-        local payload = table.concat({ self.announcementProtocol, "BODY", record.id, tostring(record.revision or 1), tostring(i), tostring(table.getn(chunks)), chunks[i] or "" }, "^")
-        if string.len(payload) > 250 then return false end
-        table.insert(payloads, payload)
+    for i=1,table.getn(chunks) do
+        local payload=table.concat({self.announcementProtocol,"BODY",record.id,tostring(record.revision or 1),tostring(i),tostring(table.getn(chunks)),chunks[i] or ""},"^")
+        if string.len(payload)>250 then return false end
+        table.insert(payloads,payload)
     end
-    self.communitySendQueue = self.communitySendQueue or {}
-    if table.getn(self.communitySendQueue) + table.getn(payloads) > 310 then return false end
-    for i = 1, table.getn(payloads) do
-        if not self:QueueCommunityPayload(payloads[i], target and "WHISPER" or "GUILD", target) then return false end
+    self.communitySendQueue=self.communitySendQueue or {}
+    if table.getn(self.communitySendQueue)+table.getn(payloads)>310 then return false end
+    for i=1,table.getn(payloads) do
+        if not self:QueueCommunityPayload(payloads[i],target and "WHISPER" or "GUILD",target,target and 2 or 1) then return false end
     end
     return true
 end
@@ -446,7 +438,8 @@ function OTLGM:PublishAnnouncement152(title, body, importance, notifyFlag, pinne
     if record and S152NormalizeName(record.author) ~= S152NormalizeName(author) and not self:CanPublishAnnouncement152() then return false, "This announcement cannot be edited." end
     if not record then
         local id = string.lower(author) .. "-" .. tostring(now) .. "-" .. tostring(math.random(100, 999))
-        record = { id = id, revision = 0, createdAt = now, author = author, reactions = {} }
+        local authorMember = self.GetMember and self:GetMember(author) or nil
+        record = { id = id, revision = 0, createdAt = now, author = author, authorRankIndex = authorMember and authorMember.rankIndex or 99, reactions = {}, verified = true }
     end
     record.revision = (tonumber(record.revision) or 0) + 1
     record.updatedAt = now
@@ -457,7 +450,13 @@ function OTLGM:PublishAnnouncement152(title, body, importance, notifyFlag, pinne
     record.pinned = pinned and true or false
     record.archived = false
     record.author = record.author or author
+    local currentAuthorMember = self.GetMember and self:GetMember(record.author) or nil
+    if currentAuthorMember then record.authorRankIndex = currentAuthorMember.rankIndex end
+    record.verified = true
     db.announcements[record.id] = record
+    db.announcementSync = db.announcementSync or {}
+    db.announcementSync.received = (tonumber(db.announcementSync.received) or 0) + 1
+    db.announcementSync.completed = self:Now()
     db.announcementRead = db.announcementRead or {}
     db.announcementRead[record.id] = tonumber(record.revision) or 1
     S152PruneAnnouncements(db)
@@ -511,23 +510,55 @@ end
 
 function OTLGM:RequestAnnouncementSync152(force)
     if not self.QueueCommunityPayload or not GetGuildInfo("player") then return false end
-    local now = self:Now()
-    if not force and self.lastAnnouncementSync152 and now - self.lastAnnouncementSync152 < 90 then return false end
-    self.lastAnnouncementSync152 = now
-    self:QueueCommunityPayload(table.concat({ self.announcementProtocol, "SYNC", self.version }, "^"), "GUILD")
+    local now=self:Now()
+    if not force and self.lastAnnouncementSync152 and now-self.lastAnnouncementSync152<60 then return false end
+    self.lastAnnouncementSync152=now
+    local db=self:GetGuildDB()
+    if db and db.announcementSync then db.announcementSync.requested=now end
+    self:QueueCommunityPayload(table.concat({self.announcementProtocol,"SYNC",self.version,tostring(now)},"^"),"GUILD",nil,3)
     return true
 end
 
+function OTLGM:ScheduleAnnouncementState155(target)
+    if not target or target == "" or S152NormalizeName(target)==S152NormalizeName(UnitName("player") or "") then return false end
+    local db=self:GetGuildDB()
+    local hasVerified=false
+    local _,record
+    for _,record in pairs(db and db.announcements or {}) do if record.verified or self:IsAnnouncementSenderAllowed152(record.author) then hasVerified=true break end end
+    if not hasVerified then return false end
+    self.announcementShareTargets155=self.announcementShareTargets155 or {}
+    local score=0
+    local name=UnitName("player") or "Player"
+    local i
+    for i=1,string.len(name) do score=score+string.byte(name,i) end
+    local due=self:Now()+2+math.mod(score,9)
+    local key=S152NormalizeName(target)
+    local old=self.announcementShareTargets155[key]
+    if not old or due<(old.due or due) then self.announcementShareTargets155[key]={name=target,due=due} end
+    return true
+end
+
+function OTLGM:ProcessAnnouncementTimers155()
+    local key,pending
+    for key,pending in pairs(self.announcementShareTargets155 or {}) do
+        if pending and self:Now()>=(pending.due or 0) then
+            self.announcementShareTargets155[key]=nil
+            self:QueueAnnouncementState152(pending.name)
+            break
+        end
+    end
+end
+
 function OTLGM:QueueAnnouncementState152(target)
-    if not target or target == "" or not self:CanPublishAnnouncement152() then return false end
-    local list = self:GetAnnouncementList152(true)
-    local i, queued = 0, false
-    -- A sync response deliberately sends the newest twelve records. This is
-    -- enough for Home plus a useful archive while guaranteeing that one reply
-    -- cannot overrun the bounded community queue with partial announcement data.
-    for i = 1, math.min(12, table.getn(list)) do
-        if not self:QueueAnnouncementRecord152(list[i], target) then break end
-        queued = true
+    if not target or target == "" then return false end
+    local list=self:GetAnnouncementList152(true)
+    local i,queued=0,false
+    for i=1,math.min(12,table.getn(list)) do
+        local record=list[i]
+        if record and (record.verified or self:IsAnnouncementSenderAllowed152(record.author)) then
+            if not self:QueueAnnouncementRecord152(record,target) then break end
+            queued=true
+        end
     end
     return queued
 end
@@ -551,6 +582,7 @@ function OTLGM:TryFinishAnnouncement152(pendingKey)
     local old = db.announcements[record.id]
     if old and (tonumber(old.revision) or 0) >= (tonumber(record.revision) or 0) then db.pendingAnnouncements[pendingKey] = nil return true end
     record.reactions = old and old.reactions or {}
+    record.verified = true
     db.announcements[record.id] = record
     S152PruneAnnouncements(db)
     db.pendingAnnouncements[pendingKey] = nil
@@ -564,59 +596,57 @@ function OTLGM:TryFinishAnnouncement152(pendingKey)
 end
 
 function OTLGM:HandleAnnouncementMessage152(message, channel, sender)
-    if string.sub(message or "", 1, 3) ~= self.announcementProtocol .. "^" then return false end
-    local fields = S152Split(message, "^")
-    local kind = fields[2]
-    local cleanupDB = self:GetGuildDB()
-    S152PrunePendingAnnouncements(cleanupDB, self:Now())
-    if kind == "SYNC" then
-        if sender and S152NormalizeName(sender) ~= S152NormalizeName(UnitName("player") or "") then self:QueueAnnouncementState152(sender) end
+    if string.sub(message or "",1,3)~=self.announcementProtocol.."^" then return false end
+    local fields=S152Split(message,"^")
+    local kind=fields[2]
+    local cleanupDB=self:GetGuildDB()
+    S152PrunePendingAnnouncements(cleanupDB,self:Now())
+    if kind=="SYNC" then
+        if sender and S152NormalizeName(sender)~=S152NormalizeName(UnitName("player") or "") then self:ScheduleAnnouncementState155(sender) end
         return true
     end
-    if kind == "DEL" then
-        if not self:IsAnnouncementSenderAllowed152(sender) then return false end
-        local id = fields[3] or ""
-        local revision = tonumber(fields[4]) or 0
+    if kind=="DEL" then
+        if not self:IsAnnouncementSenderAllowed152(sender) then
+            if cleanupDB and cleanupDB.announcementSync then cleanupDB.announcementSync.rejected=(cleanupDB.announcementSync.rejected or 0)+1 end
+            return false
+        end
+        local id,revision=fields[3] or "",tonumber(fields[4]) or 0
         if not S152ValidID(id) then return false end
-        local db = self:GetGuildDB()
-        local old = db.announcements[id]
-        if old and (tonumber(old.revision) or 0) > revision then return true end
-        db.announcements[id] = nil
-        db.announcementDeleted[id] = { revision = revision, ts = self:Now() }
+        local db=self:GetGuildDB(); local old=db.announcements[id]
+        if old and (tonumber(old.revision) or 0)>revision then return true end
+        db.announcements[id]=nil; db.announcementDeleted[id]={revision=revision,ts=self:Now()}
         if self.OnAnnouncementDataChanged152 then self:OnAnnouncementDataChanged152(true) end
         return true
     end
-    if kind ~= "META" and kind ~= "BODY" then return false end
-    if not self:IsAnnouncementSenderAllowed152(sender) then return false end
-    local id = fields[3] or ""
-    local revision = tonumber(fields[4]) or 0
-    if not S152ValidID(id) or revision < 1 then return false end
-    local pendingKey = S152NormalizeName(sender) .. ":" .. id .. ":" .. tostring(revision)
-    local db = self:GetGuildDB()
-    local pending = db.pendingAnnouncements[pendingKey]
-    if not pending then
-        pending = { id = id, revision = revision, sender = sender, created = self:Now(), ts = self:Now(), chunks = {}, total = 0 }
-        db.pendingAnnouncements[pendingKey] = pending
-    end
-    if kind == "META" then
-        local author = S152Unescape(fields[7] or "")
-        if author == "" then return false end
-        local total = tonumber(fields[12]) or 0
-        if total < 1 or total > 24 then return false end
-        pending.total = total
-        pending.meta = {
-            id = id, revision = revision, createdAt = tonumber(fields[5]) or self:Now(), updatedAt = tonumber(fields[6]) or self:Now(),
-            author = S152Safe(author, 28, false), importance = S152Unescape(fields[8] or "NORMAL"),
-            notifyFlag = fields[9] == "1", pinned = fields[10] == "1", archived = fields[11] == "1",
-            verified = true,
-        }
+    if kind~="META" and kind~="BODY" then return false end
+    local id,revision=fields[3] or "",tonumber(fields[4]) or 0
+    if not S152ValidID(id) or revision<1 then return false end
+    local pendingKey=S152NormalizeName(sender)..":"..id..":"..tostring(revision)
+    local db=self:GetGuildDB(); local pending=db.pendingAnnouncements[pendingKey]
+    if not pending then pending={id=id,revision=revision,sender=sender,created=self:Now(),ts=self:Now(),chunks={},total=0} db.pendingAnnouncements[pendingKey]=pending end
+    if kind=="META" then
+        local author=S152Unescape(fields[7] or "")
+        local total=tonumber(fields[12]) or 0
+        if author=="" or total<1 or total>24 then return false end
+        -- Relays are allowed, but the original author still has to be a known
+        -- leadership member. This keeps announcements available when the author
+        -- logs out without tying delivery to rank names on the relay character.
+        local authorAllowed=self:IsAnnouncementSenderAllowed152(author)
+        local senderAllowed=self:IsAnnouncementSenderAllowed152(sender)
+        local transmittedRankIndex=tonumber(fields[13]) or 99
+        if authorAllowed~=true and senderAllowed~=true and transmittedRankIndex>2 then
+            db.pendingAnnouncements[pendingKey]=nil
+            db.announcementSync=db.announcementSync or {}; db.announcementSync.rejected=(db.announcementSync.rejected or 0)+1
+            return false
+        end
+        pending.total=total
+        pending.meta={id=id,revision=revision,createdAt=tonumber(fields[5]) or self:Now(),updatedAt=tonumber(fields[6]) or self:Now(),
+            author=S152Safe(author,28,false),authorRankIndex=transmittedRankIndex,importance=S152Unescape(fields[8] or "NORMAL"),notifyFlag=fields[9]=="1",pinned=fields[10]=="1",archived=fields[11]=="1",verified=true}
     else
-        local sequence = tonumber(fields[5]) or 0
-        local total = tonumber(fields[6]) or 0
-        if sequence < 1 or total < 1 or sequence > total or total > 24 then return false end
-        if pending.total ~= 0 and pending.total ~= total then return false end
-        pending.total = total
-        pending.chunks[sequence] = fields[7] or ""
+        local sequence,total=tonumber(fields[5]) or 0,tonumber(fields[6]) or 0
+        if sequence<1 or total<1 or sequence>total or total>24 then return false end
+        if pending.total~=0 and pending.total~=total then return false end
+        pending.total=total; pending.chunks[sequence]=fields[7] or ""
     end
     self:TryFinishAnnouncement152(pendingKey)
     return true
@@ -755,16 +785,24 @@ function OTLGM:GetDiagnosticsText()
     local worldDisplay = self.GetWorldChannelDisplay153 and self:GetWorldChannelDisplay153() or "Unavailable"
     local activityCount = db and db.recentUsefulActivity and table.getn(db.recentUsefulActivity) or 0
     local settings = OTLGM_DB and OTLGM_DB.settings or {}
+    local pve = self.EnsurePveDB and self:EnsurePveDB() or nil
+    local craft = self.EnsureCraftingDB and self:EnsureCraftingDB() or nil
+    local raidCount = 0
+    local _
+    for _ in pairs(pve and pve.raids or {}) do raidCount = raidCount + 1 end
     return base ..
         "\nSchema version: " .. tostring(db and db.schemaVersion or 0) ..
         "\nAnnouncements: " .. tostring(S152Count(db and db.announcements)) ..
         "\nAnnouncement unread: " .. tostring(self:GetAnnouncementUnreadCount154()) ..
+        "\nAnnouncement sync received/rejected: " .. tostring(db and db.announcementSync and db.announcementSync.received or 0) .. "/" .. tostring(db and db.announcementSync and db.announcementSync.rejected or 0) ..
         "\nNotification records: " .. tostring(S152Count(db and db.notificationSeen)) ..
         "\nUseful activity records: " .. tostring(activityCount) ..
+        "\nScheduled raid events: " .. tostring(raidCount) ..
+        "\nCrafting sync active/received: " .. tostring(craft and craft.syncState and craft.syncState.active and "yes" or "no") .. "/" .. tostring(craft and craft.syncState and craft.syncState.received or 0) ..
         "\nWorld channel: " .. tostring(worldDisplay) ..
         "\nProfession category filter: " .. tostring(settings.craftingCategory153 or "ALL") ..
         "\nProfession level filter: " .. tostring(settings.craftingLevelFilter153 or "ANY") ..
         "\nProfession rarity filter: " .. tostring(settings.craftingRarityFilter153 or "ANY") ..
-        "\nSystems 1.5.4: Loaded" ..
-        "\nUI 1.5.4: " .. tostring(self.ui153Loaded and "Loaded" or "Not built yet")
+        "\nSystems layer: Loaded" ..
+        "\nUI layer: " .. tostring(self.ui153Loaded and "Loaded" or "Not built yet")
 end

@@ -2,7 +2,7 @@
 -- Core systems for Vanilla WoW / OctoWoW (Interface 11200)
 
 OTLGM = OTLGM or {}
-OTLGM.version = "1.5.4"
+OTLGM.version = "1.5.6"
 OTLGM.addonName = "OrderOfTheLionGM"
 OTLGM.pendingScan = false
 OTLGM.pendingSilent = true

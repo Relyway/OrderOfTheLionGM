@@ -1,0 +1,46 @@
+ORDER OF THE LION GM 1.5.7
+RELIABILITY, ICONS AND INTERACTION UPDATE
+
+MAJOR CHANGES
+- Added persistent recipe and reagent texture storage.
+- Local profession scans now prefer direct Trade Skill/Craft API textures.
+- Added bounded item/name texture fallback indexes.
+- Added manifest-based profession synchronization.
+- Full RC3 snapshots are requested only for missing, changed or more complete
+  professions.
+- Cached complete professions may answer targeted requests when the original
+  crafter is offline.
+- Added left-click whisper and right-click actions to each exact crafter row.
+- Removed the duplicated generic crafter whisper action.
+- Fully hides the legacy raid publication layout under Raid Planner.
+- Added live weekday/full-date/server-time preview to the raid editor.
+- Added visually distinct Main Raid metadata and schedule treatment.
+- Cancelled raids remain visible in Upcoming until their scheduled time.
+- Home shows up to three chronological active raids and marks Main Raids.
+- Seen remains available to all guild members; Ready requires an approved raid
+  guild rank.
+- New Announcement opens blank; Edit continues to load existing content.
+- Added Important and Publications filters plus colored activity categories.
+- Guild Chat player menus now survive incoming messages and close correctly by
+  repeat right-click, outside click, Escape, action or tab change.
+
+NETWORK AND PERFORMANCE
+- No new continuous scanner or frame-by-frame refresh.
+- Manifest packets and RC3 chunks are kept within the Vanilla 250-byte limit.
+- Profession snapshots apply only when complete.
+- Existing data remains visible during synchronization.
+- Icon fallback data is bounded and pruned infrequently through the existing
+  heartbeat.
+- Raid priority/cancellation metadata uses a separate compact packet.
+
+DATA MIGRATION
+- SavedVariables schema: 12.
+- Existing roster, history, announcements, raids, groups, crafting data and
+  settings are preserved.
+- Old recipe records can inherit textures from the persistent cache; incomplete
+  legacy records become fully populated after a current-version rescan.
+
+REAL-CLIENT NOTE
+The real OctoWoW UI renderer and live addon channel are unavailable in the
+build environment. Complete the supplied two-client checklist before treating
+network and layout acceptance as final.

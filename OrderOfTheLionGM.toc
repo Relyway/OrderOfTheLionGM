@@ -2,7 +2,7 @@
 ## Title: |cffffcc66Order of the Lion|r |cffffffffGuild Manager|r |cff75d66bOctoWoW|r
 ## Notes: |cffffffffGuild chat, roster, Crafting Network, PvE coordination, activity and officer tools.|r
 ## Author: |cffffcc66Hikol|r |cffaaaaaa(mrhikol / Lucks)|r, |cffffffffOrder of the Lion|r
-## Version: |cff75d66b1.5.4|r
+## Version: |cff75d66b1.5.7|r
 ## SavedVariables: OTLGM_DB
 Core.lua
 Advanced.lua
@@ -11,5 +11,7 @@ Crafting.lua
 Systems152.lua
 UI.lua
 UINext.lua
+Quality156.lua
+Quality157.lua
 Minimap.lua
 Events.lua

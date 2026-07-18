@@ -1,5 +1,5 @@
 -- Order of the Lion Guild Manager
--- Crafting Network, shared requests, reactions and guild-wide search - v1.5.4
+-- Crafting Network, shared requests, reactions and guild-wide search - v1.5.6
 
 OTLGM.craftingProtocol = "C1"
 OTLGM.craftingRequestLifetime = 86400
@@ -129,10 +129,13 @@ local function CHashRecipes(recipes)
         key = keys[i]
         recipe = recipes[key]
         text = tostring(key) .. ":" .. tostring(recipe and recipe.name or "") .. ":" .. tostring(recipe and recipe.itemId or 0)
+            .. ":" .. tostring(recipe and recipe.quality or 1) .. ":" .. tostring(recipe and recipe.icon or "")
             .. ":" .. tostring(recipe and recipe.itemLink or "") .. ":" .. tostring(recipe and recipe.recipeLink or "")
+            .. ":" .. tostring(recipe and recipe.materialsStatus or "")
         for reagentIndex = 1, table.getn(recipe and recipe.reagents or {}) do
             reagent = recipe.reagents[reagentIndex]
-            text = text .. ":" .. tostring(reagent.itemId or 0) .. ":" .. tostring(reagent.name or "") .. ":" .. tostring(reagent.count or 0)
+            text = text .. ":" .. tostring(reagent.itemId or 0) .. ":" .. tostring(reagent.name or "")
+                .. ":" .. tostring(reagent.count or 0) .. ":" .. tostring(reagent.icon or "") .. ":" .. tostring(reagent.quality or 1)
         end
         for j = 1, string.len(text) do
             hash = math.mod((hash * 33) + string.byte(text, j), 2147483000)
@@ -193,6 +196,8 @@ function OTLGM:EnsureCraftingDB()
     craft.unread.PROFESSIONS = nil
     craft.lastSync = craft.lastSync or 0
     craft.pendingRecipes = craft.pendingRecipes or {}
+    craft.cacheQueue = craft.cacheQueue or {}
+    craft.syncState = craft.syncState or { active = false, started = 0, completed = 0, received = 0 }
 
     OTLGM_DB.settings.craftingSection = OTLGM_DB.settings.craftingSection or "RECIPES"
     OTLGM_DB.settings.craftingProfession = OTLGM_DB.settings.craftingProfession or "ALL"
@@ -243,7 +248,7 @@ function OTLGM:PurgeCraftingData(silent)
         end
         if targetType == "RAID" then
             local pve = self.EnsurePveDB and self:EnsurePveDB() or nil
-            exists = pve and pve.raid and pve.raid.id == targetId
+            exists = pve and ((pve.raids and pve.raids[targetId]) or (pve.raid and pve.raid.id == targetId)) and true or false
         end
         if not exists then
             craft.reactions[targetKey] = nil
@@ -270,25 +275,49 @@ function OTLGM:PurgeCraftingData(silent)
     return changed
 end
 
-function OTLGM:QueueCommunityPayload(payload, channel, target)
+function OTLGM:QueueCommunityPayload(payload, channel, target, priority)
     if not payload or payload == "" then return false end
-    -- Vanilla addon messages have a very small payload ceiling. Keep a little
-    -- safety margin so escaped player text can never create a rejected packet.
     if string.len(payload) > 250 then
         self.communityDroppedPayloads = (self.communityDroppedPayloads or 0) + 1
         self.lastCommunityDroppedSize = string.len(payload)
         return false
     end
     self.communitySendQueue = self.communitySendQueue or {}
-    if table.getn(self.communitySendQueue) >= 320 then table.remove(self.communitySendQueue, 1) end
-    table.insert(self.communitySendQueue, { payload = payload, channel = channel or "GUILD", target = target })
+    if table.getn(self.communitySendQueue) >= 320 then
+        -- Never silently drop the newest action. Remove the oldest ordinary
+        -- background packet first; important response packets remain intact.
+        local removeAt = 1
+        local i
+        for i = 1, table.getn(self.communitySendQueue) do
+            if (tonumber(self.communitySendQueue[i].priority) or 0) <= 0 then removeAt = i break end
+        end
+        table.remove(self.communitySendQueue, removeAt)
+    end
+    local entry = { payload = payload, channel = channel or "GUILD", target = target, priority = tonumber(priority) or 0 }
+    if entry.priority > 0 then
+        local insertAt = table.getn(self.communitySendQueue) + 1
+        local i
+        for i = 1, table.getn(self.communitySendQueue) do
+            if (tonumber(self.communitySendQueue[i].priority) or 0) < entry.priority then insertAt = i break end
+        end
+        table.insert(self.communitySendQueue, insertAt, entry)
+    else
+        table.insert(self.communitySendQueue, entry)
+    end
     return true
 end
 
-function OTLGM:ProcessCommunitySendQueue()
+function OTLGM:ProcessCommunitySendQueue(maximum)
     if not SendAddonMessage or not self.communitySendQueue or table.getn(self.communitySendQueue) == 0 then return end
-    local item = table.remove(self.communitySendQueue, 1)
-    if item then pcall(SendAddonMessage, "OTLGM", item.payload, item.channel or "GUILD", item.target) end
+    -- Four short packets per one-second heartbeat keeps a large profession
+    -- snapshot responsive without creating a continuous OnUpdate sender.
+    maximum = math.max(1, math.min(6, tonumber(maximum) or 4))
+    local sent = 0
+    while sent < maximum and table.getn(self.communitySendQueue) > 0 do
+        local item = table.remove(self.communitySendQueue, 1)
+        if item then pcall(SendAddonMessage, "OTLGM", item.payload, item.channel or "GUILD", item.target) end
+        sent = sent + 1
+    end
 end
 
 function OTLGM:GetCraftingCharacter(name)
@@ -302,8 +331,64 @@ function OTLGM:GetCraftingCharacter(name)
     return nil
 end
 
-function OTLGM:ScanCurrentProfession(mode)
+function OTLGM:QueueCraftingCacheLookup(itemId, object)
+    local craft = self:EnsureCraftingDB()
+    itemId = tonumber(itemId) or 0
+    if not craft or itemId <= 0 or not object then return false end
+    local key = tostring(itemId) .. ":" .. tostring(object)
+    if craft.cacheQueue[key] then return true end
+    local count = 0
+    for _ in pairs(craft.cacheQueue) do count = count + 1 end
+    if count >= 160 then return false end
+    craft.cacheQueue[key] = { itemId = itemId, object = object, tries = 0, nextAt = self:Now() }
+    return true
+end
+
+function OTLGM:ProcessCraftingCacheQueue()
+    local craft = self:EnsureCraftingDB()
+    if not craft or not GetItemInfo then return false end
+    local now = self:Now()
+    local processed, changed = 0, false
+    local key, entry
+    for key, entry in pairs(craft.cacheQueue or {}) do
+        if processed >= 8 then break end
+        if entry and now >= (entry.nextAt or 0) then
+            processed = processed + 1
+            local name, link, quality, itemLevel, requiredLevel, itemType, itemSubType, _, equipLoc, texture = GetItemInfo(entry.itemId)
+            if name or texture or link then
+                local object = entry.object
+                if object then
+                    if link and link ~= "" then object.itemLink = link end
+                    if texture and texture ~= "" then object.icon = texture end
+                    if quality ~= nil then object.quality = tonumber(quality) or object.quality end
+                    if itemLevel ~= nil then object.itemLevel = tonumber(itemLevel) or object.itemLevel end
+                    if requiredLevel ~= nil then object.requiredLevel = tonumber(requiredLevel) or object.requiredLevel end
+                    if itemType then object.itemType = itemType end
+                    if itemSubType then object.itemSubType = itemSubType end
+                    if equipLoc then object.equipLoc = equipLoc end
+                end
+                craft.cacheQueue[key] = nil
+                changed = true
+            else
+                entry.tries = (entry.tries or 0) + 1
+                if entry.tries >= 4 then craft.cacheQueue[key] = nil
+                else entry.nextAt = now + (entry.tries * 2) end
+            end
+        end
+    end
+    if changed and self.ui and self.ui.main and self.ui.main:IsVisible() and self.ui.currentPage == "professions" and self.RefreshProfessionsPage then
+        self:RefreshProfessionsPage()
+    end
+    return changed
+end
+
+function OTLGM:ScheduleProfessionRescan(mode, attempt, delay)
+    self.craftingRescan = { mode = mode, attempt = tonumber(attempt) or 1, due = self:Now() + (tonumber(delay) or 1) }
+end
+
+function OTLGM:ScanCurrentProfession(mode, attempt)
     if not OTLGM_DB or not OTLGM_DB.settings or OTLGM_DB.settings.craftingShareEnabled == false then return false end
+    attempt = tonumber(attempt) or 0
     local rawName, rank, maxRank
     local isCraft = mode == "CRAFT"
     if isCraft then
@@ -323,6 +408,7 @@ function OTLGM:ScanCurrentProfession(mode)
 
     local recipes = {}
     local count = isCraft and (GetNumCrafts() or 0) or (GetNumTradeSkills() or 0)
+    local missingMaterialRows = 0
     local i
     for i = 1, count do
         local recipeName, recipeType
@@ -342,7 +428,8 @@ function OTLGM:ScanCurrentProfession(mode)
             local itemId = CParseItemID(itemLink)
             local quality, itemLevel, requiredLevel, itemType, itemSubType, equipLoc = 1, 0, 0, "", "", ""
             if itemId > 0 and GetItemInfo then
-                local itemName, itemCachedLink, itemQuality, cachedItemLevel, cachedRequiredLevel, cachedItemType, cachedItemSubType, stackCount, cachedEquipLoc, itemTexture = GetItemInfo(itemId)
+                local _, cachedLink, itemQuality, cachedItemLevel, cachedRequiredLevel, cachedItemType, cachedItemSubType, _, cachedEquipLoc, itemTexture = GetItemInfo(itemId)
+                if (not itemLink or itemLink == "") and cachedLink then itemLink = cachedLink end
                 quality = tonumber(itemQuality) or 1
                 itemLevel = tonumber(cachedItemLevel) or 0
                 requiredLevel = tonumber(cachedRequiredLevel) or 0
@@ -371,25 +458,33 @@ function OTLGM:ScanCurrentProfession(mode)
                 end
                 if reagentName and reagentName ~= "" then
                     local reagentId = CParseItemID(reagentLink)
-                    if reagentId > 0 and not reagentTexture and GetItemInfo then
-                        local _, _, _, _, _, _, _, _, _, cachedTexture = GetItemInfo(reagentId)
-                        reagentTexture = cachedTexture
+                    local reagentQuality = 1
+                    if reagentId > 0 and GetItemInfo then
+                        local _, cachedLink, cachedQuality, _, _, _, _, _, _, cachedTexture = GetItemInfo(reagentId)
+                        if (not reagentLink or reagentLink == "") and cachedLink then reagentLink = cachedLink end
+                        reagentQuality = tonumber(cachedQuality) or 1
+                        if not reagentTexture and cachedTexture then reagentTexture = cachedTexture end
                     end
                     table.insert(reagents, {
                         itemId = reagentId, name = CSafeText(reagentName, 48), count = tonumber(required) or 0,
-                        owned = tonumber(owned) or 0, icon = reagentTexture, itemLink = reagentLink,
+                        owned = tonumber(owned) or 0, icon = reagentTexture, itemLink = reagentLink, quality = reagentQuality,
                     })
                 end
             end
+
+            local materialsStatus
+            if reagentCount > 0 and table.getn(reagents) == reagentCount then materialsStatus = "COMPLETE"
+            elseif reagentCount > 0 then materialsStatus = "PARTIAL" missingMaterialRows = missingMaterialRows + 1
+            else materialsStatus = "UNAVAILABLE" missingMaterialRows = missingMaterialRows + 1 end
 
             local recipeKey = itemId > 0 and tostring(itemId) or CNormalizeText(recipeName)
             if recipeKey ~= "" then
                 recipes[recipeKey] = {
                     key = recipeKey, name = CSafeText(recipeName, 80), itemId = itemId,
-                    quality = quality, itemLevel = tonumber(itemLevel) or 0, requiredLevel = tonumber(requiredLevel) or 0,
-                    itemType = itemType or "", itemSubType = itemSubType or "", equipLoc = equipLoc or "",
+                    quality = quality, itemLevel = itemLevel, requiredLevel = requiredLevel,
+                    itemType = itemType, itemSubType = itemSubType, equipLoc = equipLoc,
                     itemLink = itemLink, recipeLink = recipeLink, icon = icon,
-                    reagents = reagents, materialsAvailable = reagentCount == 0 or table.getn(reagents) == reagentCount,
+                    reagents = reagents, materialsAvailable = materialsStatus == "COMPLETE", materialsStatus = materialsStatus,
                 }
             end
         end
@@ -411,9 +506,16 @@ function OTLGM:ScanCurrentProfession(mode)
     local oldCount = old and CTableCount(old.recipes) or 0
     character.professions[professionKey] = {
         key = professionKey, label = professionLabel, rank = tonumber(rank) or 0, maxRank = tonumber(maxRank) or 0,
-        ts = self:Now(), hash = hash, recipes = recipes, localOwner = true,
+        ts = self:Now(), hash = hash, recipes = recipes, localOwner = true, incompleteMaterials = missingMaterialRows,
     }
     craft.characters[player] = character
+
+    -- Profession windows often populate reagent links one frame later. Retry only
+    -- while the window is open, at most twice, and do not broadcast an incomplete
+    -- snapshot before the final attempt.
+    if missingMaterialRows > 0 and attempt < 2 then
+        self:ScheduleProfessionRescan(mode, attempt + 1, attempt == 0 and 1 or 2)
+    end
 
     if changed then
         local difference = CTableCount(recipes) - oldCount
@@ -421,13 +523,16 @@ function OTLGM:ScanCurrentProfession(mode)
         if difference > 0 then eventTitle = player .. " added " .. tostring(difference) .. " " .. professionLabel .. " recipe" .. (difference == 1 and "" or "s")
         else eventTitle = player .. " updated " .. professionLabel end
         self:AddCraftingEvent("RECIPES", eventTitle, tostring(CTableCount(recipes)) .. " recipes shared", "professions")
-        self:QueueCraftingProfessionShare(player, professionKey)
-        if self.SetStatus then self:SetStatus(professionLabel .. " scanned: " .. tostring(CTableCount(recipes)) .. " recipes ready to share.") end
-    elseif self.SetStatus then
+        if missingMaterialRows == 0 or attempt >= 2 then self:QueueCraftingProfessionShare(player, professionKey) end
+        if self.SetStatus then
+            local suffix = missingMaterialRows > 0 and ("; " .. tostring(missingMaterialRows) .. " recipe(s) need another cache pass") or ""
+            self:SetStatus(professionLabel .. " scanned: " .. tostring(CTableCount(recipes)) .. " recipes" .. suffix .. ".")
+        end
+    elseif self.SetStatus and attempt == 0 then
         self:SetStatus(professionLabel .. " is already up to date: " .. tostring(CTableCount(recipes)) .. " recipes.")
     end
     self:OnCraftingDataChanged("RECIPES", false)
-    return true, changed, CTableCount(recipes)
+    return true, changed, CTableCount(recipes), missingMaterialRows
 end
 
 function OTLGM:QueueCraftingProfessionShare(ownerName, professionKey, target)
@@ -438,10 +543,8 @@ function OTLGM:QueueCraftingProfessionShare(ownerName, professionKey, target)
     local now = self:Now()
     if not target and profession.lastSharedAt and now - profession.lastSharedAt < self.craftingShareCooldown then return false end
 
-    -- v1.5.4 serializes the complete profession snapshot first and then splits
-    -- the escaped wire string at arbitrary byte boundaries. The older RCP
-    -- implementation split only between recipes, so a single recipe with many
-    -- reagents could exceed the Vanilla addon-message limit and disappear.
+    -- RC3 keeps stable IDs plus compact fallback textures/material data. Remote
+    -- clients can render immediately even when their item cache is cold.
     local entries = {}
     local keys = CSortedKeys(profession.recipes)
     local i, recipe, reagentIndex, reagent, reagentParts
@@ -452,29 +555,31 @@ function OTLGM:QueueCraftingProfessionShare(ownerName, professionKey, target)
             reagent = recipe.reagents[reagentIndex]
             table.insert(reagentParts, table.concat({
                 tostring(reagent.itemId or 0),
-                CEscape(CSafeText(reagent.name, 48), 90),
-                tostring(reagent.count or 0)
+                CEscape(CSafeText(reagent.name, 48), 84),
+                tostring(reagent.count or 0),
+                CEscape(CSafeText(reagent.icon or "", 90), 120),
+                tostring(reagent.quality or 1)
             }, ":"))
         end
         table.insert(entries, table.concat({
             tostring(recipe.itemId or 0),
-            CEscape(CSafeText(recipe.name, 80), 130),
+            CEscape(CSafeText(recipe.name, 80), 120),
             tostring(recipe.quality or 1),
-            tostring(table.getn(reagentParts)),
-            table.concat(reagentParts, "+"),
-            CEscape(CSafeText(recipe.recipeLink or "", 180), 260),
-            CEscape(CSafeText(recipe.itemLink or "", 180), 260)
+            tostring(recipe.itemLevel or 0), tostring(recipe.requiredLevel or 0),
+            CEscape(CSafeText(recipe.equipLoc or "", 24), 40),
+            CEscape(CSafeText(recipe.icon or "", 90), 120),
+            CEscape(CSafeText(recipe.materialsStatus or "UNAVAILABLE", 12), 18),
+            tostring(table.getn(reagentParts)), table.concat(reagentParts, "+"),
+            CEscape(CSafeText(recipe.recipeLink or "", 180), 250),
+            CEscape(CSafeText(recipe.itemLink or "", 180), 250)
         }, ","))
     end
 
     local wire = table.concat(entries, "~")
-    local chunkSize = 105
-    local chunks = {}
-    local at = 1
-    while at <= string.len(wire) do
-        table.insert(chunks, string.sub(wire, at, at + chunkSize - 1))
-        at = at + chunkSize
-    end
+    local headerReserve = 92 + string.len(CEscape(ownerName, 42)) + string.len(professionKey)
+    local chunkSize = math.max(110, math.min(165, 246 - headerReserve))
+    local chunks, at = {}, 1
+    while at <= string.len(wire) do table.insert(chunks, string.sub(wire, at, at + chunkSize - 1)) at = at + chunkSize end
     if table.getn(chunks) == 0 then table.insert(chunks, "") end
     if table.getn(chunks) > 240 then
         self.communityDroppedPayloads = (self.communityDroppedPayloads or 0) + 1
@@ -483,30 +588,23 @@ function OTLGM:QueueCraftingProfessionShare(ownerName, professionKey, target)
         return false
     end
 
-    local payloads = {}
-    local totalChunks = table.getn(chunks)
+    local payloads, totalChunks = {}, table.getn(chunks)
     for i = 1, totalChunks do
         local payload = table.concat({
-            self.craftingProtocol, "RC2", CEscape(ownerName, 42), professionKey,
+            self.craftingProtocol, "RC3", CEscape(ownerName, 42), professionKey,
             tostring(profession.ts or now), tostring(profession.rank or 0), tostring(profession.maxRank or 0),
-            tostring(i), tostring(totalChunks), tostring(CTableCount(profession.recipes)), tostring(profession.hash or "0"),
-            chunks[i] or ""
+            tostring(i), tostring(totalChunks), tostring(CTableCount(profession.recipes)), tostring(profession.hash or "0"), chunks[i] or ""
         }, "^")
-        if string.len(payload) > 250 then
-            self.communityDroppedPayloads = (self.communityDroppedPayloads or 0) + 1
-            self.lastCommunityDroppedSize = string.len(payload)
-            return false
-        end
+        if string.len(payload) > 250 then return false end
         table.insert(payloads, payload)
     end
-
     self.communitySendQueue = self.communitySendQueue or {}
     if table.getn(self.communitySendQueue) + table.getn(payloads) > 310 then
         if self.SetStatus then self:SetStatus("The profession snapshot is waiting for network queue space.") end
         return false
     end
     for i = 1, table.getn(payloads) do
-        if not self:QueueCommunityPayload(payloads[i], target and "WHISPER" or "GUILD", target) then return false end
+        if not self:QueueCommunityPayload(payloads[i], target and "WHISPER" or "GUILD", target, target and 1 or 0) then return false end
     end
     if not target then profession.lastSharedAt = now end
     return true
@@ -532,10 +630,12 @@ function OTLGM:RequestCraftingSync(force)
     if not craft or not SendAddonMessage or not GetGuildInfo("player") then return false end
     local now = self:Now()
     if not force and craft.lastSync and now - craft.lastSync < 60 then return false end
-    if self.lastCraftingSyncRequestAt and now - self.lastCraftingSyncRequestAt < 30 then return false end
+    if self.lastCraftingSyncRequestAt and now - self.lastCraftingSyncRequestAt < 20 then return false end
     self.lastCraftingSyncRequestAt = now
     craft.lastSync = now
-    self:QueueCommunityPayload(table.concat({ self.craftingProtocol, "SYNC", self.version }, "^"), "GUILD")
+    craft.syncState = { active = true, started = now, completed = 0, received = 0 }
+    self:QueueCommunityPayload(table.concat({ self.craftingProtocol, "SYNC", self.version }, "^"), "GUILD", nil, 2)
+    if self.SetStatus then self:SetStatus("Requesting current crafting data from online addon users...") end
     return true
 end
 
@@ -599,8 +699,21 @@ function OTLGM:ProcessCraftingTimers()
         if pending and self:Now() >= (pending.due or 0) then
             self.craftingShareTargets[normalized] = nil
             self:QueueCraftingStateToTarget(pending.name)
-            return
+            break
         end
+    end
+    if self.craftingRescan and self:Now() >= (self.craftingRescan.due or 0) then
+        local job = self.craftingRescan
+        self.craftingRescan = nil
+        local frameOpen = (job.mode == "TRADE" and TradeSkillFrame and TradeSkillFrame.IsShown and TradeSkillFrame:IsShown())
+            or (job.mode == "CRAFT" and CraftFrame and CraftFrame.IsShown and CraftFrame:IsShown())
+        if frameOpen then self:ScanCurrentProfession(job.mode, job.attempt) end
+    end
+    self:ProcessCraftingCacheQueue()
+    local craft = self:EnsureCraftingDB()
+    if craft and craft.syncState and craft.syncState.active and self:Now() - (craft.syncState.started or 0) > 25 then
+        craft.syncState.active = false
+        if self.SetStatus then self:SetStatus("Crafting sync finished. Received " .. tostring(craft.syncState.received or 0) .. " profession snapshot(s).") end
     end
 end
 
@@ -667,6 +780,7 @@ function OTLGM:ApplyRemoteRecipeChunk(fields, sender, channel)
                         recipe.itemSubType = cachedSubType or ""
                         recipe.equipLoc = cachedEquipLoc or ""
                         recipe.icon = texture
+                    if itemId > 0 and (not recipe.icon or recipe.icon == "") then self:QueueCraftingCacheLookup(itemId, recipe) end
                     end
                     reagentEntries = reagentPayload ~= "" and CSplit(reagentPayload, "+") or {}
                     for reagentIndex = 1, table.getn(reagentEntries) do
@@ -679,6 +793,7 @@ function OTLGM:ApplyRemoteRecipeChunk(fields, sender, channel)
                             local _, link, _, _, _, _, _, _, _, texture = GetItemInfo(reagentId)
                             reagent.itemLink = link
                             reagent.icon = texture
+                            if reagentId > 0 and (not reagent.icon or reagent.icon == "") then self:QueueCraftingCacheLookup(reagentId, reagent) end
                         end
                         table.insert(recipe.reagents, reagent)
                     end
@@ -714,6 +829,90 @@ function OTLGM:ApplyRemoteRecipeChunk(fields, sender, channel)
         self:IncrementCraftingUnread("RECIPES")
     end
     self:OnCraftingDataChanged("RECIPES", true)
+    return true
+end
+
+function OTLGM:ApplyRemoteRecipeSnapshot155(fields, sender, channel)
+    local craft = self:EnsureCraftingDB()
+    if not craft then return false end
+    local owner = string.gsub(CUnescape(fields[3] or ""), "%-.*$", "")
+    local professionKey = fields[4] or ""
+    local timestamp = tonumber(fields[5]) or 0
+    local rank, maxRank = tonumber(fields[6]) or 0, tonumber(fields[7]) or 0
+    local sequence, total = tonumber(fields[8]) or 0, tonumber(fields[9]) or 0
+    local count, hash, wireChunk = tonumber(fields[10]) or 0, fields[11] or "0", fields[12] or ""
+    if owner == "" or professionKey == "" or sequence < 1 or total < 1 or sequence > total or total > 240 or count < 0 then return false end
+    if channel ~= "WHISPER" and sender and CNormalizeName(owner) ~= CNormalizeName(sender) then return false end
+    local existing = craft.characters[owner]
+    if existing and existing.localOwner then return true end
+    local pendingKey = "RC3:" .. CNormalizeName(sender) .. ":" .. CNormalizeName(owner) .. ":" .. professionKey .. ":" .. tostring(timestamp) .. ":" .. tostring(hash)
+    local pending = craft.pendingRecipes[pendingKey]
+    if not pending then
+        pending = { owner=owner, professionKey=professionKey, timestamp=timestamp, rank=rank, maxRank=maxRank, total=total, count=count, hash=hash, chunks={}, sender=sender, created=self:Now(), ts=self:Now() }
+        craft.pendingRecipes[pendingKey] = pending
+    end
+    if pending.total ~= total or pending.hash ~= hash or pending.count ~= count then return false end
+    pending.chunks[sequence] = wireChunk
+    local i
+    for i=1,total do if pending.chunks[i] == nil then return true end end
+    local wire=""
+    for i=1,total do wire=wire..(pending.chunks[i] or "") end
+    local recipes, entries = {}, (wire ~= "" and CSplit(wire,"~") or {})
+    local j
+    for j=1,table.getn(entries) do
+        if entries[j] ~= "" then
+            local f=CSplit(entries[j],",")
+            local itemId=tonumber(f[1]) or 0
+            local recipeName=CUnescape(f[2] or "")
+            local key=itemId>0 and tostring(itemId) or CNormalizeText(recipeName)
+            local reagentCount=tonumber(f[9]) or 0
+            if key ~= "" and recipeName ~= "" and reagentCount >= 0 and reagentCount <= 12 then
+                local recipe={ key=key, name=recipeName, itemId=itemId, quality=tonumber(f[3]) or 1,
+                    itemLevel=tonumber(f[4]) or 0, requiredLevel=tonumber(f[5]) or 0, equipLoc=CUnescape(f[6] or ""),
+                    icon=CUnescape(f[7] or ""), materialsStatus=CUnescape(f[8] or "UNAVAILABLE"), reagents={},
+                    recipeLink=(CUnescape(f[11] or "") ~= "" and CUnescape(f[11]) or nil),
+                    itemLink=(CUnescape(f[12] or "") ~= "" and CUnescape(f[12]) or nil) }
+                local reagentEntries=(f[10] and f[10] ~= "") and CSplit(f[10],"+") or {}
+                local ri
+                for ri=1,math.min(12,table.getn(reagentEntries)) do
+                    local rf=CSplit(reagentEntries[ri],":")
+                    local reagent={ itemId=tonumber(rf[1]) or 0, name=CUnescape(rf[2] or ""), count=tonumber(rf[3]) or 0,
+                        icon=CUnescape(rf[4] or ""), quality=tonumber(rf[5]) or 1 }
+                    if reagent.name ~= "" then
+                        table.insert(recipe.reagents,reagent)
+                        if reagent.itemId>0 and (not reagent.icon or reagent.icon=="") then self:QueueCraftingCacheLookup(reagent.itemId,reagent) end
+                    end
+                end
+                recipe.materialsAvailable=recipe.materialsStatus=="COMPLETE" and reagentCount==table.getn(recipe.reagents)
+                if itemId>0 and (not recipe.icon or recipe.icon=="" or not recipe.itemLink) then self:QueueCraftingCacheLookup(itemId,recipe) end
+                recipes[key]=recipe
+            end
+        end
+    end
+    craft.pendingRecipes[pendingKey]=nil
+    if CTableCount(recipes) ~= count then return false end
+    local member=self:GetMember(owner)
+    local character=existing or {name=owner,professions={}}
+    character.name=owner; character.class=member and member.class or character.class or ""; character.level=member and member.level or character.level or 0
+    character.updated=self:Now(); character.source=sender; character.professions=character.professions or {}
+    local label=professionKey
+    local definitions=self.professionDefinitions or {}
+    for i=1,table.getn(definitions) do if definitions[i].key==professionKey then label=definitions[i].label break end end
+    local old=character.professions[professionKey]
+    local changed=not old or old.hash~=hash
+    local oldCount=old and CTableCount(old.recipes) or 0
+    character.professions[professionKey]={key=professionKey,label=label,rank=rank,maxRank=maxRank,ts=timestamp,receivedAt=self:Now(),hash=hash,recipes=recipes}
+    craft.characters[owner]=character
+    craft.syncState=craft.syncState or {}
+    craft.syncState.received=(craft.syncState.received or 0)+1
+    craft.syncState.completed=self:Now()
+    if changed then
+        local difference=count-oldCount
+        local title=difference>0 and (owner.." shared "..tostring(difference).." new "..label.." recipe"..(difference==1 and "" or "s")) or (owner.." updated "..label)
+        self:AddCraftingEvent("RECIPES",title,tostring(count).." recipes available","professions",self:Now())
+        self:IncrementCraftingUnread("RECIPES")
+    end
+    self:OnCraftingDataChanged("RECIPES",true)
     return true
 end
 
@@ -790,6 +989,7 @@ function OTLGM:ApplyRemoteRecipeSnapshot152(fields, sender, channel)
                     recipe.itemSubType = cachedSubType or ""
                     recipe.equipLoc = cachedEquipLoc or ""
                     recipe.icon = texture
+                    if itemId > 0 and (not recipe.icon or recipe.icon == "") then self:QueueCraftingCacheLookup(itemId, recipe) end
                 end
                 reagentEntries = reagentPayload ~= "" and CSplit(reagentPayload, "+") or {}
                 for reagentIndex = 1, math.min(12, table.getn(reagentEntries)) do
@@ -803,6 +1003,7 @@ function OTLGM:ApplyRemoteRecipeSnapshot152(fields, sender, channel)
                             local _, link, _, _, _, _, _, _, _, texture = GetItemInfo(reagentId)
                             reagent.itemLink = link
                             reagent.icon = texture
+                            if reagentId > 0 and (not reagent.icon or reagent.icon == "") then self:QueueCraftingCacheLookup(reagentId, reagent) end
                         end
                         table.insert(recipe.reagents, reagent)
                     end
@@ -1307,6 +1508,7 @@ function OTLGM:HandleCommunityAddonMessage(message, channel, sender)
     local fields = CSplit(message, "^")
     local kind = fields[2]
     if kind == "SYNC" then self:ScheduleCraftingShareResponse(sender) return true end
+    if kind == "RC3" then return self:ApplyRemoteRecipeSnapshot155(fields, sender, channel) end
     if kind == "RC2" then return self:ApplyRemoteRecipeSnapshot152(fields, sender, channel) end
     if kind == "RCP" then return self:ApplyRemoteRecipeChunk(fields, sender, channel) end
     if kind == "CREQ" then return self:ApplyRemoteCraftingRequest(fields, sender, channel) end

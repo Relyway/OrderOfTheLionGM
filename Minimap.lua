@@ -1,6 +1,18 @@
 -- Order of the Lion Guild Manager
 -- Compact minimap launcher
 
+function OTLGM:GetImportantMinimapAlerts155()
+    -- The minimap badge is a signal, not an accumulated history counter.
+    -- One raid signal plus current group/application actions is enough.
+    local raidUnread=self.GetPveUnread and self:GetPveUnread("RAIDS") or 0
+    local activeRaid=self.GetPveActiveRaid and self:GetPveActiveRaid() or nil
+    local raids=(tonumber(raidUnread) or 0)>0 and activeRaid and 1 or 0
+    local groupUnread=self.GetPveUnread and self:GetPveUnread("GROUPS") or 0
+    local pending=self.GetPendingPveApplicationCount and self:GetPendingPveApplicationCount() or 0
+    local groups=math.min(9,(tonumber(pending) or 0)+(((tonumber(groupUnread) or 0)>0) and 1 or 0))
+    return raids+groups,raids,groups
+end
+
 function OTLGM:BuildMinimapButton()
     if self.ui.minimapButton then return end
     self:EnsureDB()
@@ -97,11 +109,16 @@ function OTLGM:BuildMinimapButton()
         GameTooltip:AddLine("Shift-drag: move button", 0.65, 0.65, 0.65)
         local db = OTLGM:GetGuildDB()
         if db then
+            local total,raids,groups=OTLGM:GetImportantMinimapAlerts155()
             GameTooltip:AddLine(" ")
-            GameTooltip:AddDoubleLine("Members", tostring(db.lastTotal or 0), 0.8, 0.8, 0.8, 1, 1, 1)
-            GameTooltip:AddDoubleLine("Online", tostring(db.lastOnline or 0), 0.8, 0.8, 0.8, 0.4, 1, 0.4)
-            GameTooltip:AddDoubleLine("Unread changes", tostring(db.unread or 0), 0.8, 0.8, 0.8, 1, 0.78, 0.25)
-            GameTooltip:AddDoubleLine("Last update", db.lastScan and OTLGM:FormatElapsedShort(OTLGM:Now() - db.lastScan) or "Never", 0.8, 0.8, 0.8, 0.75, 0.75, 0.75)
+            if total>0 then
+                GameTooltip:AddLine("Important PvE alerts",1,0.82,0.25)
+                GameTooltip:AddDoubleLine("Raid alerts",tostring(raids),0.8,0.8,0.8,1,0.35,0.25)
+                GameTooltip:AddDoubleLine("Groups / applications",tostring(groups),0.8,0.8,0.8,0.35,0.75,1)
+            else
+                GameTooltip:AddLine("No important raid or group alerts",0.55,0.75,0.55)
+            end
+            GameTooltip:AddDoubleLine("Guild online", tostring(db.lastOnline or 0), 0.8, 0.8, 0.8, 0.4, 1, 0.4)
             GameTooltip:AddLine(OTLGM:IsOfficerMode() and "Officer Mode" or "Member Mode", 0.65, 0.65, 0.65)
         end
         GameTooltip:Show()
@@ -138,16 +155,14 @@ end
 
 function OTLGM:UpdateMinimapBadge()
     if not self.ui.minimapButton or not self.ui.minimapButton.badge then return end
-    local db = self:GetGuildDB()
-    local count = db and db.unread or 0
-    if self.GetGuildChatUnread then count = count + self:GetGuildChatUnread("GUILD") + (self:IsOfficerMode() and self:GetGuildChatUnread("OFFICER") or 0) end
-    if self.GetPveUnreadTotal then count = count + self:GetPveUnreadTotal() end
-    if self.GetPveUnread then count = count + self:GetPveUnread("BOARD") end
-    if self.GetCraftingUnread then count = count + self:GetCraftingUnread("RECIPES") + self:GetCraftingUnread("REQUESTS") end
-    if self.GetTotalNotificationUnread152 then count = count + self:GetTotalNotificationUnread152() end
-    if count and count > 0 then
-        if count > 99 then count = 99 end
-        self.ui.minimapButton.badge.text:SetText(tostring(count))
+    local count,raids,groups=self:GetImportantMinimapAlerts155()
+    if count and count>0 then
+        self.ui.minimapButton.badge.text:SetText(count>9 and "9+" or tostring(count))
+        if raids>0 then
+            self.ui.minimapButton.badge:SetBackdropColor(0.62,0.035,0.025,1)
+        else
+            self.ui.minimapButton.badge:SetBackdropColor(0.05,0.24,0.52,1)
+        end
         self.ui.minimapButton.badge:Show()
     else
         self.ui.minimapButton.badge:Hide()

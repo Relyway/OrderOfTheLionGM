@@ -1,8 +1,8 @@
 -- Order of the Lion Guild Manager
--- v1.5.4 interface expansion: crafting, search, announcements and UI polish
+-- v1.5.6 interface expansion: crafting, search, announcements and UI polish
 
 OTLGM.nextUILoaded = true
-OTLGM.nextUIVersion = "1.5.4"
+OTLGM.nextUIVersion = "1.5.6"
 
 local BaseBuildUI = OTLGM.BuildUI
 local BaseRefreshNavigation = OTLGM.RefreshNavigation
@@ -235,6 +235,43 @@ local function NShort(text, limit)
     text = tostring(text or "")
     if string.len(text) <= (limit or 50) then return text end
     return string.sub(text, 1, (limit or 50) - 3) .. "..."
+end
+
+local N_QUALITY_HEX_155 = {
+    [0] = "9d9d9d", [1] = "ffffff", [2] = "1eff00", [3] = "0070dd",
+    [4] = "a335ee", [5] = "ff8000", [6] = "e6cc80",
+}
+
+local function NQualityText155(text, quality)
+    local hex = N_QUALITY_HEX_155[tonumber(quality)] or "b8b8b8"
+    return "|cff" .. hex .. tostring(text or "") .. "|r"
+end
+
+local function NValidTexture155(texture)
+    if type(texture) ~= "string" or texture == "" or texture == "0" then return nil end
+    local lower = string.lower(texture)
+    if string.find(lower, "interface\\", 1, true) ~= 1 then return nil end
+    return texture
+end
+
+local function NResolveRecipeTexture155(recipe)
+    if not recipe then return "Interface\\Icons\\INV_Misc_QuestionMark" end
+    local itemId = tonumber(recipe.itemId) or 0
+    if itemId > 0 and GetItemInfo then
+        local _, _, _, _, _, _, _, _, _, cached = GetItemInfo(itemId)
+        if NValidTexture155(cached) then recipe.icon = cached return cached end
+    end
+    return NValidTexture155(recipe.icon) or "Interface\\Icons\\INV_Misc_QuestionMark"
+end
+
+local function NResolveReagentTexture155(reagent)
+    if not reagent then return "Interface\\Icons\\INV_Misc_QuestionMark" end
+    local itemId = tonumber(reagent.itemId) or 0
+    if itemId > 0 and GetItemInfo then
+        local _, _, _, _, _, _, _, _, _, cached = GetItemInfo(itemId)
+        if NValidTexture155(cached) then reagent.icon = cached return cached end
+    end
+    return NValidTexture155(reagent.icon) or "Interface\\Icons\\INV_Misc_QuestionMark"
 end
 
 local function NAge(self, timestamp)
@@ -811,7 +848,15 @@ function OTLGM:RefreshProfessionsPage()
     for key, panel in pairs(self.ui.craftingPanels) do if key == section then panel:Show() else panel:Hide() end end
     local summary = self:GetCraftingSummary()
     local _, _, online = self:GetDetectedAddonUsers(86400)
-    self.ui.craftingNetworkText:SetText(self.colors.green .. "Network: " .. tostring(online) .. " online" .. self.colors.reset)
+    local craft = self:EnsureCraftingDB()
+    local syncState = craft and craft.syncState or nil
+    if syncState and syncState.active then
+        self.ui.craftingNetworkText:SetText(self.colors.gold .. "Syncing: " .. tostring(syncState.received or 0) .. " snapshot(s)" .. self.colors.reset)
+        NSetEnabled(self.ui.craftingSyncButton, false, "Crafting data is already being synchronized.")
+    else
+        self.ui.craftingNetworkText:SetText(self.colors.green .. "Network: " .. tostring(online) .. " online" .. self.colors.reset)
+        NSetEnabled(self.ui.craftingSyncButton, true)
+    end
     NSetButtonText(self.ui.craftingTabButtons.RECIPES, "Recipes" .. (self:GetCraftingUnread("RECIPES") > 0 and (" (" .. tostring(self:GetCraftingUnread("RECIPES")) .. ")") or ""))
     NSetButtonText(self.ui.craftingTabButtons.REQUESTS, "Crafting Requests" .. (self:GetCraftingUnread("REQUESTS") > 0 and (" (" .. tostring(self:GetCraftingUnread("REQUESTS")) .. ")") or ""))
     for key, panel in pairs(self.ui.craftingTabButtons) do NSetSelected(panel, key == section) end
@@ -859,10 +904,8 @@ function OTLGM:RefreshCraftingRecipesPanel(summary)
             onlineCount = 0
             local j
             for j = 1, table.getn(result.crafters or {}) do if result.crafters[j].online then onlineCount = onlineCount + 1 end end
-            local icon = result.recipe.icon
-            if not icon and tonumber(result.recipe.itemId) and tonumber(result.recipe.itemId) > 0 and GetItemInfo then local _, _, _, _, _, _, _, _, _, texture = GetItemInfo(result.recipe.itemId) icon = texture end
-            row.recipeIcon:SetTexture(icon or (definitionMap[result.professionKey] and definitionMap[result.professionKey].icon) or "Interface\\Icons\\INV_Misc_QuestionMark")
-            row.nameText:SetText(NShort(result.recipe.name, 27))
+            row.recipeIcon:SetTexture(NResolveRecipeTexture155(result.recipe))
+            row.nameText:SetText(NQualityText155(NShort(result.recipe.name, 27), result.recipe.quality))
             row.countText:SetText((onlineCount > 0 and self.colors.green or self.colors.grey) .. tostring(table.getn(result.crafters or {})) .. " crafter" .. (table.getn(result.crafters or {}) == 1 and "" or "s") .. self.colors.reset)
             NSetSelected(row, self.ui.craftingSelectedRecipe == result.key)
             row:Show()
@@ -881,10 +924,9 @@ function OTLGM:RefreshCraftingRecipesPanel(summary)
     self.ui.craftingSelectedRecipeData = selected
     local selectedRecipeIcon
     if selected then
-        selectedRecipeIcon = selected.recipe.icon
-        if not selectedRecipeIcon and tonumber(selected.recipe.itemId) and tonumber(selected.recipe.itemId) > 0 and GetItemInfo then local _, _, _, _, _, _, _, _, _, texture = GetItemInfo(selected.recipe.itemId) selectedRecipeIcon = texture end
-        self.ui.craftingRecipeIcon152:SetTexture(selectedRecipeIcon or (definitionMap[selected.professionKey] and definitionMap[selected.professionKey].icon) or "Interface\\Icons\\INV_Misc_QuestionMark")
-        self.ui.craftingRecipeTitle:SetText(self.colors.gold .. NShort(selected.recipe.name or "Recipe", 35) .. self.colors.reset)
+        selectedRecipeIcon = NResolveRecipeTexture155(selected.recipe)
+        self.ui.craftingRecipeIcon152:SetTexture(selectedRecipeIcon)
+        self.ui.craftingRecipeTitle:SetText(NQualityText155(NShort(selected.recipe.name or "Recipe", 35), selected.recipe.quality))
         self.ui.craftingRecipeMeta:SetText((selected.professionLabel or "Profession") .. "  |  " .. tostring(table.getn(selected.crafters or {})) .. " crafter(s)")
         self.ui.craftingRecipeIcon152:Show()
     else
@@ -909,11 +951,13 @@ function OTLGM:RefreshCraftingRecipesPanel(summary)
     if not selected then
         self.ui.craftingMaterialsEmpty152:SetText("Select a recipe to view materials.")
         self.ui.craftingMaterialsEmpty152:Show()
-    elseif table.getn(reagents) == 0 and not materialsAvailable then
-        self.ui.craftingMaterialsEmpty152:SetText("Materials unavailable until this recipe is scanned again.")
-        self.ui.craftingMaterialsEmpty152:Show()
     elseif table.getn(reagents) == 0 then
-        self.ui.craftingMaterialsEmpty152:SetText("No reagents reported by the profession window.")
+        local materialState = selected.recipe.materialsStatus or (materialsAvailable and "COMPLETE" or "UNAVAILABLE")
+        if materialState == "COMPLETE" then
+            self.ui.craftingMaterialsEmpty152:SetText("No reagents are required for this craft.")
+        else
+            self.ui.craftingMaterialsEmpty152:SetText("Materials are incomplete. Ask the crafter to reopen this profession once with the latest addon.")
+        end
         self.ui.craftingMaterialsEmpty152:Show()
     else
         self.ui.craftingMaterialsEmpty152:Hide()
@@ -922,8 +966,10 @@ function OTLGM:RefreshCraftingRecipesPanel(summary)
     self.ui.craftingMaterialsEmpty152:SetPoint("TOPLEFT", self.ui.craftingRecipeTitle:GetParent(), "TOPLEFT", 10, -92)
     self.ui.craftingMaterialsEmpty152:SetHeight(62)
     if self.ui.craftingMaterialsTitle152 then
-        if table.getn(reagents) > 3 then self.ui.craftingMaterialsTitle152:SetText("REQUIRED MATERIALS  (+" .. tostring(table.getn(reagents) - 3) .. " MORE)")
-        else self.ui.craftingMaterialsTitle152:SetText("REQUIRED MATERIALS") end
+        local title = "REQUIRED MATERIALS"
+        if table.getn(reagents) > 3 then title = title .. "  (+" .. tostring(table.getn(reagents) - 3) .. " MORE)" end
+        if selected and selected.recipe and selected.recipe.materialsStatus == "PARTIAL" then title = title .. "  -  PARTIAL" end
+        self.ui.craftingMaterialsTitle152:SetText(title)
     end
 
     local selectedCrafter
@@ -949,7 +995,7 @@ function OTLGM:RefreshCraftingRecipesPanel(summary)
     end
     NSetEnabled(self.ui.craftingWhisperButton, selectedCrafter ~= nil, "Select a guild crafter first.")
     NSetEnabled(self.ui.craftingLinkButton, selected and self:GetCraftingItemLink154(selected.recipe) ~= nil, "The item link is not cached yet.")
-    NSetEnabled(self.ui.craftingRecipeLinkButton152, selected and self:GetCraftingRecipeLink154(selected.recipe) ~= nil, "The crafter must rescan this profession with version 1.5.4 to share its recipe link.")
+    NSetEnabled(self.ui.craftingRecipeLinkButton152, selected and self:GetCraftingRecipeLink154(selected.recipe) ~= nil, "The crafter must rescan this profession with the current addon version to share its recipe link.")
     NSetEnabled(self.ui.craftingRequestButton, selected ~= nil or query ~= "", "Select a recipe or enter what you need.")
 end
 
@@ -1033,7 +1079,7 @@ function OTLGM:RefreshCraftingRequestsPanel(summary)
 end
 
 function OTLGM:BuildNextHomeEnhancements()
-    -- Home is built directly by UI.lua in 1.5.4. Keeping the old v1.5
+    -- Home is built directly by UI.lua in 1.5.6. Keeping the old v1.5
     -- Chronicle overlay disabled prevents duplicated cards and text overlap.
     self.ui.home152DirectLayout = true
 end
@@ -1675,7 +1721,7 @@ end
 
 
 -- ---------------------------------------------------------------------------
--- v1.5.4 focused usability pass: profession categories/filters and full
+-- v1.5.6 focused usability pass: profession categories/filters and full
 -- activity readers. These overrides are loaded before BuildUI is executed.
 -- ---------------------------------------------------------------------------
 

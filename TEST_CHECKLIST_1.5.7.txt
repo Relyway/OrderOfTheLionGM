@@ -1,0 +1,65 @@
+ORDER OF THE LION GM 1.5.7 - IN-GAME ACCEPTANCE CHECKLIST
+
+INSTALL / LOAD
+[ ] Close WoW and replace the entire addon folder.
+[ ] Keep the WTF folder.
+[ ] Run /otltest.
+[ ] Confirm version 1.5.7 and Quality 1.5.7=true.
+[ ] Confirm no Lua error appears during login or opening the addon.
+
+RAID PLANNER
+[ ] Open PvE Hub > Raid Alerts.
+[ ] Confirm no old Publish Raid Notice controls appear under the planner.
+[ ] Create two different raid events and confirm neither overwrites the other.
+[ ] Confirm editor preview shows weekday, full date and [HH:MM ST].
+[ ] Mark one event Main Raid and confirm its distinct icon/gold schedule style.
+[ ] Confirm Home still orders active raids by actual time.
+[ ] Cancel an event and confirm it remains clearly visible in Upcoming until its
+    original time, with red CANCELLED treatment.
+[ ] Permanently delete an event, synchronize on another client and confirm it
+    does not return.
+[ ] On a non-raider character, confirm Seen works and Ready is disabled with a
+    Discord/raider-role explanation.
+
+PROFESSIONS / ICONS
+[ ] Open each local profession once.
+[ ] Confirm local recipe icons are real icons, not red squares.
+[ ] Confirm reagent icons are real icons.
+[ ] /reload and confirm icons remain.
+[ ] On a second account, press Sync Now.
+[ ] Confirm the complete recipe count matches the source account.
+[ ] Confirm remote recipe and reagent icons appear without waiting for a random
+    page refresh.
+[ ] Disconnect the original crafter, then synchronize through another client
+    that already has the complete profession; confirm the profession can relay.
+[ ] Confirm old data stays visible while Sync is running.
+[ ] Confirm a failed/incomplete transfer does not replace a complete profession.
+
+CRAFTER INTERACTION
+[ ] Left-click a specific online crafter and confirm whisper targets that exact
+    character.
+[ ] Right-click the crafter and verify Whisper, Invite and View in Roster.
+[ ] Confirm Invite is disabled for an offline crafter.
+[ ] Repeat right-click the same crafter and confirm the menu closes.
+
+ANNOUNCEMENTS / ACTIVITY
+[ ] Publish an announcement, then click New Announcement again.
+[ ] Confirm Title and Message are empty.
+[ ] Edit the published announcement and confirm its content loads.
+[ ] Open Guild Activity and verify Important and Publications filters.
+[ ] Confirm RAID/POST/GROUP/CRAFT/REPLY/REACT entries use different colors.
+
+GUILD CHAT CONTEXT MENU
+[ ] Right-click a player name.
+[ ] Receive new chat messages and confirm the menu stays open.
+[ ] Left-click outside and confirm it closes.
+[ ] Right-click the same player twice and confirm the second click closes it.
+[ ] Press Escape and confirm it closes.
+[ ] Switch chat tabs and confirm it closes.
+
+PERFORMANCE / NETWORK
+[ ] Play for at least 15 minutes with the addon closed and confirm no periodic
+    hitching is introduced.
+[ ] Confirm Sync buttons cannot be repeatedly activated while already running.
+[ ] Confirm queues return to zero after synchronization.
+[ ] Confirm minimap indicators show only important raid/group attention items.
