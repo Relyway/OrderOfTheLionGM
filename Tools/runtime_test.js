@@ -366,8 +366,8 @@ local function auditInteractiveTree(root)
   return totals
 end
 
-check('version', OTLGM.version=='1.7.2', OTLGM.version)
-check('build-id', OTLGM.build=='stable-r3-20260720', OTLGM.build)
+check('version', OTLGM.version=='1.7.3', OTLGM.version)
+check('build-id', OTLGM.build=='stable-r4-20260721', OTLGM.build)
 check('schema', OTLGM.schemaVersion==14, OTLGM.schemaVersion)
 check('module-count', OTLGM:Count(OTLGM.modules)==21, OTLGM:Count(OTLGM.modules))
 
@@ -708,7 +708,7 @@ safe('refresh-all', function() OTLGM:RefreshAll() end)
 local diagnosticsText
 safe('diagnostics', function() diagnosticsText=OTLGM:GetDiagnosticsText() return diagnosticsText end)
 check('diagnostics-show-permission-source', diagnosticsText and string.find(diagnosticsText,'Guild action permissions:',1,true)~=nil)
-check('diagnostics-show-build-id', diagnosticsText and string.find(diagnosticsText,'Build: stable-r3-20260720',1,true)~=nil)
+check('diagnostics-show-build-id', diagnosticsText and string.find(diagnosticsText,'Build: stable-r4-20260721',1,true)~=nil)
 check('diagnostics-show-interaction-audit', diagnosticsText and string.find(diagnosticsText,'UI interactive controls',1,true)~=nil)
 
 print('INTERACTION buttons='..tostring(interactionAudit and interactionAudit.buttons or 0)..' editboxes='..tostring(interactionAudit and interactionAudit.edits or 0)..' missingMouse='..tostring(interactionAudit and interactionAudit.missingMouse or 0)..' missingClicks='..tostring(interactionAudit and interactionAudit.missingClicks or 0)..' stateMismatch='..tostring(interactionAudit and interactionAudit.stateMismatch or 0))
