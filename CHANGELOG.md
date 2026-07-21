@@ -1,6 +1,20 @@
 # Changelog
 
+
 All notable changes to OrderOfTheLionGM are documented here.
+
+
+## 1.7.3 — 2026-07-21
+
+### Launcher compatibility
+
+- Moved the live addon TOC, Assets and Modules to the repository root.
+- Added direct OctoLauncher Git installation support.
+- Enabled future one-click updates through Update and Update All.
+- Updated validation and release packaging for the new repository layout.
+- SavedVariables schema 14 and network protocol 3 remain unchanged.
+
+
 
 ## [1.7.2] - 2026-07-20
 
