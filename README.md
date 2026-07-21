@@ -1,4 +1,4 @@
-# Order of the Lion Guild Manager 1.7.2
+# Order of the Lion Guild Manager 1.7.3
 
 OrderOfTheLionGM is the guild companion for Order of the Lion on OctoWoW. It targets the Vanilla client (`Interface 11200`) and combines guild communication, roster history, leadership announcements, professions, crafting requests, PvE coordination, recruitment, activity, treasury planning, and officer tools.
 

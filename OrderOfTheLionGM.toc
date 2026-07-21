@@ -2,8 +2,8 @@
 ## Title: |cffffcc66Order of the Lion|r |cffffffffGuild Manager|r |cff75d66bOctoWoW|r
 ## Notes: |cffffffffGuild chat, roster, Crafting Network, PvE coordination, activity and officer tools.|r
 ## Author: |cffffcc66Hikol|r |cffaaaaaa(mrhikol / Lucks)|r, |cffffffffOrder of the Lion|r
-## Version: 1.7.2
-## X-Build: stable-r3-20260720
+## Version: 1.7.3
+## X-Build: stable-r4-20260721
 ## X-License: MIT
 ## X-Website: https://github.com/Relyway/OrderOfTheLionGM
 ## SavedVariables: OTLGM_DB

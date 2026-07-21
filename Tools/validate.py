@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static release validator for OrderOfTheLionGM 1.7.2."""
+"""Static release validator for OrderOfTheLionGM 1.7.3."""
 from __future__ import annotations
 
 import argparse
@@ -10,7 +10,7 @@ from pathlib import Path
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("addon_root", nargs="?", default="OrderOfTheLionGM")
+    parser.add_argument("addon_root", nargs="?", default=".")
     args = parser.parse_args()
     root = Path(args.addon_root).resolve()
     checks: list[tuple[str, bool, str]] = []
@@ -26,8 +26,8 @@ def main() -> int:
 
     toc = toc_path.read_text(encoding="utf-8-sig")
     check("Interface 11200", bool(re.search(r"^## Interface:\s*11200\s*$", toc, re.M)))
-    check("Version 1.7.2", bool(re.search(r"^## Version:\s*1\.7\.2\s*$", toc, re.M)))
-    check("stable build identifier", "## X-Build: stable-r3-20260720" in toc)
+    check("Version 1.7.3", bool(re.search(r"^## Version:\s*1\.7\.3\s*$", toc, re.M)))
+    check("stable build identifier", "## X-Build: stable-r4-20260721" in toc)
     check("SavedVariables declared", "## SavedVariables: OTLGM_DB" in toc)
 
     load_entries = [line.strip().replace("\\", "/") for line in toc.splitlines()
@@ -38,7 +38,7 @@ def main() -> int:
     missing = [entry for entry in load_entries if not (root / entry).is_file()]
     check("all TOC files exist", not missing, ", ".join(missing))
 
-    lua_files = sorted(root.rglob("*.lua"))
+    lua_files = sorted((root / "Modules").rglob("*.lua"))
     check("21 Lua files in package", len(lua_files) == 21, str(len(lua_files)))
     check("TOC covers every Lua file",
           {str(p.relative_to(root)).replace("\\", "/") for p in lua_files} == set(lua_entries))
@@ -111,8 +111,8 @@ def main() -> int:
     experience_ui = (root / "Modules/UI/Experience.lua").read_text(encoding="ascii")
     coordination_ui = (root / "Modules/Integration/Coordination.lua").read_text(encoding="ascii")
 
-    check("runtime version constant", 'OTLGM.version = "1.7.2"' in bootstrap)
-    check("runtime build constant", 'OTLGM.build = "stable-r3-20260720"' in bootstrap)
+    check("runtime version constant", 'OTLGM.version = "1.7.3"' in bootstrap)
+    check("runtime build constant", 'OTLGM.build = "stable-r4-20260721"' in bootstrap)
     check("central interaction repair installed", "PrepareInteractiveControl170" in theme and "RepairInteractiveTree170" in theme)
     check("all UI generations share enabled-state setter",
           "SetControlEnabled170(button, enabled, reason)" in main_ui and
@@ -133,7 +133,13 @@ def main() -> int:
 
     required_files = [root / "Assets/LionCrest.tga", root / "README.md", root / "LICENSE"]
     check("required package files present", all(path.is_file() for path in required_files))
-    forbidden = [p for p in root.rglob("*") if p.name in {".git", "node_modules", "__pycache__"}]
+    forbidden = []
+    for package_root in (root / "Assets", root / "Modules"):
+        if package_root.exists():
+            forbidden.extend(
+                p for p in package_root.rglob("*")
+                if p.name in {".git", "node_modules", "__pycache__"}
+            )
     check("no development directories in install addon", not forbidden, ", ".join(map(str, forbidden)))
 
     return report(checks)

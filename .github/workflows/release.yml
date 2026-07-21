@@ -12,6 +12,7 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,7 +42,7 @@ jobs:
         shell: bash
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
-          TOC_VERSION="$(sed -n 's/^## Version:[[:space:]]*//p' OrderOfTheLionGM/OrderOfTheLionGM.toc | tr -d '\r')"
+          TOC_VERSION="$(sed -n 's/^## Version:[[:space:]]*//p' OrderOfTheLionGM.toc | tr -d '\r')"
           test "$TAG_VERSION" = "$TOC_VERSION" || {
             echo "Tag version $TAG_VERSION does not match TOC version $TOC_VERSION"
             exit 1
@@ -50,10 +51,16 @@ jobs:
       - name: Build install ZIP
         shell: bash
         run: |
-          mkdir -p release
-          zip -r "release/OrderOfTheLionGM-${GITHUB_REF_NAME}.zip" OrderOfTheLionGM \
-            -x '*/.DS_Store' '*/Thumbs.db'
+          rm -rf release
+          mkdir -p release/OrderOfTheLionGM
+          cp OrderOfTheLionGM.toc release/OrderOfTheLionGM/
+          cp -R Assets release/OrderOfTheLionGM/
+          cp -R Modules release/OrderOfTheLionGM/
+          cp README.md release/OrderOfTheLionGM/
+          cp LICENSE release/OrderOfTheLionGM/
           cd release
+          zip -r "OrderOfTheLionGM-${GITHUB_REF_NAME}.zip" OrderOfTheLionGM \
+            -x '*/.DS_Store' '*/Thumbs.db'
           sha256sum "OrderOfTheLionGM-${GITHUB_REF_NAME}.zip" > "OrderOfTheLionGM-${GITHUB_REF_NAME}.sha256"
 
       - name: Publish GitHub Release
@@ -62,4 +69,4 @@ jobs:
           files: |
             release/OrderOfTheLionGM-${{ github.ref_name }}.zip
             release/OrderOfTheLionGM-${{ github.ref_name }}.sha256
-          body_path: docs/RELEASE_NOTES_1.7.2.md
+          body_path: docs/RELEASE_NOTES_1.7.3.md
