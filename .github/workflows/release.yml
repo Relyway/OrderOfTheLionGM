@@ -1,0 +1,65 @@
+name: Build release archive
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate
+        run: |
+          npm run validate
+          npm run parse
+          npm run ast
+          npm test
+
+      - name: Verify tag matches TOC version
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          TOC_VERSION="$(sed -n 's/^## Version:[[:space:]]*//p' OrderOfTheLionGM/OrderOfTheLionGM.toc | tr -d '\r')"
+          test "$TAG_VERSION" = "$TOC_VERSION" || {
+            echo "Tag version $TAG_VERSION does not match TOC version $TOC_VERSION"
+            exit 1
+          }
+
+      - name: Build install ZIP
+        shell: bash
+        run: |
+          mkdir -p release
+          zip -r "release/OrderOfTheLionGM-${GITHUB_REF_NAME}.zip" OrderOfTheLionGM \
+            -x '*/.DS_Store' '*/Thumbs.db'
+          cd release
+          sha256sum "OrderOfTheLionGM-${GITHUB_REF_NAME}.zip" > "OrderOfTheLionGM-${GITHUB_REF_NAME}.sha256"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/OrderOfTheLionGM-${{ github.ref_name }}.zip
+            release/OrderOfTheLionGM-${{ github.ref_name }}.sha256
+          body_path: docs/RELEASE_NOTES_1.7.2.md

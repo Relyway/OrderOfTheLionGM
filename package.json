@@ -1,0 +1,16 @@
+{
+  "name": "order-of-the-lion-guild-manager-release-tools",
+  "version": "1.7.2",
+  "private": true,
+  "description": "Offline release validation for the Vanilla/OctoWoW OrderOfTheLionGM addon",
+  "scripts": {
+    "validate": "python3 Tools/validate.py OrderOfTheLionGM",
+    "parse": "node Tools/parse_all.js OrderOfTheLionGM",
+    "ast": "node Tools/analyze_ast.js OrderOfTheLionGM",
+    "test": "node Tools/runtime_test.js OrderOfTheLionGM"
+  },
+  "devDependencies": {
+    "fengari": "0.1.4",
+    "luaparse": "0.3.1"
+  }
+}
