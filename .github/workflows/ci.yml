@@ -1,0 +1,43 @@
+name: Validate addon
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: npm ci
+
+      - name: Static validation
+        run: npm run validate
+
+      - name: Parse Lua 5.1 files
+        run: npm run parse
+
+      - name: Analyze definitions
+        run: npm run ast
+
+      - name: Run deterministic scenarios
+        run: npm test
