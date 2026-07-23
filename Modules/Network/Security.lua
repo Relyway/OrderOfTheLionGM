@@ -119,6 +119,68 @@ local function IsRecentAnnouncementSync(self)
     return requested > 0 and self:Now() - requested <= 30
 end
 
+local function IsAssignedRaidInviteSender175(self, raidId, sender)
+    if not self.GetRaidById156 then return false end
+    local record = self:GetRaidById156(raidId)
+    if not record then return false end
+    local wanted = self:NormalizeName(sender or "")
+    if wanted == "" then return false end
+    if self:NormalizeName(record.raidLeader or record.author or "") == wanted then return true end
+    if self:NormalizeName(record.inviteContact or "") == wanted then return true end
+    local helpers = string.gsub(tostring(record.inviteHelpers or ""), ";", ",")
+    local parts = self:Split(helpers, ",")
+    local index, part
+    for index = 1, table.getn(parts) do
+        part = parts[index]
+        if self:NormalizeName(part) == wanted then return true end
+    end
+    return false
+end
+
+
+local function RaidMetaUnescape175(text)
+    text=tostring(text or "")
+    text=string.gsub(text,"%%0A","\n")
+    text=string.gsub(text,"%%2C",",")
+    text=string.gsub(text,"%%7E","~")
+    text=string.gsub(text,"%%7C","|")
+    text=string.gsub(text,"%%5E","^")
+    text=string.gsub(text,"%%25","%%")
+    return text
+end
+
+local function NormalizeRaidHelpers175(self,text)
+    local names={}
+    local parts,index,part
+    text=string.gsub(tostring(text or ""),";",",")
+    parts=self:Split(text,",")
+    for index=1,table.getn(parts) do
+        part=self:NormalizeName(parts[index])
+        if part~="" then table.insert(names,part) end
+    end
+    table.sort(names)
+    return table.concat(names,",")
+end
+
+local function AssignedRaidMetaIsInviteOnly175(self,fields,sender)
+    local record=self.GetRaidById156 and self:GetRaidById156(fields[3] or "") or nil
+    if not record or not IsAssignedRaidInviteSender175(self,fields[3],sender) then return false end
+    local sameFeatured=(fields[5]=="1")==(record.featured and true or false)
+    local sameCancel=RaidMetaUnescape175(fields[6] or "")==tostring(record.cancelReason or "")
+    local incomingLeader=self:NormalizeName(RaidMetaUnescape175(fields[7] or ""))
+    local incomingContact=self:NormalizeName(RaidMetaUnescape175(fields[8] or ""))
+    local incomingHelpers=NormalizeRaidHelpers175(self,RaidMetaUnescape175(fields[9] or ""))
+    local currentLeader=self:NormalizeName(record.raidLeader or record.author or "")
+    local currentContact=self:NormalizeName(record.inviteContact or record.raidLeader or record.author or "")
+    local currentHelpers=NormalizeRaidHelpers175(self,record.inviteHelpers or "")
+    local inviteRevision=tonumber(fields[10]) or -1
+    local currentInviteRevision=tonumber(record.inviteRevision) or 0
+    local inviteTs=tonumber(fields[12]) or 0
+    return sameFeatured and sameCancel and incomingLeader==currentLeader and incomingContact==currentContact
+        and incomingHelpers==currentHelpers and inviteRevision>=currentInviteRevision
+        and inviteRevision<=currentInviteRevision+1 and inviteTs>0 and math.abs(self:Now()-inviteTs)<=600
+end
+
 local function IsRecentSharedActivitySync(self)
     local db = self:GetGuildDB()
     local shared = db and db.sharedActivity156
@@ -226,6 +288,21 @@ function OTLGM:HandleAddonMessage(prefix, message, channel, sender)
         self:RememberAddonUser(sender, detectedVersion)
     end
 
+    if protocol == "F1" then
+        if channel ~= "WHISPER" then return Reject(self, "release175-channel", sender) end
+        if kind == "STATE" then
+            if not ValidShortField(fields[3] or "", 16) or string.len(fields[4] or "") > 12
+                or string.len(fields[5] or "") > 180 or string.len(fields[6] or "") > 80
+                or not tonumber(fields[7]) then return Reject(self, "release175-state-shape", sender) end
+        elseif kind == "REVIVE" then
+            if not ValidShortField(fields[3] or "", 48) or string.len(fields[4] or "") > 80
+                or not tonumber(fields[5]) or string.len(fields[6] or "") > 80 then return Reject(self, "release175-revive-shape", sender) end
+        else
+            return Reject(self, "unknown-release175-kind", sender)
+        end
+        return self.HandleRelease175Message and self:HandleRelease175Message(message, channel, sender) or false
+    end
+
     if protocol == "P1" then
         if kind == "SYNC" then
             if channel ~= "GUILD" then return Reject(self, "pve-sync-channel", sender) end
@@ -238,7 +315,9 @@ function OTLGM:HandleAddonMessage(prefix, message, channel, sender)
             if not direct and not relay then return Reject(self, "pve-leadership", sender) end
         elseif kind == "RDMETA" then
             if not self:IsValidID(fields[3], 64) or not ValidRevision(fields[4]) then return Reject(self, "pve-meta-shape", sender) end
-            if not self:IsLeadershipSender(sender) and not CanRelayPve(self, channel, sender, true) then return Reject(self, "pve-meta-authority", sender) end
+            if not self:IsLeadershipSender(sender) and not CanRelayPve(self, channel, sender, true) then
+                if not AssignedRaidMetaIsInviteOnly175(self, fields, sender) then return Reject(self, "pve-meta-authority", sender) end
+            end
         elseif kind == "NOTICE" then
             if not self:IsLeadershipSender(sender) then return Reject(self, "pve-notice-leadership", sender) end
         elseif kind == "REQ" and not DirectOrExpectedPve(self, fields, sender, channel, 7) then
@@ -331,6 +410,22 @@ function OTLGM:HandleAddonMessage(prefix, message, channel, sender)
             return Reject(self, "unknown-treasury-kind", sender)
         end
         return self.HandleTreasuryMessage170 and self:HandleTreasuryMessage170(message, channel, sender) or false
+    end
+
+    if protocol == "H1" then
+        if kind ~= "SECRET" or channel ~= "WHISPER" then return Reject(self, "achievement-secret-channel", sender) end
+        local id = fields[3] or ""
+        local emoteKind = fields[4] or ""
+        local zone = fields[5] or ""
+        local timestamp = tonumber(fields[6]) or 0
+        local eventKey = fields[7] or ""
+        if (id ~= "A081" and id ~= "A082" and id ~= "A083")
+            or (emoteKind ~= "roar" and emoteKind ~= "dance" and emoteKind ~= "kneel")
+            or not ValidShortField(zone, 80) or not ValidShortField(eventKey, 80)
+            or timestamp <= 0 or math.abs(self:Now() - timestamp) > 45 then
+            return Reject(self, "achievement-secret-shape", sender)
+        end
+        return self.HandleAchievementSecretMessage174 and self:HandleAchievementSecretMessage174(fields, sender, channel) or false
     end
 
     if protocol == "S1" or protocol == "S2" then

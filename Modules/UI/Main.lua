@@ -899,6 +899,40 @@ function OTLGM:ProcessStatus170()
     if self.ui and self.ui.statusBar then self.ui.statusBar:Hide() end
 end
 
+function OTLGM:SetNavigationBadge170(button, count, tone, textOverride)
+    if not button then return end
+    count = tonumber(count) or 0
+    if not button.navBadge170 then
+        local badge = CreateFrame("Frame", nil, button)
+        badge:SetWidth(24)
+        badge:SetHeight(16)
+        badge:SetPoint("RIGHT", button, "RIGHT", -5, 0)
+        badge:SetFrameLevel(button:GetFrameLevel() + 3)
+        CreateBackdrop(badge, 2)
+        badge.text = badge:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        badge.text:SetPoint("CENTER", badge, "CENTER", 0, 0)
+        button.navBadge170 = badge
+        if button.text then button.text:SetWidth(math.max(40, (button:GetWidth() or 142) - 62)) end
+    end
+    local badge = button.navBadge170
+    if count <= 0 and not textOverride then badge:Hide() return end
+    badge.text:SetText(textOverride or (count > 9 and "9+" or tostring(count)))
+    if tone == "mention" then
+        badge:SetBackdropColor(0.05, 0.23, 0.52, 1)
+        badge:SetBackdropBorderColor(0.34, 0.72, 1.0, 1)
+    elseif tone == "green" then
+        badge:SetBackdropColor(0.035, 0.25, 0.08, 1)
+        badge:SetBackdropBorderColor(0.28, 0.78, 0.36, 1)
+    elseif tone == "red" then
+        badge:SetBackdropColor(0.50, 0.035, 0.025, 1)
+        badge:SetBackdropBorderColor(1.0, 0.30, 0.18, 1)
+    else
+        badge:SetBackdropColor(0.36, 0.20, 0.025, 1)
+        badge:SetBackdropBorderColor(0.94, 0.63, 0.16, 1)
+    end
+    badge:Show()
+end
+
 function OTLGM:RefreshGuildChatNavigationBadge()
     if not self.ui or not self.ui.navButtons then return end
     local chatButton = self.ui.navButtons.guildchat
@@ -906,15 +940,10 @@ function OTLGM:RefreshGuildChatNavigationBadge()
     local guildUnread = self:GetGuildChatUnread("GUILD")
     local officerUnread = self:IsOfficerMode() and self:GetGuildChatUnread("OFFICER") or 0
     local boardUnread = self.GetPveUnread and self:GetPveUnread("BOARD") or 0
-    if guildUnread > 0 or officerUnread > 0 or boardUnread > 0 then
-        local label = "Guild Chat"
-        if guildUnread > 0 then label = label .. "  " .. self.colors.green .. "G" .. tostring(guildUnread > 99 and "99+" or guildUnread) .. self.colors.reset end
-        if officerUnread > 0 then label = label .. " " .. self.colors.gold .. "O" .. tostring(officerUnread > 99 and "99+" or officerUnread) .. self.colors.reset end
-        if boardUnread > 0 then label = label .. " " .. self.colors.blue .. "B" .. tostring(boardUnread > 99 and "99+" or boardUnread) .. self.colors.reset end
-        SetButtonText(chatButton, label)
-    else
-        SetButtonText(chatButton, "Guild Chat")
-    end
+    local mentionCount = self.GetInboxUnreadCount170 and self:GetInboxUnreadCount170("mention") or 0
+    local total = guildUnread + officerUnread + boardUnread
+    SetButtonText(chatButton, "Guild Chat")
+    self:SetNavigationBadge170(chatButton, total, mentionCount > 0 and "mention" or "green", mentionCount > 0 and "@" or nil)
 end
 
 function OTLGM:RefreshPveNavigationBadge()
@@ -923,15 +952,11 @@ function OTLGM:RefreshPveNavigationBadge()
     if not button then return end
     local unread = self.GetPveUnreadTotal and self:GetPveUnreadTotal() or 0
     local summary = self.GetPveSummary and self:GetPveSummary() or { requests = 0, raid = nil }
-    local label = "PvE Hub"
-    if unread > 0 then
-        label = label .. "  " .. self.colors.gold .. tostring(unread > 99 and "99+" or unread) .. self.colors.reset
-    elseif summary.raid then
-        label = label .. "  " .. self.colors.green .. "!" .. self.colors.reset
-    elseif (summary.requests or 0) > 0 then
-        label = label .. "  " .. self.colors.blue .. tostring(summary.requests) .. self.colors.reset
-    end
-    SetButtonText(button, label)
+    SetButtonText(button, "PvE Hub")
+    if unread > 0 then self:SetNavigationBadge170(button, unread, "gold")
+    elseif summary.raid then self:SetNavigationBadge170(button, 1, "red", "!")
+    elseif (summary.requests or 0) > 0 then self:SetNavigationBadge170(button, summary.requests, "mention")
+    else self:SetNavigationBadge170(button, 0) end
 end
 
 function OTLGM:_Stage_UI_RefreshNavigation_1()
@@ -1187,14 +1212,15 @@ local function HomeShort152(text, maximum)
 end
 
 function OTLGM:BuildHomePage(page)
-    self.ui.homeTitle170 = CreateText(page, "GameFontNormalLarge", "Guild Feed", 0, -2, 420, "LEFT")
-    CreateHelpButton(page, "Home", "Leadership announcements, the next raid, online leadership and a small useful activity feed. Technical database counters are kept in Settings instead of the guild home page.")
-    self.ui.homeSubtitle170 = CreateText(page, "GameFontNormalSmall", "Official posts, decisions and what deserves your attention now.", 0, -28, 700, "LEFT")
+    self.ui.homeTitle170 = CreateText(page, "GameFontNormalLarge", "", 0, -2, 420, "LEFT")
+    self.ui.homeTitle170:Hide()
+    self.ui.homeSubtitle170 = CreateText(page, "GameFontNormalSmall", "", 0, -28, 700, "LEFT")
+    self.ui.homeSubtitle170:Hide()
 
     local announcements = CreateFrame("Frame", nil, page)
-    announcements:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -56)
+    announcements:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -8)
     announcements:SetWidth(450)
-    announcements:SetHeight(460)
+    announcements:SetHeight(508)
     CreateBackdrop(announcements, 5)
     announcements:SetBackdropColor(0.026, 0.023, 0.019, 0.995)
     announcements:SetBackdropBorderColor(0.48, 0.34, 0.15, 1)
@@ -1275,40 +1301,40 @@ function OTLGM:BuildHomePage(page)
     end
     self.ui.homeNoAnnouncements = CreateWrappedText(announcements, "GameFontNormal", "No leadership announcements have been published yet.\n\nWhen leadership posts an update, it will appear here instead of being mixed with roster history.", 34, -138, 382, 110)
     self.ui.homeNoAnnouncements:SetTextColor(0.62, 0.62, 0.60)
-    self.ui.homeAnnouncementArchiveButton = CreateButton(announcements, nil, "Open Announcement Archive", 10, -424, 210, 26, function()
+    self.ui.homeAnnouncementArchiveButton = CreateButton(announcements, nil, "Open Announcement Archive", 10, -472, 210, 26, function()
         OTLGM:OpenAnnouncementArchive152()
     end)
     SetButtonActionStyle(self.ui.homeAnnouncementArchiveButton, "utility")
-    self.ui.homeAnnouncementHint = CreateText(announcements, "GameFontNormalSmall", "Reactions belong to each individual post.", 230, -432, 208, "RIGHT")
+    self.ui.homeAnnouncementHint = CreateText(announcements, "GameFontNormalSmall", "Reactions belong to each individual post.", 230, -480, 208, "RIGHT")
     self.ui.homeAnnouncementHint:SetTextColor(0.48, 0.48, 0.46)
     self.ui.homeAnnouncementsPanel = announcements
 
     local raid = CreateFrame("Frame", nil, page)
-    raid:SetPoint("TOPLEFT", page, "TOPLEFT", 460, -56)
+    raid:SetPoint("TOPLEFT", page, "TOPLEFT", 460, -8)
     raid:SetWidth(258)
-    raid:SetHeight(138)
+    raid:SetHeight(220)
     CreateBackdrop(raid, 5)
     raid:SetBackdropColor(0.035, 0.025, 0.020, 0.995)
     raid:SetBackdropBorderColor(0.52, 0.18, 0.12, 1)
     CreateText(raid, "GameFontNormalSmall", "NEXT RAID", 12, -9, 108, "LEFT")
-    self.ui.homeRaidText = CreateWrappedText(raid, "GameFontHighlightSmall", "", 12, -27, 234, 39)
-    CreateText(raid, "GameFontNormalSmall", "ACTIVE GROUPS", 12, -67, 108, "LEFT")
-    self.ui.homeGroupsText155 = CreateWrappedText(raid, "GameFontHighlightSmall", "", 12, -84, 234, 20)
-    self.ui.homeRaidButton = CreateButton(raid, nil, "Raid Alerts", 12, -108, 104, 22, function()
+    self.ui.homeRaidText = CreateWrappedText(raid, "GameFontHighlightSmall", "", 12, -28, 234, 112)
+    CreateText(raid, "GameFontNormalSmall", "ACTIVE GROUPS", 12, -148, 108, "LEFT")
+    self.ui.homeGroupsText155 = CreateWrappedText(raid, "GameFontHighlightSmall", "", 12, -165, 234, 20)
+    self.ui.homeRaidButton = CreateButton(raid, nil, "View Raid", 12, -190, 104, 22, function()
         OTLGM_DB.settings.pveSection = "RAIDS"
         OTLGM:ShowPage("pve")
     end)
     SetButtonActionStyle(self.ui.homeRaidButton, "raid")
-    self.ui.homeGroupsButton155 = CreateButton(raid, nil, "Group Finder", 124, -108, 122, 22, function()
+    self.ui.homeGroupsButton155 = CreateButton(raid, nil, "Group Finder", 124, -190, 122, 22, function()
         OTLGM_DB.settings.pveSection = "GROUPS"
         OTLGM:ShowPage("pve")
     end)
     SetButtonActionStyle(self.ui.homeGroupsButton155, "utility")
 
     local leaders = CreateFrame("Frame", nil, page)
-    leaders:SetPoint("TOPLEFT", page, "TOPLEFT", 460, -204)
+    leaders:SetPoint("TOPLEFT", page, "TOPLEFT", 460, -238)
     leaders:SetWidth(258)
-    leaders:SetHeight(142)
+    leaders:SetHeight(128)
     CreateBackdrop(leaders, 5)
     leaders:SetBackdropColor(0.026, 0.023, 0.019, 0.995)
     leaders:SetBackdropBorderColor(0.40, 0.31, 0.17, 1)
@@ -1348,9 +1374,9 @@ function OTLGM:BuildHomePage(page)
     self.ui.homeNoLeaders:SetTextColor(0.55, 0.55, 0.55)
 
     local recent = CreateFrame("Frame", nil, page)
-    recent:SetPoint("TOPLEFT", page, "TOPLEFT", 460, -356)
+    recent:SetPoint("TOPLEFT", page, "TOPLEFT", 460, -376)
     recent:SetWidth(258)
-    recent:SetHeight(124)
+    recent:SetHeight(108)
     CreateBackdrop(recent, 5)
     recent:SetBackdropColor(0.026, 0.023, 0.019, 0.995)
     recent:SetBackdropBorderColor(0.36, 0.29, 0.18, 1)
@@ -1369,7 +1395,7 @@ function OTLGM:BuildHomePage(page)
     self.ui.homeUsefulEmpty = CreateWrappedText(recent, "GameFontNormalSmall", "No recent group, request or response activity.", 12, -48, 234, 48)
     self.ui.homeUsefulEmpty:SetTextColor(0.52, 0.52, 0.50)
 
-    self.ui.homeGuildInfoButton = CreateButton(page, nil, "Guild Information & Rules", 460, -490, 258, 26, function() OTLGM:ShowPage("guildinfo") end)
+    self.ui.homeGuildInfoButton = CreateButton(page, nil, "Guild Information & Rules", 460, -492, 258, 24, function() OTLGM:ShowPage("guildinfo") end)
     AddButtonIcon(self.ui.homeGuildInfoButton, "Interface\\Icons\\INV_Scroll_03", 14, true)
     SetButtonActionStyle(self.ui.homeGuildInfoButton, "primary")
 end
@@ -2018,6 +2044,19 @@ function OTLGM:BuildOverviewPage(page)
     for i = 1, 7 do
         self.ui.overviewEvents[i] = CreateText(page, "GameFontNormalSmall", "", 0, -338 - ((i - 1) * 23), 718, "LEFT")
     end
+    self.ui.overviewAnnouncementButton = CreateButton(page, nil, "Announcement", 0, -494, 126, 30, function()
+        OTLGM:OpenAnnouncementComposer152(nil)
+    end)
+    SetButtonActionStyle(self.ui.overviewAnnouncementButton, "confirm")
+    self.ui.overviewRaidButton = CreateButton(page, nil, "Create Raid", 136, -494, 116, 30, function()
+        OTLGM_DB.settings.pveSection = "RAIDS"
+        OTLGM:ShowPage("pve")
+    end)
+    SetButtonActionStyle(self.ui.overviewRaidButton, "raid")
+    self.ui.overviewRecruitButton = CreateButton(page, nil, "Recruitment", 262, -494, 120, 30, function()
+        OTLGM:ShowPage("recruitment")
+    end)
+    SetButtonActionStyle(self.ui.overviewRecruitButton, "utility")
     self.ui.overviewSummaryButton = CreateButton(page, nil, "Copy Weekly Summary", 552, -494, 166, 30, function()
         OTLGM:ShowCopyDialog("Weekly Guild Summary", OTLGM:GenerateWeeklySummary())
     end)
@@ -2040,8 +2079,15 @@ function OTLGM:_Stage_UI_RefreshOverviewPage_1()
     self.ui.overviewCards.members.sub:SetText("Tracked characters")
     self.ui.overviewCards.online.value:SetText(self.colors.green .. tostring(db.lastOnline or 0) .. self.colors.reset)
     self.ui.overviewCards.online.sub:SetText(tostring(onlinePercent) .. "% of roster online")
-    self.ui.overviewCards.joined.value:SetText(self.colors.green .. "+" .. tostring(stats.joins) .. self.colors.reset .. "  " .. self.colors.red .. "-" .. tostring(stats.leaves) .. self.colors.reset)
-    self.ui.overviewCards.joined.sub:SetText("Last 7 days")
+    local rosterDelta = (tonumber(stats.joins) or 0) + (tonumber(stats.leaves) or 0)
+    local implausibleDelta = (db.lastTotal or 0) > 0 and rosterDelta > math.max(50, math.floor((db.lastTotal or 0) * 0.25))
+    if implausibleDelta then
+        self.ui.overviewCards.joined.value:SetText(self.colors.gold .. "REVIEW" .. self.colors.reset)
+        self.ui.overviewCards.joined.sub:SetText("Large roster delta - open History")
+    else
+        self.ui.overviewCards.joined.value:SetText(self.colors.green .. "+" .. tostring(stats.joins) .. self.colors.reset .. "  " .. self.colors.red .. "-" .. tostring(stats.leaves) .. self.colors.reset)
+        self.ui.overviewCards.joined.sub:SetText("Last 7 days")
+    end
     self.ui.overviewCards.inactive.value:SetText(tostring(stats.inactive30))
     self.ui.overviewCards.inactive.sub:SetText("Offline 30 days or more")
     self.ui.overviewCards.unread.value:SetText(self.colors.gold .. tostring(stats.unread) .. self.colors.reset)
@@ -3081,6 +3127,8 @@ function OTLGM:_Stage_UI_BuildActivityPage_1(page)
     CreateText(composition, "GameFontNormal", "GUILD COMPOSITION", 12, -10, 214, "LEFT")
     self.ui.compositionTotal = CreateWrappedText(composition, "GameFontNormal", "", 12, -38, 214, 202)
     self.ui.compositionOnline = CreateWrappedText(composition, "GameFontNormal", "", 12, -244, 214, 82)
+    self.ui.activityInsightText170 = CreateText(page, "GameFontNormalSmall", "", 0, -505, 510, "LEFT")
+    self.ui.activityInsightText170:SetTextColor(0.74, 0.70, 0.60)
     self.ui.activitySummaryButton = CreateButton(page, nil, "Copy Weekly Summary", 532, -502, 186, 28, function()
         OTLGM:ShowCopyDialog("Weekly Guild Summary", OTLGM:GenerateWeeklySummary())
     end)
@@ -3109,6 +3157,22 @@ function OTLGM:_Stage_UI_RefreshActivityPage_1()
             cell:SetBackdropColor(0.05 + (0.38 * intensity), 0.04 + (0.19 * intensity), 0.025, 1)
             cell:SetBackdropBorderColor(0.24 + (0.55 * intensity), 0.18 + (0.30 * intensity), 0.10, 1)
             cell.text:SetText(value > 0 and tostring(math.floor(value + 0.5)) or "-")
+        end
+    end
+
+    if self.ui.activityInsightText170 then
+        local bestValue, bestDay, bestSlot = 0, nil, nil
+        local dayLabels = { [0]="Sunday", [1]="Monday", [2]="Tuesday", [3]="Wednesday", [4]="Thursday", [5]="Friday", [6]="Saturday" }
+        for weekday = 0, 6 do
+            for slot = 0, 7 do
+                local value = matrix[weekday][slot] or 0
+                if value > bestValue then bestValue, bestDay, bestSlot = value, weekday, slot end
+            end
+        end
+        if bestDay and bestValue > 0 then
+            self.ui.activityInsightText170:SetText("Best observed window: " .. dayLabels[bestDay] .. " " .. string.format("%02d:00-%02d:00 ST", bestSlot * 3, math.mod((bestSlot + 1) * 3, 24)) .. "  -  average " .. tostring(math.floor(bestValue + 0.5)) .. " online")
+        else
+            self.ui.activityInsightText170:SetText("More shared activity samples are needed before a reliable guild-time recommendation can be shown.")
         end
     end
 
@@ -3684,7 +3748,7 @@ function OTLGM:InsertGuildChatName(sender)
     local current = edit:GetText() or ""
     local prefix = ""
     if current ~= "" and string.sub(current, -1) ~= " " then prefix = " " end
-    local token = prefix .. "[" .. shortName .. "] "
+    local token = prefix .. "@" .. shortName .. " "
     if edit.Insert then edit:Insert(token) else edit:SetText(current .. token) end
 end
 
@@ -3956,7 +4020,21 @@ function OTLGM:GuildChatTextMentionsPlayer(text)
     playerName = string.lower(string.gsub(playerName or "", "%-.*$", ""))
     if playerName == "" then return false end
     local lowered = string.lower(StripColorCodes(text or ""))
-    return string.find(lowered, playerName, 1, true) ~= nil
+    if string.find(lowered, "@" .. playerName, 1, true) then return true end
+
+    -- Preserve natural-name mentions without matching the name inside a longer
+    -- word (for example, Luck must not trigger on unlucky).
+    local cursor = 1
+    while true do
+        local startAt, endAt = string.find(lowered, playerName, cursor, true)
+        if not startAt then return false end
+        local before = startAt > 1 and string.sub(lowered, startAt - 1, startAt - 1) or ""
+        local after = endAt < string.len(lowered) and string.sub(lowered, endAt + 1, endAt + 1) or ""
+        local beforeIsName = before ~= "" and string.find(before, "[%w_]" ) ~= nil
+        local afterIsName = after ~= "" and string.find(after, "[%w_]" ) ~= nil
+        if not beforeIsName and not afterIsName then return true end
+        cursor = endAt + 1
+    end
 end
 
 function OTLGM:GetGuildChatVisibleText(text)
@@ -4307,7 +4385,7 @@ function OTLGM:BuildGuildChatPage(page)
         ApplyCompatibleChatFont(row.messageFrame, 1)
         if row.messageFrame.SetJustifyH then row.messageFrame:SetJustifyH("LEFT") end
         row.messageFrame:SetFading(false)
-        row.messageFrame:SetMaxLines(5)
+        row.messageFrame:SetMaxLines(12)
         if row.messageFrame.SetHyperlinksEnabled then row.messageFrame:SetHyperlinksEnabled(true) end
         row.messageFrame:EnableMouse(true)
         row.messageFrame:SetScript("OnHyperlinkClick", function()
@@ -4701,7 +4779,7 @@ function OTLGM:_Stage_UI_RefreshGuildChatPage_1()
     if endIndex < 0 then endIndex = 0 end
     local visibleItems = self:GetGuildChatVisibleItems(messages, endIndex, markerIndex)
     local cursorY = 30
-    local rowNumber, item, row, messageInfo, member, badgePath, rankToken, rankLabel, rankR, rankG, rankB
+    local rowNumber, item, row, messageInfo, member, badgePath, rankToken, rankLabel, rankR, rankG, rankB, isAchievementMessage
     for rowNumber = 1, CHAT_ROWS do
         row = self.ui.chatRows[rowNumber]
         item = visibleItems[rowNumber]
@@ -4743,36 +4821,50 @@ function OTLGM:_Stage_UI_RefreshGuildChatPage_1()
             row.timeText:ClearAllPoints()
             row.timeText:SetPoint("TOPLEFT", row, "TOPLEFT", 6, contentY - 1)
             row.timeText:SetText(date("%H:%M", messageInfo.ts or self:Now()))
-            row.rankButton:ClearAllPoints()
-            row.rankButton:SetPoint("TOPLEFT", row, "TOPLEFT", 54, contentY)
-            if OTLGM_DB.settings.chatShowRanks == false then
-                row.rankIcon:Hide()
-                row.rankText:SetText("")
-            elseif badgePath then
-                row.rankIcon:SetTexture(badgePath)
-                row.rankIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-                row.rankIcon:SetVertexColor(1, 1, 1)
-                row.rankIcon:Show()
-                row.rankText:SetText("")
-            else
-                row.rankIcon:Hide()
-                row.rankText:SetText(rankToken or "-")
-                row.rankText:SetTextColor(rankR or 0.72, rankG or 0.72, rankB or 0.72)
-            end
-            row.senderButton:ClearAllPoints()
-            row.senderButton:SetPoint("TOPLEFT", row, "TOPLEFT", 100, contentY)
-            row.senderText:SetText(self:GetGuildChatSenderColor(messageInfo.sender) .. string.gsub(messageInfo.sender or "Unknown", "%-.*$", "") .. self.colors.reset)
+            isAchievementMessage = string.find(tostring(messageInfo.text or ""), "^%[Guild Achievement%]") ~= nil
 
             row.messageFrame:ClearAllPoints()
-            row.messageFrame:SetPoint("TOPLEFT", row, "TOPLEFT", 224, contentY)
-            row.messageFrame:SetHeight(item.lines * 16 + 3)
+            row.messageFrame:SetHeight(item.lines * 17 + 6)
             row.messageFrame:Clear()
-            row.messageFrame:AddMessage(self:FormatGuildChatDisplayText(messageInfo.text or ""), 1, 1, 1)
-
-            if messageInfo.channel == "OFFICER" then
-                row.channelAccent:SetTexture(0.95, 0.58, 0.16, 0.95)
+            if isAchievementMessage then
+                row.rankButton:Hide()
+                row.senderButton:Hide()
+                row.messageFrame:SetPoint("TOPLEFT", row, "TOPLEFT", 58, contentY)
+                row.messageFrame:SetWidth(606)
+                row.messageFrame:AddMessage(self:FormatGuildChatDisplayText(messageInfo.text or ""), 1.0, 0.84, 0.32)
+                row.channelAccent:SetTexture(0.95, 0.62, 0.16, 0.98)
+                row.shade:SetTexture(0.16, 0.10, 0.025, 0.66)
             else
-                row.channelAccent:SetTexture(0.18, 0.78, 0.30, 0.95)
+                row.rankButton:Show()
+                row.senderButton:Show()
+                row.rankButton:ClearAllPoints()
+                row.rankButton:SetPoint("TOPLEFT", row, "TOPLEFT", 54, contentY)
+                if OTLGM_DB.settings.chatShowRanks == false then
+                    row.rankIcon:Hide()
+                    row.rankText:SetText("")
+                elseif badgePath then
+                    row.rankIcon:SetTexture(badgePath)
+                    row.rankIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                    row.rankIcon:SetVertexColor(1, 1, 1)
+                    row.rankIcon:Show()
+                    row.rankText:SetText("")
+                else
+                    row.rankIcon:Hide()
+                    row.rankText:SetText(rankToken or "-")
+                    row.rankText:SetTextColor(rankR or 0.72, rankG or 0.72, rankB or 0.72)
+                end
+                row.senderButton:ClearAllPoints()
+                row.senderButton:SetPoint("TOPLEFT", row, "TOPLEFT", 100, contentY)
+                row.senderText:SetText(self:GetGuildChatSenderColor(messageInfo.sender) .. string.gsub(messageInfo.sender or "Unknown", "%-.*$", "") .. self.colors.reset)
+                row.messageFrame:SetPoint("TOPLEFT", row, "TOPLEFT", 224, contentY)
+                row.messageFrame:SetWidth(444)
+                row.messageFrame:AddMessage(self:FormatGuildChatDisplayText(messageInfo.text or ""), 1, 1, 1)
+                if messageInfo.channel == "OFFICER" then
+                    row.channelAccent:SetTexture(0.95, 0.58, 0.16, 0.95)
+                else
+                    row.channelAccent:SetTexture(0.18, 0.78, 0.30, 0.95)
+                end
+                row.shade:SetTexture(0.06, 0.048, 0.032, rowNumber / 2 == math.floor(rowNumber / 2) and 0.52 or 0.28)
             end
             if OTLGM_DB.settings.chatHighlightMentions ~= false and self:GuildChatTextMentionsPlayer(messageInfo.text or "") then row.mention:Show() else row.mention:Hide() end
             row:Show()
@@ -6089,7 +6181,7 @@ function OTLGM:BuildSettingsPage(page)
     chatLeft:SetBackdropColor(0.024, 0.021, 0.017, 0.98)
     chatLeft:SetBackdropBorderColor(0.34, 0.27, 0.17, 1)
     CreateText(chatLeft, "GameFontNormal", "GUILD CHAT DISPLAY", 12, -12, 310, "LEFT")
-    self.ui.settingChecks.chatMentions = CreateCheck(chatLeft, "OTLGM_SettingChatMentions", "Highlight messages that mention my character", 12, -42, function()
+    self.ui.settingChecks.chatMentions = CreateCheck(chatLeft, "OTLGM_SettingChatMentions", "Highlight and notify when my character is mentioned", 12, -42, function()
         OTLGM_DB.settings.chatHighlightMentions = this:GetChecked() and true or false
         OTLGM:RefreshGuildChatPage()
     end)

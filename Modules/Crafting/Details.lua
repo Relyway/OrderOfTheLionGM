@@ -305,7 +305,13 @@ function OTLGM:ShowCraftingObjectTooltip(anchor, object, professionKey)
     self.runtime = self.runtime or {}
     if self.runtime.craftingTooltipBusy160 then return end
     self.runtime.craftingTooltipBusy160 = true
-    GameTooltip:SetOwner(anchor, "ANCHOR_RIGHT")
+    local tooltipAnchor = "ANCHOR_RIGHT"
+    if anchor.GetCenter and UIParent and UIParent.GetCenter then
+        local ax = anchor:GetCenter()
+        local ux = UIParent:GetCenter()
+        if ax and ux and ax < ux then tooltipAnchor = "ANCHOR_LEFT" end
+    end
+    GameTooltip:SetOwner(anchor, tooltipAnchor)
     pcall(GameTooltip.ClearLines, GameTooltip)
     local shown = false
     local link = object.itemLink

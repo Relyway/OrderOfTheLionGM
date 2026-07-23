@@ -65,9 +65,9 @@ OTLGM.recruitmentPresets = {
         text = "[G-Info] Join Discord for news, help, groups & future raids. No mic needed. Discord join = first promotion from starter rank: https://discord.gg/UNacDPrGt2",
     },
     ADDONINFO = {
-        label = "Guild Addon",
+        label = "Share Addon",
         target = "GUILD",
-        text = "[Order of the Lion Addon] Made specifically for our guild to help us stay connected, share experience and play together: improved guild chat, member and profession search, guild information, activity, live Group Finder, raid alerts and a shared guild board. Download: https://github.com/Relyway/OrderOfTheLionGM",
+        text = "[Guild Addon] Install OrderOfTheLionGM for improved Guild Chat, member and profession search, Crafting Network, Group Finder, raid alerts and achievements. More users improve shared data. Download: https://github.com/Relyway/OrderOfTheLionGM",
     },
 }
 
@@ -1112,7 +1112,8 @@ function OTLGM:CaptureGuildChatMessage(channel, message, sender)
 
     local playerName = UnitName and UnitName("player") or ""
     local ownMessage = NormalizeName(sender) == NormalizeName(playerName)
-    if self:IsGuildChatChannelBeingRead(channel) then
+    local channelBeingRead = self:IsGuildChatChannelBeingRead(channel)
+    if channelBeingRead then
         self:SetGuildChatUnread(channel, 0)
     elseif not ownMessage then
         local previousUnread = self:GetGuildChatUnread(channel)
@@ -1121,6 +1122,19 @@ function OTLGM:CaptureGuildChatMessage(channel, message, sender)
             self.guildChatNewMarker[channel] = messageTime
         end
         self:SetGuildChatUnread(channel, previousUnread + 1)
+    end
+
+    if not ownMessage and not channelBeingRead and OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.chatHighlightMentions ~= false
+        and self.GuildChatTextMentionsPlayer and self:GuildChatTextMentionsPlayer(message) and self.NotifyEvent152 then
+        local shortSender = string.gsub(sender or "Unknown", "%-.*$", "")
+        local preview = self:Utf8Truncate(message, 120)
+        local fingerprint = self:NormalizeText(shortSender .. ":" .. preview)
+        self.runtime = self.runtime or {}
+        self.runtime.pendingMentionTarget174 = { channel = channel, ts = messageTime, sender = shortSender, text = message }
+        self:NotifyEvent152("mention", "MENTION:" .. channel .. ":" .. tostring(messageTime) .. ":" .. fingerprint,
+            shortSender .. (channel == "OFFICER" and " mentioned you in officer chat" or " mentioned you in guild chat"),
+            preview, "ACTION", true, "guildchat")
+        self.runtime.pendingMentionTarget174 = nil
     end
 
     if self.ui and self.ui.main and self.ui.main:IsVisible() and self.ui.currentPage == "guildchat" and self.RefreshGuildChatPage then

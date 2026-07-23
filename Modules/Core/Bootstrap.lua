@@ -6,8 +6,8 @@ OTLGM = OTLGM or {}
 
 OTLGM.name = "Order of the Lion Guild Manager"
 OTLGM.addonName = "OrderOfTheLionGM"
-OTLGM.version = "1.7.3"
-OTLGM.build = "stable-r4-20260721"
+OTLGM.version = "1.7.5"
+OTLGM.build = "stable-r7-20260723"
 OTLGM.schemaVersion = 14
 OTLGM.protocolVersion = 3
 OTLGM.useRaidPlanner160 = true

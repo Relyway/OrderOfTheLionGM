@@ -1193,14 +1193,26 @@ function OTLGM:RefreshHomePveSummary155()
         raid = all[i]
         if raid.status ~= "CANCELLED" and (raid.startTs or 0) >= self:Now() - 60 then table.insert(active, raid) end
     end
-    table.sort(active, function(a, b) return (a.startTs or 0) < (b.startTs or 0) end)
-    local lines = {}
-    for i = 1, math.min(3, table.getn(active)) do
-        raid = active[i]
-        table.insert(lines, (raid.featured and "|cffffcc44[MAIN]|r " or "") .. (raid.name or "Guild Raid") .. "  [" .. string.format("%02d:%02d", tonumber(raid.stHour) or 0, tonumber(raid.stMinute) or 0) .. " ST]")
+    table.sort(active, function(a, b)
+        if (a.featured and true or false) ~= (b.featured and true or false) then return a.featured and true or false end
+        return (a.startTs or 0) < (b.startTs or 0)
+    end)
+    raid = active[1]
+    if raid then
+        local startTs = tonumber(raid.startTs) or 0
+        local dateText = startTs > 0 and date("%A, %d %b", startTs) or "Date TBA"
+        local timeText = self.GetPveRaidServerTime155 and self:GetPveRaidServerTime155(raid) or (raid.serverTime or "Time TBA")
+        local remaining = self.GetPveRaidRemainingText and self:GetPveRaidRemainingText(raid) or ""
+        local header = raid.featured and "|cffff5b3dIMPORTANT RAID|r" or "|cffffcc44NEXT RAID|r"
+        local leader = raid.author and raid.author ~= "" and ("Leader: " .. tostring(raid.author)) or "Leader TBA"
+        local place = raid.location and raid.location ~= "" and ("Location: " .. tostring(raid.location)) or "Location TBA"
+        local note = raid.note and raid.note ~= "" and ("\n" .. self:Utf8Truncate(raid.note, 74)) or ""
+        self.ui.homeRaidText:SetText(header .. "\n|cffffffff" .. tostring(raid.name or "Guild Raid") .. "|r\n" ..
+            dateText .. "  -  " .. timeText .. "\n" .. remaining .. "\n" .. leader .. "\n" .. place .. note)
+        if self.ui.homeRaidButton then self.ui.homeRaidButton.raidId170 = raid.id end
+    else
+        self.ui.homeRaidText:SetText("|cff888888No raid scheduled|r\nLeadership can publish the next raid from PvE Hub.")
     end
-    if table.getn(lines) == 0 then table.insert(lines, "|cff888888No raid scheduled|r") end
-    self.ui.homeRaidText:SetText(table.concat(lines, "\n"))
 end
 
 -- ---------------------------------------------------------------------------

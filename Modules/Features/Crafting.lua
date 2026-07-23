@@ -466,6 +466,7 @@ function OTLGM:_Stage_Crafting_ScanCurrentProfession_1(mode, attempt)
                     requiredSkill = 0, difficulty = recipeType or "unknown",
                     itemType = itemType, itemSubType = itemSubType, equipLoc = equipLoc,
                     itemLink = itemLink, recipeLink = recipeLink, icon = icon,
+                    effectText = professionKey == "ENCHANTING" and CSafeText(recipeName, 110) or nil,
                     reagents = reagents, materialsAvailable = materialsStatus == "COMPLETE", materialsStatus = materialsStatus,
                 }
             end
