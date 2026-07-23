@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static release validator for OrderOfTheLionGM 1.7.3."""
+"""Static release validator for OrderOfTheLionGM 1.7.5."""
 from __future__ import annotations
 
 import argparse
@@ -26,20 +26,20 @@ def main() -> int:
 
     toc = toc_path.read_text(encoding="utf-8-sig")
     check("Interface 11200", bool(re.search(r"^## Interface:\s*11200\s*$", toc, re.M)))
-    check("Version 1.7.3", bool(re.search(r"^## Version:\s*1\.7\.3\s*$", toc, re.M)))
-    check("stable build identifier", "## X-Build: stable-r4-20260721" in toc)
+    check("Version 1.7.3", bool(re.search(r"^## Version:\s*1\.7\.5\s*$", toc, re.M)))
+    check("stable build identifier", "## X-Build: stable-r7-20260723" in toc)
     check("SavedVariables declared", "## SavedVariables: OTLGM_DB" in toc)
 
     load_entries = [line.strip().replace("\\", "/") for line in toc.splitlines()
                     if line.strip() and not line.lstrip().startswith("##")]
     lua_entries = [entry for entry in load_entries if entry.lower().endswith(".lua")]
-    check("21 TOC Lua entries", len(lua_entries) == 21, str(len(lua_entries)))
+    check("27 TOC Lua entries", len(lua_entries) == 27, str(len(lua_entries)))
     check("no duplicate TOC entries", len(load_entries) == len(set(load_entries)))
     missing = [entry for entry in load_entries if not (root / entry).is_file()]
     check("all TOC files exist", not missing, ", ".join(missing))
 
     lua_files = sorted((root / "Modules").rglob("*.lua"))
-    check("21 Lua files in package", len(lua_files) == 21, str(len(lua_files)))
+    check("27 Lua files in package", len(lua_files) == 27, str(len(lua_files)))
     check("TOC covers every Lua file",
           {str(p.relative_to(root)).replace("\\", "/") for p in lua_files} == set(lua_entries))
 
@@ -70,7 +70,7 @@ def main() -> int:
     unprepared_controls: list[str] = []
     control_pattern = re.compile(r'(?P<target>[A-Za-z_][A-Za-z0-9_.]*)\s*=\s*CreateFrame\(\s*["\'](?P<kind>Button|CheckButton|EditBox|Slider)["\']')
     for path in lua_files:
-        lines = path.read_text(encoding="ascii").splitlines()
+        lines = path.read_text(encoding="utf-8").splitlines()
         for index, line in enumerate(lines):
             match = control_pattern.search(line)
             if not match:
@@ -95,24 +95,24 @@ def main() -> int:
     check("single shared OnUpdate heartbeat", len(on_updates) == 1, str(len(on_updates)))
 
     module_names = re.findall(r"OTLGM:RegisterModule\s*\(\s*[\"']([^\"']+)", combined)
-    check("21 registered modules", len(module_names) == 21, str(len(module_names)))
+    check("26 registered modules", len(module_names) == 26, str(len(module_names)))
     check("registered module names unique", len(module_names) == len(set(module_names)))
 
-    bootstrap = (root / "Modules/Core/Bootstrap.lua").read_text(encoding="ascii")
-    database = (root / "Modules/Core/Database.lua").read_text(encoding="ascii")
-    search = (root / "Modules/Crafting/Search.lua").read_text(encoding="ascii")
-    events = (root / "Modules/Core/Events.lua").read_text(encoding="ascii")
-    transport = (root / "Modules/Network/Transport.lua").read_text(encoding="ascii")
-    security = (root / "Modules/Network/Security.lua").read_text(encoding="ascii")
+    bootstrap = (root / "Modules/Core/Bootstrap.lua").read_text(encoding="utf-8")
+    database = (root / "Modules/Core/Database.lua").read_text(encoding="utf-8")
+    search = (root / "Modules/Crafting/Search.lua").read_text(encoding="utf-8")
+    events = (root / "Modules/Core/Events.lua").read_text(encoding="utf-8")
+    transport = (root / "Modules/Network/Transport.lua").read_text(encoding="utf-8")
+    security = (root / "Modules/Network/Security.lua").read_text(encoding="utf-8")
 
-    theme = (root / "Modules/UI/Theme.lua").read_text(encoding="ascii")
-    main_ui = (root / "Modules/UI/Main.lua").read_text(encoding="ascii")
-    pages_ui = (root / "Modules/UI/Pages.lua").read_text(encoding="ascii")
-    experience_ui = (root / "Modules/UI/Experience.lua").read_text(encoding="ascii")
-    coordination_ui = (root / "Modules/Integration/Coordination.lua").read_text(encoding="ascii")
+    theme = (root / "Modules/UI/Theme.lua").read_text(encoding="utf-8")
+    main_ui = (root / "Modules/UI/Main.lua").read_text(encoding="utf-8")
+    pages_ui = (root / "Modules/UI/Pages.lua").read_text(encoding="utf-8")
+    experience_ui = (root / "Modules/UI/Experience.lua").read_text(encoding="utf-8")
+    coordination_ui = (root / "Modules/Integration/Coordination.lua").read_text(encoding="utf-8")
 
-    check("runtime version constant", 'OTLGM.version = "1.7.3"' in bootstrap)
-    check("runtime build constant", 'OTLGM.build = "stable-r4-20260721"' in bootstrap)
+    check("runtime version constant", 'OTLGM.version = "1.7.5"' in bootstrap)
+    check("runtime build constant", 'OTLGM.build = "stable-r7-20260723"' in bootstrap)
     check("central interaction repair installed", "PrepareInteractiveControl170" in theme and "RepairInteractiveTree170" in theme)
     check("all UI generations share enabled-state setter",
           "SetControlEnabled170(button, enabled, reason)" in main_ui and
