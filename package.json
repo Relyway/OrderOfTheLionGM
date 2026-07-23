@@ -1,6 +1,6 @@
 {
   "name": "order-of-the-lion-guild-manager-release-tools",
-  "version": "1.7.3",
+  "version": "1.7.5",
   "private": true,
   "description": "Offline release validation for the Vanilla/OctoWoW OrderOfTheLionGM addon",
   "scripts": {
