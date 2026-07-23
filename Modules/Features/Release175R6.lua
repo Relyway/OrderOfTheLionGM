@@ -651,7 +651,7 @@ end
 
 local function CheckFallTextR6(self,message)
     local lower=string.lower(tostring(message or ""))
-    if string.find(lower,"fall",1,true) or string.find(lower,"паден",1,true) or string.find(lower,"sturz",1,true) or string.find(lower,"chute",1,true) then
+    if string.find(lower,"fall",1,true) or string.find(lower,"\208\191\208\176\208\180\208\181\208\189",1,true) or string.find(lower,"sturz",1,true) or string.find(lower,"chute",1,true) then
         self.runtime=self.runtime or {} self.runtime.pendingFallR6=self:Now()
     end
 end
