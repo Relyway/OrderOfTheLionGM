@@ -24,7 +24,7 @@ local function EnsureRootShape170()
         if type(settings[key]) ~= "table" then settings[key] = nil end
     end
     if type(settings.notifications) == "table" then
-        local categories = { "raid", "announcement", "group", "response", "crafting", "reaction", "background" }
+        local categories = { "raid", "announcement", "group", "response", "crafting", "reaction", "mention", "background" }
         for index = 1, table.getn(categories) do
             key = categories[index]
             if settings.notifications[key] ~= nil and type(settings.notifications[key]) ~= "table" then settings.notifications[key] = nil end
@@ -38,7 +38,7 @@ local function EnsureGuildContainers170(db)
         "memberFlags", "detectedVersions", "snapshots", "scans", "crafting",
         "weeklySnapshots", "announcements", "announcementDeleted",
         "pendingAnnouncements", "announcementRead", "notificationSeen",
-        "notificationUnread", "recentUsefulActivity", "pve",
+        "notificationUnread", "recentUsefulActivity", "pve", "achievements174",
     }
     local index, key
     for index = 1, table.getn(fields) do

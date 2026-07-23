@@ -1,9 +1,9 @@
 ## Interface: 11200
 ## Title: |cffffcc66Order of the Lion|r |cffffffffGuild Manager|r |cff75d66bOctoWoW|r
-## Notes: |cffffffffGuild chat, roster, Crafting Network, PvE coordination, activity and officer tools.|r
+## Notes: |cffffffffGuild chat, Guild Achievements, roster, Crafting Network, PvE coordination, activity and officer tools.|r
 ## Author: |cffffcc66Hikol|r |cffaaaaaa(mrhikol / Lucks)|r, |cffffffffOrder of the Lion|r
-## Version: 1.7.3
-## X-Build: stable-r4-20260721
+## Version: 1.7.5
+## X-Build: stable-r7-20260723
 ## X-License: MIT
 ## X-Website: https://github.com/Relyway/OrderOfTheLionGM
 ## SavedVariables: OTLGM_DB
@@ -27,4 +27,10 @@ Modules\Network\Security.lua
 Modules\Crafting\Details.lua
 Modules\Crafting\Search.lua
 Modules\UI\Minimap.lua
+Modules\Features\Achievements174.lua
 Modules\Core\Events.lua
+Modules\Features\Release175.lua
+Modules\Features\Release175R4.lua
+Modules\Features\Release175R5.lua
+Modules\Features\Release175R6.lua
+Modules\Features\Release175R7.lua

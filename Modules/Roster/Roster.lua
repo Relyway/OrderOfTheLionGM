@@ -671,13 +671,26 @@ function OTLGM:IsSuspiciousSnapshot(db, current, total)
     if not db.initialized then return false end
     local previousTotal = db.lastTotal or TableCount(db.roster)
     if previousTotal < 20 then return false end
-    local missing = 0
+    local missing, added = 0, 0
     local name
     for name in pairs(db.roster or {}) do
         if not current[name] then missing = missing + 1 end
     end
-    local threshold = math.max(10, math.floor(previousTotal * 0.12))
-    return total < math.floor(previousTotal * 0.85) and missing >= threshold, previousTotal, missing
+    for name in pairs(current or {}) do
+        if not (db.roster and db.roster[name]) then added = added + 1 end
+    end
+    local shrinkThreshold = math.max(10, math.floor(previousTotal * 0.12))
+    if total < math.floor(previousTotal * 0.85) and missing >= shrinkThreshold then
+        return true, previousTotal, missing, "SHRINK"
+    end
+    -- A large upward jump usually means that the previous accepted roster was
+    -- incomplete. Confirm it, then re-baseline without generating hundreds of
+    -- false JOIN records.
+    local expansionThreshold = math.max(25, math.floor(previousTotal * 0.15))
+    if total > math.floor(previousTotal * 1.15) and added >= expansionThreshold then
+        return true, previousTotal, added, "EXPANSION"
+    end
+    return false, previousTotal, 0, nil
 end
 
 function OTLGM:RecordActivitySample(db, total, online)
@@ -788,22 +801,28 @@ function OTLGM:_Stage_Advanced_Scan_2(reason)
     end
     self.zeroScanAttempts = 0
 
-    local suspicious, previousTotal, missing = self:IsSuspiciousSnapshot(db, current, total)
+    local suspicious, previousTotal, difference, suspiciousDirection = self:IsSuspiciousSnapshot(db, current, total)
+    local confirmedExpansion = false
     if suspicious then
         local signature = self:GetSnapshotSignature(current)
         local candidate = db.suspiciousCandidate
         if candidate and candidate.signature == signature and (self:Now() - (candidate.ts or 0)) <= 45 then
+            if suspiciousDirection == "EXPANSION" then confirmedExpansion = true end
             db.suspiciousCandidate = nil
             self.suspiciousScanAttempts = 0
         else
             if reason ~= "CONFIRM" then self.confirmOriginReason = reason end
             self.suspiciousScanAttempts = (self.suspiciousScanAttempts or 0) + 1
-            db.suspiciousCandidate = { signature = signature, ts = self:Now(), total = total, previousTotal = previousTotal, missing = missing, reason = reason }
+            db.suspiciousCandidate = { signature = signature, ts = self:Now(), total = total, previousTotal = previousTotal, difference = difference, direction = suspiciousDirection, reason = reason }
             self:RecordScan(db, total, online, 0, false, "SUSPICIOUS")
             if self.suspiciousScanAttempts < 3 then
                 self:ScheduleConfirmScan()
                 if self.SetStatus then
-                    self:SetStatus("Incomplete roster suspected: " .. tostring(total) .. " of " .. tostring(previousTotal) .. ". No leave events recorded; confirmation " .. tostring(self.suspiciousScanAttempts) .. " of 3...")
+                    if suspiciousDirection == "EXPANSION" then
+                        self:SetStatus("Large roster restoration suspected: " .. tostring(previousTotal) .. " -> " .. tostring(total) .. ". Confirming before recording changes...")
+                    else
+                        self:SetStatus("Incomplete roster suspected: " .. tostring(total) .. " of " .. tostring(previousTotal) .. ". No leave events recorded; confirmation " .. tostring(self.suspiciousScanAttempts) .. " of 3...")
+                    end
                 end
             else
                 local failedOrigin = self.confirmOriginReason or reason
@@ -827,6 +846,35 @@ function OTLGM:_Stage_Advanced_Scan_2(reason)
     local outputReason = reason
     if reason == "CONFIRM" and self.confirmOriginReason then outputReason = self.confirmOriginReason end
     self.confirmOriginReason = nil
+
+    if confirmedExpansion then
+        local baselineNow = self:Now()
+        local memberName, memberInfo
+        for memberName, memberInfo in pairs(current) do
+            local oldInfo = db.roster and db.roster[memberName]
+            if oldInfo then
+                self:CarryMemberMetadata(oldInfo, memberInfo)
+            else
+                memberInfo.trackedSince = baselineNow
+                memberInfo.joinedAt = nil
+            end
+        end
+        self:PushSnapshot(db, current, total, online)
+        db.roster = current
+        db.lastScan = baselineNow
+        db.lastTotal = total
+        db.lastOnline = online
+        db.lastScanReason = outputReason
+        self:AddLog(db, "BASELINE", "Guild", "Confirmed full roster restoration: " .. tostring(total) .. " members; mass JOIN events suppressed")
+        if outputReason == "MANUAL" or outputReason == "AUTO" then self:RecordActivitySample(db, total, online) end
+        self:RecordScan(db, total, online, 0, true, "REBASELINE")
+        if outputReason == "MANUAL" or outputReason == "AUTO" then self.elapsed = 0 end
+        if self.RefreshVisiblePage then self:RefreshVisiblePage() elseif self.RefreshAll then self:RefreshAll() end
+        if self.UpdateMinimapBadge then self:UpdateMinimapBadge() end
+        if self.RefreshNavigation then self:RefreshNavigation() end
+        if self.SetStatus then self:SetStatus("Roster baseline safely refreshed at " .. date("%H:%M", baselineNow) .. "; mass false joins were not recorded.") end
+        return
+    end
 
     self:CleanupPendingInvites(db)
     self:CleanupPendingActions(db)

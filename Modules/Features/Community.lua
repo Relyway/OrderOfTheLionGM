@@ -194,6 +194,7 @@ local notificationDefaults152 = {
     response = { visual = true, sound = true, soundName = "TellMessage" },
     crafting = { visual = true, sound = false, soundName = "MapPing" },
     reaction = { visual = true, sound = false, soundName = "MapPing" },
+    mention = { visual = true, sound = true, soundName = "TellMessage" },
     background = { visual = false, sound = false, soundName = "MapPing" },
 }
 
@@ -993,13 +994,15 @@ function OTLGM:ApplyRemoteReaction(fields, sender, channel)
     local targetType = fields and S152Unescape(fields[3] or "") or ""
     local targetId = fields and S152Unescape(fields[4] or "") or ""
     local author = fields and S152Unescape(fields[5] or "") or ""
+    local reaction = fields and S152Unescape(fields[6] or "") or "REACTION"
     local result = BaseApplyRemoteReaction152(self, fields, sender, channel)
     if result and targetId ~= "" and author ~= "" then
         local owner = S152ReactionOwner(self, targetType, targetId)
         if owner and S152NormalizeName(owner) == S152NormalizeName(UnitName("player") or "") and S152NormalizeName(author) ~= S152NormalizeName(owner) then
             local reactionPage = targetType == "CRAFT" and "professions" or targetType == "RAID" and "pve" or "home"
-            self:NotifyEvent152("reaction", "REACT:" .. targetType .. ":" .. targetId .. ":" .. S152NormalizeName(author) .. ":" .. tostring(fields[7] or "0"), "New reaction", author .. " reacted to your post.", "INFO", true, reactionPage)
-            self:AddUsefulActivity152("REACTION", author .. " reacted to your post", targetType .. " reaction", targetType == "CRAFT" and "professions" or "home", self:Now())
+            local reactionEventKey = "REACT:" .. targetType .. ":" .. targetId .. ":" .. S152NormalizeName(author)
+            self:NotifyEvent152("reaction", reactionEventKey, "New reaction", author .. " reacted to your post.", "INFO", true, reactionPage)
+            self:AddUsefulActivity152("REACTION", author .. " reacted to your post", targetType .. " reaction", targetType == "CRAFT" and "professions" or "home", self:Now(), reactionEventKey)
         end
     end
     return result

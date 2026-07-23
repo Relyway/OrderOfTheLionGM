@@ -58,6 +58,15 @@ local function NApplyButton(button)
         return
     end
     local style = button.actionStyle or "normal"
+    if style == "section" then
+        button:SetBackdropColor(0.020, 0.018, 0.015, button.hovered and 0.98 or 0.72)
+        button:SetBackdropBorderColor(button.selected and 0.74 or 0.34, button.selected and 0.48 or 0.27, button.selected and 0.14 or 0.13, 0.95)
+        if button.text then
+            if button.selected or button.hovered then button.text:SetTextColor(1.0, 0.82, 0.30)
+            else button.text:SetTextColor(0.72, 0.65, 0.50) end
+        end
+        return
+    end
     if button.selected then
         if style == "raid" then
             button:SetBackdropColor(0.39, 0.025, 0.018, 1)
@@ -611,7 +620,10 @@ function OTLGM:_Stage_UINext_BuildRecipesPanel_1(page)
         self.ui.craftingCrafterRows[i] = row
     end
     self.ui.craftingWhisperButton = NButton(crafters, "Whisper", 10, -354, 56, 26, function()
-        if OTLGM.ui.craftingSelectedCrafter then OTLGM:OpenGuildChatWhisper(OTLGM.ui.craftingSelectedCrafter) end
+        if OTLGM.ui.craftingSelectedCrafter then
+            if OTLGM.RecordCrafterContact174 then OTLGM:RecordCrafterContact174(OTLGM.ui.craftingSelectedCrafter) end
+            OTLGM:OpenGuildChatWhisper(OTLGM.ui.craftingSelectedCrafter)
+        end
     end, "utility")
     self.ui.craftingLinkButton = NButton(crafters, "Link Item", 70, -354, 64, 26, function()
         local result = OTLGM.ui.craftingSelectedRecipeData
@@ -1221,22 +1233,44 @@ function OTLGM:BuildNextHeaderAndFooter()
     if self.ui.memberLabel then self.ui.memberLabel:Hide() end
     if self.ui.officerDivider then self.ui.officerDivider:Hide() end
     if self.ui.officerLabel then self.ui.officerLabel:Hide() end
-    self.ui.guildSectionButton = NButton(sidebar, "GUILD", 12, -158, 142, 24, function()
+    self.ui.guildSectionButton = NButton(sidebar, "GUILD", 12, -158, 142, 20, function()
         OTLGM_DB.settings.guildSectionExpanded = not OTLGM_DB.settings.guildSectionExpanded
         OTLGM:RefreshNavigation()
-    end, "utility")
+    end, "section")
     self.ui.guildSectionButton.text:SetJustifyH("LEFT")
     self.ui.guildSectionButton.text:ClearAllPoints()
     self.ui.guildSectionButton.text:SetPoint("LEFT", self.ui.guildSectionButton, "LEFT", 9, 0)
     self.ui.guildSectionButton.text:SetWidth(124)
-    self.ui.officerSectionButton = NButton(sidebar, "OFFICER TOOLS", 12, -276, 142, 24, function()
+    self.ui.officerSectionButton = NButton(sidebar, "OFFICER TOOLS", 12, -276, 142, 20, function()
         OTLGM_DB.settings.officerSectionExpanded = not OTLGM_DB.settings.officerSectionExpanded
         OTLGM:RefreshNavigation()
-    end, "utility")
+    end, "section")
     self.ui.officerSectionButton.text:SetJustifyH("LEFT")
     self.ui.officerSectionButton.text:ClearAllPoints()
     self.ui.officerSectionButton.text:SetPoint("LEFT", self.ui.officerSectionButton, "LEFT", 9, 0)
     self.ui.officerSectionButton.text:SetWidth(124)
+
+    -- Navigation is split into fixed top, scrollable middle and fixed footer.
+    -- The scroll frame stays invisible while content fits, but prevents future
+    -- pages from ever overlapping Officer Mode or utility controls.
+    self.ui.sidebarMiddle174 = CreateFrame("ScrollFrame", "OTLGM_SidebarMiddle174", sidebar)
+    self.ui.sidebarMiddle174:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 12, -154)
+    self.ui.sidebarMiddle174:SetWidth(142)
+    self.ui.sidebarMiddle174:SetHeight(268)
+    self.ui.sidebarMiddle174:EnableMouse(true)
+    self.ui.sidebarMiddle174:EnableMouseWheel(true)
+    self.ui.sidebarMiddleChild174 = CreateFrame("Frame", nil, self.ui.sidebarMiddle174)
+    self.ui.sidebarMiddleChild174:SetWidth(142)
+    self.ui.sidebarMiddleChild174:SetHeight(268)
+    self.ui.sidebarMiddle174:SetScrollChild(self.ui.sidebarMiddleChild174)
+    self.ui.sidebarMiddle174:SetScript("OnMouseWheel", function()
+        local current = this:GetVerticalScroll() or 0
+        local child = OTLGM.ui and OTLGM.ui.sidebarMiddleChild174
+        local maximum = math.max(0, ((child and child:GetHeight()) or 268) - (this:GetHeight() or 268))
+        local nextValue = math.max(0, math.min(maximum, current - ((arg1 or 0) * 42)))
+        this:SetVerticalScroll(nextValue)
+        OTLGM_DB.settings.sidebarScroll174 = nextValue
+    end)
 end
 
 function OTLGM:BuildNextNavigationButtons()
@@ -1284,27 +1318,28 @@ function OTLGM:BuildNextSettingsEnhancements()
         {"response", "Applications & responses", "Accepted, declined and replies to your requests"},
         {"crafting", "Crafting requests", "New guild crafting requests"},
         {"reaction", "Reactions & replies", "Reactions on your own posts"},
+        {"mention", "Guild Chat mentions", "Your character name is mentioned in guild or officer chat"},
         {"background", "Background activity", "Roster scans, joins, leaves and database updates"},
     }
     self.ui.notificationRows152 = {}
     local i
     for i = 1, table.getn(definitions) do
         local category = definitions[i][1]
-        local row = NPanel(panel, 12, -92 - ((i - 1) * 45), 694, 39, 0.024, 0.022, 0.019)
-        row.label = NText(row, "GameFontNormalSmall", definitions[i][2], 10, -7, 202, "LEFT")
-        row.detail = NText(row, "GameFontNormalSmall", definitions[i][3], 10, -22, 300, "LEFT")
+        local row = NPanel(panel, 12, -80 - ((i - 1) * 42), 694, 36, 0.024, 0.022, 0.019)
+        row.label = NText(row, "GameFontNormalSmall", definitions[i][2], 10, -5, 202, "LEFT")
+        row.detail = NText(row, "GameFontNormalSmall", definitions[i][3], 10, -19, 300, "LEFT")
         row.detail:SetTextColor(0.50, 0.50, 0.48)
-        row.visual = NButton(row, "Visual", 314, -6, 104, 27, function()
+        row.visual = NButton(row, "Visual", 314, -4, 104, 27, function()
             local pref = OTLGM:GetNotificationPreference152(category)
             pref.visual = not pref.visual
             OTLGM:RefreshSettingsPage()
         end, "utility")
-        row.sound = NButton(row, "Sound", 426, -6, 104, 27, function()
+        row.sound = NButton(row, "Sound", 426, -4, 104, 27, function()
             local pref = OTLGM:GetNotificationPreference152(category)
             pref.sound = not pref.sound
             OTLGM:RefreshSettingsPage()
         end, "confirm")
-        row.choice = NButton(row, "Message", 538, -6, 144, 27, function()
+        row.choice = NButton(row, "Message", 538, -4, 144, 27, function()
             OTLGM:CycleNotificationSound152(category)
             OTLGM:RefreshSettingsPage()
         end, "normal")
@@ -1440,90 +1475,117 @@ function OTLGM:RefreshNavigation()
     local officer = self:IsOfficerMode()
     local guildOpen = OTLGM_DB.settings.guildSectionExpanded ~= false
     local officerOpen = OTLGM_DB.settings.officerSectionExpanded ~= false
+    local sidebar = self.ui.sidebar
+    local middle = self.ui.sidebarMiddle174
+    local middleChild = self.ui.sidebarMiddleChild174 or sidebar
     local key, button
     for key, button in pairs(self.ui.navButtons or {}) do button:Hide() end
+    if self.ui.memberDivider then self.ui.memberDivider:Hide() end
+    if self.ui.memberLabel then self.ui.memberLabel:Hide() end
+    if self.ui.officerDivider then self.ui.officerDivider:Hide() end
+    if self.ui.officerLabel then self.ui.officerLabel:Hide() end
 
     if self.ui.generalLabel then
         self.ui.generalLabel:ClearAllPoints()
-        self.ui.generalLabel:SetPoint("TOPLEFT", self.ui.sidebar, "TOPLEFT", 12, -12)
+        self.ui.generalLabel:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 12, -10)
         self.ui.generalLabel:SetText("MAIN")
         self.ui.generalLabel:Show()
     end
 
-    local function PlaceNavigationButton(buttonKey, y, height)
-        local navButton = OTLGM.ui.navButtons and OTLGM.ui.navButtons[buttonKey]
-        if not navButton then return end
-        navButton:ClearAllPoints()
-        navButton:SetPoint("TOPLEFT", OTLGM.ui.sidebar, "TOPLEFT", 12, y)
-        navButton:SetHeight(height or 26)
-        navButton:Show()
+    local function Reparent(control, parent)
+        if not control or not parent then return end
+        if control.GetParent and control:GetParent() ~= parent and control.SetParent then control:SetParent(parent) end
     end
 
-    -- Main and Settings are never hidden. The two collapsible groups only move
-    -- their own entries, so closing a group removes dead space instead of
-    -- leaving a confusing empty ladder in the sidebar.
-    PlaceNavigationButton("home", -30, 28)
-    PlaceNavigationButton("guildchat", -60, 28)
-    PlaceNavigationButton("search", -90, 28)
-    PlaceNavigationButton("pve", -120, 32)
+    local function PlaceNavigationButton(buttonKey, parent, x, y, height)
+        local navButton = OTLGM.ui.navButtons and OTLGM.ui.navButtons[buttonKey]
+        if not navButton then return y end
+        Reparent(navButton, parent)
+        navButton:ClearAllPoints()
+        navButton:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+        navButton:SetWidth(142)
+        navButton:SetHeight(height or 22)
+        navButton:Show()
+        return y - (height or 22) - 2
+    end
 
-    local cursor = -154
+    -- Fixed primary navigation.
+    PlaceNavigationButton("home", sidebar, 12, -28, 28)
+    PlaceNavigationButton("guildchat", sidebar, 12, -58, 28)
+    PlaceNavigationButton("search", sidebar, 12, -88, 28)
+    PlaceNavigationButton("pve", sidebar, 12, -118, 30)
+
+    -- Scrollable guild/officer navigation. Every row derives from one cursor.
+    Reparent(self.ui.guildSectionButton, middleChild)
+    Reparent(self.ui.officerSectionButton, middleChild)
+    local cursor = 0
     self.ui.guildSectionButton:ClearAllPoints()
-    self.ui.guildSectionButton:SetPoint("TOPLEFT", self.ui.sidebar, "TOPLEFT", 12, cursor)
+    self.ui.guildSectionButton:SetPoint("TOPLEFT", middleChild, "TOPLEFT", 0, cursor)
+    self.ui.guildSectionButton:SetWidth(142)
+    self.ui.guildSectionButton:SetHeight(20)
     NSetButtonText(self.ui.guildSectionButton, guildOpen and "-  GUILD" or "+  GUILD")
     self.ui.guildSectionButton:Show()
-    cursor = cursor - 26
+    cursor = cursor - 22
     if guildOpen then
-        local guildKeys = { "roster", "professions", "activity", "treasury" }
+        local guildKeys = { "roster", "professions", "achievements", "treasury", "activity" }
         local i
-        for i = 1, table.getn(guildKeys) do
-            PlaceNavigationButton(guildKeys[i], cursor, 26)
-            cursor = cursor - 26
-        end
+        for i = 1, table.getn(guildKeys) do cursor = PlaceNavigationButton(guildKeys[i], middleChild, 0, cursor, 22) end
     end
 
-    cursor = cursor - 4
+    cursor = cursor - 2
     if officer then
         self.ui.officerSectionButton:ClearAllPoints()
-        self.ui.officerSectionButton:SetPoint("TOPLEFT", self.ui.sidebar, "TOPLEFT", 12, cursor)
+        self.ui.officerSectionButton:SetPoint("TOPLEFT", middleChild, "TOPLEFT", 0, cursor)
+        self.ui.officerSectionButton:SetWidth(142)
+        self.ui.officerSectionButton:SetHeight(20)
         NSetButtonText(self.ui.officerSectionButton, officerOpen and "-  OFFICER TOOLS" or "+  OFFICER TOOLS")
         self.ui.officerSectionButton:Show()
-        cursor = cursor - 26
+        cursor = cursor - 22
         if officerOpen then
             local officerKeys = { "overview", "recruitment", "history", "inactive" }
             local i
-            for i = 1, table.getn(officerKeys) do
-                PlaceNavigationButton(officerKeys[i], cursor, 26)
-                cursor = cursor - 26
-            end
+            for i = 1, table.getn(officerKeys) do cursor = PlaceNavigationButton(officerKeys[i], middleChild, 0, cursor, 22) end
         end
     else
         self.ui.officerSectionButton:Hide()
     end
 
-    PlaceNavigationButton("settings", -478, 26)
+    local contentHeight = math.max(268, -cursor + 2)
+    middleChild:SetHeight(contentHeight)
+    if middle then
+        local maximum = math.max(0, contentHeight - (middle:GetHeight() or 268))
+        local wanted = math.max(0, math.min(maximum, tonumber(OTLGM_DB.settings.sidebarScroll174) or 0))
+        middle:SetVerticalScroll(wanted)
+        OTLGM_DB.settings.sidebarScroll174 = wanted
+        middle:Show()
+    end
+
+    -- Fixed footer, independent from the number of navigation rows.
+    PlaceNavigationButton("settings", sidebar, 12, -493, 22)
     if self.ui.modeText then
         self.ui.modeText:ClearAllPoints()
-        self.ui.modeText:SetPoint("TOPLEFT", self.ui.sidebar, "TOPLEFT", 12, -422)
+        self.ui.modeText:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 12, -430)
         self.ui.modeText:SetWidth(142)
         self.ui.modeText:SetText(officer and self.colors.gold .. "OFFICER MODE" .. self.colors.reset or self.colors.grey .. "MEMBER MODE" .. self.colors.reset)
     end
     if self.ui.versionText then
         self.ui.versionText:ClearAllPoints()
-        self.ui.versionText:SetPoint("TOPLEFT", self.ui.sidebar, "TOPLEFT", 12, -438)
+        self.ui.versionText:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 12, -444)
         self.ui.versionText:SetWidth(142)
         self.ui.versionText:SetText("Lion GM  v" .. self.version)
     end
     if self.ui.addonUsersButton then
+        Reparent(self.ui.addonUsersButton, sidebar)
         self.ui.addonUsersButton:ClearAllPoints()
-        self.ui.addonUsersButton:SetPoint("TOPLEFT", self.ui.sidebar, "TOPLEFT", 12, -454)
-        self.ui.addonUsersButton:SetHeight(22)
+        self.ui.addonUsersButton:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 12, -459)
+        self.ui.addonUsersButton:SetHeight(28)
         self.ui.addonUsersButton:Show()
     end
     if self.ui.scanButton then
+        Reparent(self.ui.scanButton, sidebar)
         self.ui.scanButton:ClearAllPoints()
-        self.ui.scanButton:SetPoint("TOPLEFT", self.ui.sidebar, "TOPLEFT", 12, -510)
-        self.ui.scanButton:SetHeight(28)
+        self.ui.scanButton:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 12, -519)
+        self.ui.scanButton:SetHeight(30)
         self.ui.scanButton:Show()
     end
 
@@ -1531,15 +1593,24 @@ function OTLGM:RefreshNavigation()
     if self.RefreshGuildChatNavigationBadge then self:RefreshGuildChatNavigationBadge() end
     if self.RefreshPveNavigationBadge then self:RefreshPveNavigationBadge() end
     local homeUnread = self.GetAnnouncementUnreadCount154 and self:GetAnnouncementUnreadCount154() or 0
-    if self.ui.navButtons.home then NSetButtonText(self.ui.navButtons.home, "Home" .. (homeUnread > 0 and ("  " .. tostring(homeUnread > 99 and "99+" or homeUnread)) or "")) end
+    if self.ui.navButtons.home then
+        NSetButtonText(self.ui.navButtons.home, "Home")
+        if self.SetNavigationBadge170 then self:SetNavigationBadge170(self.ui.navButtons.home, homeUnread, "gold") end
+    end
     local craftUnread = self:GetCraftingUnread("RECIPES") + self:GetCraftingUnread("REQUESTS")
-    NSetButtonText(self.ui.navButtons.professions, "Professions" .. (craftUnread > 0 and ("  " .. tostring(craftUnread > 99 and "99+" or craftUnread)) or ""))
+    if self.ui.navButtons.professions then
+        NSetButtonText(self.ui.navButtons.professions, "Professions")
+        if self.SetNavigationBadge170 then self:SetNavigationBadge170(self.ui.navButtons.professions, craftUnread, "blue") end
+    end
     local unread = self:GetUnreadCount()
-    if self.ui.navButtons.history then NSetButtonText(self.ui.navButtons.history, unread > 0 and ("History  " .. tostring(unread > 99 and "99+" or unread)) or "History") end
+    if self.ui.navButtons.history then
+        NSetButtonText(self.ui.navButtons.history, "History")
+        if self.SetNavigationBadge170 then self:SetNavigationBadge170(self.ui.navButtons.history, unread, "gold") end
+    end
 
     local visibleSelection = self.ui.currentPage == "guildinfo" and "home" or self.ui.currentPage
     for key, button in pairs(self.ui.navButtons or {}) do NSetSelected(button, key == visibleSelection) end
-    NSetSelected(self.ui.guildSectionButton, visibleSelection == "roster" or visibleSelection == "professions" or visibleSelection == "activity" or visibleSelection == "treasury")
+    NSetSelected(self.ui.guildSectionButton, visibleSelection == "roster" or visibleSelection == "professions" or visibleSelection == "activity" or visibleSelection == "achievements" or visibleSelection == "treasury")
     NSetSelected(self.ui.officerSectionButton, visibleSelection == "overview" or visibleSelection == "recruitment" or visibleSelection == "history" or visibleSelection == "inactive")
     self:RefreshUpdateWarning()
     if self.RefreshExperienceNavigation170 then self:RefreshExperienceNavigation170() end
@@ -1687,7 +1758,6 @@ function OTLGM:ShowAddonUsersTooltip(owner)
         for i = 1, maxOnline do
             info = online[i]
             local versionText = info.version and info.version ~= "Detected" and ("v" .. tostring(info.version)) or "detected"
-            if info.build and info.build ~= "" and info.version == self.version then versionText = versionText .. "  " .. self:Utf8Truncate(info.build, 18) end
             local rankText = info.leadership and "Leadership" or (info.rank ~= "" and info.rank or ("Level " .. tostring(info.level or 0)))
             GameTooltip:AddDoubleLine(self:GetClassColor(info.class) .. (info.name or "Unknown") .. self.colors.reset .. "  " .. versionText, rankText, 1, 1, 1, 0.65, 0.65, 0.65)
         end
@@ -2111,8 +2181,8 @@ function OTLGM:_Stage_UINext_RefreshCraftingRecipesPanel_2(summary)
             if basis == "REQUIRED" then value = tonumber(row.recipeData and row.recipeData.filterRequiredLevel153) or tonumber(recipe and recipe.requiredLevel) or 0
             elseif basis == "SKILL" then value = tonumber(row.recipeData and row.recipeData.filterRequiredSkill170) or tonumber(recipe and recipe.requiredSkill) or 0
             else value = tonumber(row.recipeData and row.recipeData.filterItemLevel153) or tonumber(recipe and recipe.itemLevel) or 0 end
-            local prefix = basis == "SKILL" and "S" or basis == "REQUIRED" and "U" or "i"
-            row.levelText170:SetText(prefix .. (value > 0 and tostring(value) or "?"))
+            local prefix = basis == "SKILL" and "S" or basis == "REQUIRED" and "L" or "i"
+            row.levelText170:SetText(value > 0 and (prefix .. tostring(value)) or "")
         end
     end
     local selected = self.ui.craftingSelectedRecipeData

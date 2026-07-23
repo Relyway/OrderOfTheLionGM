@@ -597,7 +597,8 @@ end
 function OTLGM:IsRaidNoticeEligible()
     local player = UnitName("player") or ""
     local member = self:GetMember(player)
-    local rank = string.lower((member and member.rank) or select(2, GetGuildInfo("player")) or "")
+    local guildName, guildRankName = GetGuildInfo and GetGuildInfo("player")
+    local rank = string.lower((member and member.rank) or guildRankName or "")
     if string.find(rank, "core raider", 1, true) or string.find(rank, "the devoted", 1, true) then return true end
     if rank == "raider" or string.find(rank, "4 - raider", 1, true) then return true end
     return false

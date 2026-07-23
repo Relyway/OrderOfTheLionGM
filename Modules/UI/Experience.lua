@@ -222,31 +222,22 @@ function OTLGM:BuildProfessionExperience170()
     self.ui.craftingRecipeMeta:SetWidth(158)
     self.ui.craftingRecipeMeta:SetHeight(28)
     self.ui.craftingRecipeMeta:SetJustifyV("TOP")
-    self.ui.craftingFavoriteButton170 = XButton(parent, "", 180, -10, 30, 26, function()
+    self.ui.craftingFavoriteButton170 = XButton(parent, "+", 180, -10, 30, 26, function()
         if OTLGM.ui.craftingSelectedRecipeData then OTLGM:ToggleCraftingFavorite170(OTLGM.ui.craftingSelectedRecipeData) end
     end, "primary")
-    local icon = self.ui.craftingFavoriteButton170:CreateTexture(nil, "OVERLAY")
-    icon:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_1")
-    icon:SetPoint("CENTER", self.ui.craftingFavoriteButton170, "CENTER", 0, 0)
-    icon:SetWidth(17) icon:SetHeight(17)
-    self.ui.craftingFavoriteButton170.icon170 = icon
+    self.ui.craftingFavoriteButton170.favoriteSymbol170 = self.ui.craftingFavoriteButton170.text
     local recipes = self.ui.craftingSearchEdit and self.ui.craftingSearchEdit:GetParent()
     if recipes then
-        self.ui.craftingFavoritesOnly170 = XButton(recipes, "", 284, -78, 30, 26, function()
+        self.ui.craftingFavoritesOnly170 = XButton(recipes, "+", 284, -78, 30, 26, function()
             OTLGM_DB.settings.craftingFavoritesOnly170 = not OTLGM_DB.settings.craftingFavoritesOnly170
             OTLGM.ui.craftingRecipeOffset = 0
             OTLGM:RefreshProfessionsPage()
         end, "primary")
-        local filterIcon = self.ui.craftingFavoritesOnly170:CreateTexture(nil, "OVERLAY")
-        filterIcon:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_1")
-        filterIcon:SetPoint("CENTER", self.ui.craftingFavoritesOnly170, "CENTER", 0, 0)
-        filterIcon:SetWidth(15) filterIcon:SetHeight(15)
-        self.ui.craftingFavoritesOnly170.icon170 = filterIcon
         self.ui.craftingFavoritesOnly170:SetScript("OnEnter", function()
             this.hovered = true OTLGM:ApplyButtonSkin(this)
             GameTooltip:SetOwner(this, "ANCHOR_CURSOR")
             GameTooltip:AddLine("Favorite recipes", 1.0, 0.82, 0.35)
-            GameTooltip:AddLine("Click to show only favorites. Right-side star saves the selected recipe.", 0.62, 0.62, 0.60, true)
+            GameTooltip:AddLine("Click to show only favorites. The + button on the recipe card saves the selected recipe.", 0.62, 0.62, 0.60, true)
             GameTooltip:Show()
         end)
         self.ui.craftingFavoritesOnly170:SetScript("OnLeave", function() this.hovered = false OTLGM:ApplyButtonSkin(this) GameTooltip:Hide() end)
@@ -259,12 +250,12 @@ function OTLGM:RefreshProfessionExperience170()
     local favorite = selected and self:IsCraftingFavorite170(selected)
     XEnable(self.ui.craftingFavoriteButton170, selected ~= nil, "Select a recipe first.")
     XSelect(self.ui.craftingFavoriteButton170, favorite)
-    XSetIconState(self.ui.craftingFavoriteButton170, favorite, selected ~= nil)
+    self.ui.craftingFavoriteButton170.text:SetText(favorite and "-" or "+")
     if self.ui.craftingFavoritesOnly170 then
         self.ui.craftingFavoritesOnly170.favoriteCount170 = self:GetCraftingFavoriteCount170()
         local enabled = OTLGM_DB.settings.craftingFavoritesOnly170 and true or false
         XSelect(self.ui.craftingFavoritesOnly170, enabled)
-        XSetIconState(self.ui.craftingFavoritesOnly170, enabled, true)
+        self.ui.craftingFavoritesOnly170.text:SetText(enabled and "-" or "+")
     end
 end
 
@@ -275,18 +266,25 @@ function OTLGM:BuildTreasuryPage170(page)
     XText(page, "GameFontNormalLarge", "Guild Treasury", 0, -2, 360, "LEFT")
     XWrapped(page, "GameFontNormalSmall", "Shared funding goals now; conservative read-only guild-bank support when the server exposes a compatible API.", 0, -28, 700, 32)
 
-    ui.banner = XPanel(page, 0, -64, 718, 54, "raised")
+    ui.banner = XPanel(page, 0, -64, 718, 86, "raised")
     ui.bannerIcon = ui.banner:CreateTexture(nil, "OVERLAY")
     ui.bannerIcon:SetPoint("LEFT", ui.banner, "LEFT", 12, 0)
     ui.bannerIcon:SetWidth(32) ui.bannerIcon:SetHeight(32)
-    ui.bannerIcon:SetTexture("Interface\\Icons\\INV_Misc_Coin_01")
-    ui.bannerTitle = XText(ui.banner, "GameFontNormal", "PREVIEW / MANUAL PLANNING", 54, -9, 310, "LEFT")
-    ui.bannerDetail = XText(ui.banner, "GameFontNormalSmall", "No server guild-bank API detected. No money or items are touched.", 54, -29, 490, "LEFT")
-    ui.sync = XButton(ui.banner, "Sync Goals", 598, -12, 108, 28, function()
+    ui.bannerIcon:SetTexture("Interface\\Icons\\INV_Letter_15")
+    ui.contributionTitle = XText(ui.banner, "GameFontNormal", "HOW TO CONTRIBUTE", 54, -8, 330, "LEFT")
+    ui.contributionTitle:SetTextColor(1.0, 0.82, 0.35)
+    ui.contributionDetail = XWrapped(ui.banner, "GameFontNormalSmall", "Mail gold or items to Morrow and state which guild goal they are for. Leadership records the contribution and advances the shared total.", 54, -27, 430, 42)
+    ui.contributionDetail:SetTextColor(0.78, 0.78, 0.74)
+    ui.bannerStatus = XText(ui.banner, "GameFontNormalSmall", "Manual goals - no money or items are moved by the addon.", 54, -68, 500, "LEFT")
+    ui.bannerStatus:SetTextColor(0.52, 0.52, 0.50)
+    ui.copyMorrow = XButton(ui.banner, "Copy Morrow", 598, -10, 108, 28, function()
+        OTLGM:ShowCopyDialog("Treasury recipient", "Morrow")
+    end, "primary")
+    ui.sync = XButton(ui.banner, "Sync Goals", 598, -46, 108, 28, function()
         if OTLGM:RequestTreasurySync170(true) then OTLGM:SetStatus("Requesting treasury goals from online leadership...") end
     end, "utility")
 
-    local list = XPanel(page, 0, -128, 448, 390, "background")
+    local list = XPanel(page, 0, -160, 448, 358, "background")
     XText(list, "GameFontNormal", "FUNDING GOALS", 12, -12, 220, "LEFT")
     ui.newGoal = XButton(list, "+ New Goal", 324, -8, 112, 26, function()
         ui.selected = nil
@@ -317,11 +315,11 @@ function OTLGM:BuildTreasuryPage170(page)
         row.progress:SetTexture(0.94, 0.63, 0.16, 1)
         ui.rows[index] = row
     end
-    ui.prev = XButton(list, "<", 328, -356, 48, 24, function() ui.offset = math.max(0, ui.offset - 5) OTLGM:RefreshTreasuryPage170() end, "utility")
-    ui.next = XButton(list, ">", 386, -356, 48, 24, function() ui.offset = ui.offset + 5 OTLGM:RefreshTreasuryPage170() end, "utility")
-    ui.status = XText(list, "GameFontNormalSmall", "", 12, -362, 300, "LEFT")
+    ui.prev = XButton(list, "<", 328, -324, 48, 24, function() ui.offset = math.max(0, ui.offset - 5) OTLGM:RefreshTreasuryPage170() end, "utility")
+    ui.next = XButton(list, ">", 386, -324, 48, 24, function() ui.offset = ui.offset + 5 OTLGM:RefreshTreasuryPage170() end, "utility")
+    ui.status = XText(list, "GameFontNormalSmall", "", 12, -330, 300, "LEFT")
 
-    local detail = XPanel(page, 458, -128, 260, 390, "background")
+    local detail = XPanel(page, 458, -160, 260, 358, "background")
     ui.serverTitle = XText(detail, "GameFontNormal", "GUILD BANK ADAPTER", 12, -12, 236, "LEFT")
     ui.serverState = XWrapped(detail, "GameFontNormalSmall", "", 12, -34, 236, 48)
     ui.detect = XButton(detail, "Check Server Support", 12, -82, 236, 26, function() OTLGM:RefreshGuildBankAdapter170() OTLGM:RefreshTreasuryPage170() end, "utility")
@@ -341,10 +339,10 @@ function OTLGM:BuildTreasuryPage170(page)
     ui.delete = XButton(detail, "Delete", 172, -228, 76, 28, function()
         if ui.selected then OTLGM:ShowConfirm("Delete Treasury Goal", "Delete this shared funding goal?", "Delete", function() OTLGM:DeleteTreasuryGoal170(ui.selected) ui.selected = nil OTLGM:RefreshTreasuryPage170(true) end) end
     end, "danger")
-    XText(detail, "GameFontNormalSmall", "RECENT CHANGES", 12, -270, 236, "LEFT")
+    XText(detail, "GameFontNormalSmall", "RECENT CHANGES", 12, -266, 236, "LEFT")
     ui.history = {}
-    for index = 1, 4 do
-        ui.history[index] = XText(detail, "GameFontNormalSmall", "", 12, -292 - ((index - 1) * 22), 236, "LEFT")
+    for index = 1, 3 do
+        ui.history[index] = XText(detail, "GameFontNormalSmall", "", 12, -288 - ((index - 1) * 22), 236, "LEFT")
         ui.history[index]:SetTextColor(0.64, 0.64, 0.61)
     end
 end
@@ -357,12 +355,10 @@ function OTLGM:RefreshTreasuryPage170(forceEditor)
     local capability = self:GetGuildBankCapability170()
     local snapshot = self.runtime and self.runtime.guildBank170
     if capability.available then
-        ui.bannerTitle:SetText(self.colors.green .. "READ-ONLY SERVER ADAPTER AVAILABLE" .. self.colors.reset)
-        ui.bannerDetail:SetText("Bank data is read only and loaded only when this page is opened or refreshed.")
+        ui.bannerStatus:SetText(self.colors.green .. "Read-only server guild-bank data is available; addon goals remain leadership-recorded." .. self.colors.reset)
         ui.serverState:SetText("Detected: " .. (capability.money and "balance  " or "") .. (capability.tabs and "tabs  " or "") .. (capability.items and "items  " or "") .. (capability.history and "history" or "") .. (snapshot and snapshot.money and ("\nBalance: " .. XMoney(snapshot.money)) or ""))
     else
-        ui.bannerTitle:SetText(self.colors.gold .. "PREVIEW / MANUAL PLANNING" .. self.colors.reset)
-        ui.bannerDetail:SetText("Server guild-bank API is not available yet. Goals are safe addon data; no money or items are touched.")
+        ui.bannerStatus:SetText("Manual goals - the addon never reads mail or moves money/items on this client.")
         ui.serverState:SetText("Unavailable on this client build. The adapter is prepared and remains dormant until compatible APIs appear.")
     end
     local maximum = math.max(0, table.getn(goals) - 5)
@@ -398,7 +394,7 @@ function OTLGM:RefreshTreasuryPage170(forceEditor)
     XEnable(ui.newGoal, canEdit, "Only guild leadership can edit shared goals.")
     XEnable(ui.save, canEdit, "Only guild leadership can edit shared goals.")
     XEnable(ui.delete, canEdit and selected ~= nil, "Select a goal you can edit.")
-    for index = 1, 4 do
+    for index = 1, 3 do
         local history = treasury.history[index]
         ui.history[index]:SetText(history and (date("%d %b", history.ts or self:Now()) .. "  " .. (history.actor or "Leadership") .. "  " .. string.lower(history.kind or "update")) or "")
     end
@@ -411,21 +407,31 @@ end
 function OTLGM:BuildInbox170()
     if self.ui.inbox170 or not self.ui.main then return end
     local main = self.ui.main
-    local drawer = XPanel(main, 672, -84, 310, 570, "raised")
+    local overlay = CreateFrame("Button", nil, main)
+    if self.PrepareInteractiveControl170 then self:PrepareInteractiveControl170(overlay, "button") end
+    overlay:SetAllPoints(main)
+    overlay:SetFrameLevel(main:GetFrameLevel() + 54)
+    overlay:SetBackdrop({ bgFile="Interface\\Tooltips\\UI-Tooltip-Background", tile=true, tileSize=16, edgeSize=0, insets={left=0,right=0,top=0,bottom=0} })
+    overlay:SetBackdropColor(0,0,0,0.72)
+    overlay:SetScript("OnClick", function() OTLGM:CloseInbox170() end)
+    overlay:Hide()
+    self.ui.inboxOverlay170 = overlay
+
+    local drawer = XPanel(main, 199, -112, 620, 500, "raised")
     drawer:SetFrameLevel(main:GetFrameLevel() + 55)
     drawer:Hide()
     drawer.mode = "ALL"
     drawer.offset = 0
     self.ui.inbox170 = drawer
-    XText(drawer, "GameFontNormalLarge", "Guild Inbox", 16, -14, 190, "LEFT")
-    drawer.close = XButton(drawer, "X", 270, -10, 28, 26, function() OTLGM:CloseInbox170() end, "danger")
-    drawer.subtitle = XText(drawer, "GameFontNormalSmall", "Actionable updates, deduplicated.", 16, -39, 270, "LEFT")
+    XText(drawer, "GameFontNormalLarge", "Guild Inbox", 18, -16, 360, "LEFT")
+    drawer.close = XButton(drawer, "X", 580, -12, 28, 26, function() OTLGM:CloseInbox170() end, "danger")
+    drawer.subtitle = XText(drawer, "GameFontNormalSmall", "Replies, mentions, important posts and group updates in one place.", 18, -42, 560, "LEFT")
     drawer.tabs = {}
     local definitions = { {"ALL", "All"}, {"UNREAD", "Unread"}, {"ACTION", "Actions"} }
     local index
     for index = 1, 3 do
         local mode = definitions[index][1]
-        drawer.tabs[mode] = XButton(drawer, definitions[index][2], 14 + ((index - 1) * 94), -64, 88, 26, function()
+        drawer.tabs[mode] = XButton(drawer, definitions[index][2], 18 + ((index - 1) * 118), -68, 108, 28, function()
             drawer.mode = mode
             drawer.offset = 0
             OTLGM:RefreshInbox170()
@@ -433,7 +439,7 @@ function OTLGM:BuildInbox170()
     end
     drawer.rows = {}
     for index = 1, 7 do
-        local row = XButton(drawer, "", 14, -100 - ((index - 1) * 59), 282, 53, function(button)
+        local row = XButton(drawer, "", 18, -106 - ((index - 1) * 49), 584, 45, function(button)
             local entry = button.entry170
             if not entry then return end
             OTLGM:MarkInboxRead170(entry.id)
@@ -441,18 +447,18 @@ function OTLGM:BuildInbox170()
             if entry.targetPage and OTLGM.ui.pages[entry.targetPage] then OTLGM:ShowPage(entry.targetPage) end
         end, "normal")
         row.text:Hide()
-        row.state = XText(row, "GameFontNormalSmall", "", 8, -7, 66, "LEFT")
-        row.title = XText(row, "GameFontNormalSmall", "", 74, -7, 196, "LEFT")
-        row.body = XText(row, "GameFontNormalSmall", "", 8, -27, 262, "LEFT")
+        row.state = XText(row, "GameFontNormalSmall", "", 8, -6, 62, "LEFT")
+        row.title = XText(row, "GameFontNormalSmall", "", 74, -6, 480, "LEFT")
+        row.body = XText(row, "GameFontNormalSmall", "", 8, -24, 548, "LEFT")
         row.body:SetTextColor(0.58, 0.58, 0.56)
         drawer.rows[index] = row
     end
-    drawer.empty = XWrapped(drawer, "GameFontNormal", "You're all caught up.\nNew replies, important posts and group updates will appear here.", 36, -224, 238, 80)
+    drawer.empty = XWrapped(drawer, "GameFontNormal", "You're all caught up.\nNew replies, important posts and group updates will appear here.", 120, -216, 380, 80)
     drawer.empty:SetTextColor(0.60, 0.60, 0.58)
-    drawer.markAll = XButton(drawer, "Mark All Read", 14, -526, 112, 28, function() OTLGM:MarkInboxCategoryRead170(nil) OTLGM:RefreshInbox170() end, "utility")
-    drawer.previous = XButton(drawer, "<", 134, -526, 32, 28, function() drawer.offset = math.max(0, (drawer.offset or 0) - 7) OTLGM:RefreshInbox170() end, "utility")
-    drawer.next = XButton(drawer, ">", 172, -526, 32, 28, function() drawer.offset = (drawer.offset or 0) + 7 OTLGM:RefreshInbox170() end, "utility")
-    drawer.count = XText(drawer, "GameFontNormalSmall", "", 212, -534, 84, "RIGHT")
+    drawer.markAll = XButton(drawer, "Mark All Read", 18, -458, 122, 28, function() OTLGM:MarkInboxCategoryRead170(nil) OTLGM:RefreshInbox170() end, "utility")
+    drawer.previous = XButton(drawer, "<", 430, -458, 38, 28, function() drawer.offset = math.max(0, (drawer.offset or 0) - 7) OTLGM:RefreshInbox170() end, "utility")
+    drawer.next = XButton(drawer, ">", 474, -458, 38, 28, function() drawer.offset = (drawer.offset or 0) + 7 OTLGM:RefreshInbox170() end, "utility")
+    drawer.count = XText(drawer, "GameFontNormalSmall", "", 520, -466, 82, "RIGHT")
 
     self.ui.inboxButton170 = XButton(main, "Inbox", 0, 0, 78, 24, function() OTLGM:ToggleInbox170() end, "utility")
     self.ui.inboxButton170:ClearAllPoints()
@@ -495,6 +501,7 @@ function OTLGM:ToggleInbox170()
     local drawer = self.ui and self.ui.inbox170
     if not drawer then return end
     if drawer:IsVisible() then self:CloseInbox170() return end
+    if self.ui.inboxOverlay170 then self.ui.inboxOverlay170:Show() end
     drawer:Show()
     self:RefreshInbox170()
     self:StartExperienceMotion170(drawer, 0.45, 1, 0.12)
@@ -502,6 +509,7 @@ end
 
 function OTLGM:CloseInbox170()
     if self.ui and self.ui.inbox170 then self.ui.inbox170:Hide() end
+    if self.ui and self.ui.inboxOverlay170 then self.ui.inboxOverlay170:Hide() end
 end
 
 -- -------------------------------------------------------------------------
@@ -739,15 +747,12 @@ function OTLGM:RefreshGuildChatExperience170()
                 row.pinButton170:ClearAllPoints()
                 row.pinButton170:SetPoint("TOPRIGHT", row, "TOPRIGHT", -2, -2)
                 if row.newLine:IsVisible() then row.pinButton170:Hide() else row.pinButton170:Show() end
-                row.messageFrame:SetWidth((compact and 284 or 444) - 24)
-                grouped = previous and XChatName(previous.sender) == XChatName(message.sender) and previous.channel == message.channel and math.abs((tonumber(message.ts) or 0) - (tonumber(previous.ts) or 0)) <= 180 and not row.separatorText:IsVisible() and not row.newLine:IsVisible()
-                if grouped then
-                    row.timeText:SetText("")
-                    row.rankIcon:Hide()
-                    row.rankText:SetText("")
-                    row.senderText:SetText("")
-                    row.channelAccent:SetAlpha(0.42)
-                else row.channelAccent:SetAlpha(1) end
+                local isAchievement = string.find(tostring(message.text or ""), "^%[Guild Achievement%]") ~= nil
+                row.messageFrame:SetWidth(isAchievement and 582 or ((compact and 284 or 444) - 24))
+                -- Keep every message self-identifying. Hiding the sender on consecutive
+                -- messages looked like broken wrapping and made separate messages merge visually.
+                grouped = false
+                row.channelAccent:SetAlpha(1)
                 previous = message
             else
                 row.pinButton170.message170 = nil
