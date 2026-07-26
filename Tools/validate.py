@@ -170,9 +170,9 @@ def main() -> int:
                 syntax_failures.append(f"{path.relative_to(root)}: {(run.stderr or run.stdout).strip()}")
         check("all Lua files compile", not syntax_failures, " | ".join(syntax_failures))
     else:
-        check("Lua compiler optional in CI", True, "texluac/luac not found; syntax is covered by npm parse")
+        check("Lua compiler optional in CI", True, "texluac/luac not found; syntax is covered by the dedicated CI compile step")
 
-    workflow = root / ".github/workflows/validate.yml"
+    workflow = root / ".github/workflows/ci.yml"
     workflow_text = workflow.read_text(encoding="utf-8") if workflow.is_file() else ""
     check("GitHub Actions validation workflow installed", bool(workflow_text))
     check("GitHub workflow runs all release gates", all(token in workflow_text for token in (
@@ -189,7 +189,7 @@ def main() -> int:
         root / "Tools/validate.py",
         root / "Tools/release176r5_smoke_test.lua",
         root / "Modules/Core/Release176R5Hotfix.lua",
-        root / ".github/workflows/validate.yml",
+        root / ".github/workflows/ci.yml",
     ]
     check("required package files present", all(path.is_file() for path in required), ", ".join(str(p) for p in required if not p.is_file()))
 
