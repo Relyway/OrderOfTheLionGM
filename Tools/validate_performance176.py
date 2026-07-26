@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 import subprocess
+import shutil
 import sys
 from pathlib import Path
 
@@ -62,21 +63,27 @@ if lua.is_file():
     check('cold-start work queue installed', 'ProcessDeferredColdStartWork176' in text and 'COLD_LOGIN_WINDOW_176 = 30' in text)
     check('window park commands installed', 'function OTLGM:ParkWindow176' in text and 'msg == "center"' in text and 'SetClampedToScreen(false)' in text)
     check('first UI refresh delayed', 'uiBuildDeferredRefresh' in text and 'uiRefreshDue176' in text)
-    try:
-        proc = subprocess.run(['texluac','-p',str(lua)], text=True, capture_output=True, timeout=20)
-        check('Lua syntax via texluac', proc.returncode == 0, (proc.stdout + proc.stderr).strip())
-    except Exception as exc:
-        check('Lua syntax via texluac', False, str(exc))
+    compiler = shutil.which('luac5.1') or shutil.which('luac') or shutil.which('texluac')
+    check('Lua compiler available', bool(compiler), compiler or 'luac5.1/luac/texluac not found')
+    if compiler:
+        try:
+            proc = subprocess.run([compiler, '-p', str(lua)], text=True, capture_output=True, timeout=20)
+            check('Lua syntax compile', proc.returncode == 0, (proc.stdout + proc.stderr).strip())
+        except Exception as exc:
+            check('Lua syntax compile', False, str(exc))
     check('module SHA-256', True, hashlib.sha256(data).hexdigest())
 
 smoke = root / 'Tools/performance_smoke_test.lua'
 check('smoke test exists', smoke.is_file(), str(smoke))
 if smoke.is_file() and lua.is_file():
-    try:
-        proc = subprocess.run(['texlua',str(smoke),str(lua)], cwd=root, text=True, capture_output=True, timeout=30)
-        check('runtime smoke test', proc.returncode == 0 and 'PERFORMANCE176_R4_SMOKE_TEST_OK' in proc.stdout, (proc.stdout + proc.stderr).strip())
-    except Exception as exc:
-        check('runtime smoke test', False, str(exc))
+    runtime = shutil.which('lua5.1') or shutil.which('lua') or shutil.which('texlua')
+    check('Lua runtime available', bool(runtime), runtime or 'lua5.1/lua/texlua not found')
+    if runtime:
+        try:
+            proc = subprocess.run([runtime, str(smoke), str(lua)], cwd=root, text=True, capture_output=True, timeout=30)
+            check('runtime smoke test', proc.returncode == 0 and 'PERFORMANCE176_R4_SMOKE_TEST_OK' in proc.stdout, (proc.stdout + proc.stderr).strip())
+        except Exception as exc:
+            check('runtime smoke test', False, str(exc))
 
 failed = 0
 for name, ok, detail in checks:

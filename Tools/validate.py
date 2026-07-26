@@ -161,7 +161,7 @@ def main() -> int:
     check("recruitment whisper button no longer overlaps world card", 'SetPoint("TOPLEFT", page, "TOPLEFT", 270, -54)' in r5)
     check("actor-unavailable UI cleanup installed", "BaseRefreshOverviewCleanupR5" in r5 and "Left or was removed" in r5)
 
-    texluac = shutil.which("texluac") or shutil.which("luac")
+    texluac = shutil.which("luac5.1") or shutil.which("luac") or shutil.which("texluac")
     syntax_failures: list[str] = []
     if texluac:
         for path in lua_files:
@@ -170,7 +170,7 @@ def main() -> int:
                 syntax_failures.append(f"{path.relative_to(root)}: {(run.stderr or run.stdout).strip()}")
         check("all Lua files compile", not syntax_failures, " | ".join(syntax_failures))
     else:
-        check("Lua compiler optional in CI", True, "texluac/luac not found; syntax is covered by the dedicated CI compile step")
+        check("Lua compiler optional in CI", True, "luac5.1/luac/texluac not found; syntax is covered by the dedicated CI compile step")
 
     workflow = root / ".github/workflows/ci.yml"
     workflow_text = workflow.read_text(encoding="utf-8") if workflow.is_file() else ""
@@ -200,19 +200,19 @@ def main() -> int:
     check("no development directories in install addon", not forbidden, ", ".join(map(str, forbidden)))
 
     smoke = root / "Tools/release176r5_smoke_test.lua"
-    texlua = shutil.which("texlua")
+    texlua = shutil.which("lua5.1") or shutil.which("lua") or shutil.which("texlua")
     if smoke.is_file() and texlua:
         run = subprocess.run([texlua, str(smoke), str(root)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env={**__import__('os').environ, 'TERM': 'xterm'})
         check("R5 runtime smoke test", run.returncode == 0 and "RELEASE176_R5_SMOKE_TEST_OK" in run.stdout, (run.stdout + run.stderr).strip())
     else:
-        check("R5 runtime smoke test script present", smoke.is_file(), "texlua unavailable; script retained for local/release validation")
+        check("R5 runtime smoke test script present", smoke.is_file(), "lua5.1/lua/texlua unavailable; script retained for local/release validation")
 
     full_smoke = root / "Tools/full_load_smoke_test.lua"
     if full_smoke.is_file() and texlua:
         run = subprocess.run([texlua, str(full_smoke), str(root)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env={**__import__('os').environ, 'TERM': 'xterm'})
         check("full addon load and UI-build smoke test", run.returncode == 0 and "FULL_LOAD_R5_SMOKE_TEST_OK" in run.stdout, (run.stdout + run.stderr).strip())
     else:
-        check("full-load smoke test script present", full_smoke.is_file(), "texlua unavailable; script retained for local/release validation")
+        check("full-load smoke test script present", full_smoke.is_file(), "lua5.1/lua/texlua unavailable; script retained for local/release validation")
 
     return report(checks)
 

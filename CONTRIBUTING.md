@@ -13,12 +13,21 @@ OrderOfTheLionGM is maintained primarily for the Order of the Lion guild on Octo
 
 ## Local checks
 
+On Debian/Ubuntu, install the test runtime first:
+
 ```bash
-npm ci
-npm run validate
-npm run parse
-npm run ast
-npm test
+sudo apt-get install -y lua5.1 zip unzip rsync
+```
+
+Then run:
+
+```bash
+python3 Tools/validate.py .
+python3 Tools/validate_performance176.py .
+while IFS= read -r file; do luac5.1 -p "$file"; done < <(grep -v '^##' OrderOfTheLionGM.toc | sed '/^[[:space:]]*$/d' | tr '\\' '/')
+lua5.1 Tools/performance_smoke_test.lua Modules/Core/Performance176.lua
+lua5.1 Tools/release176r5_smoke_test.lua .
+lua5.1 Tools/full_load_smoke_test.lua .
 ```
 
 ## Pull requests

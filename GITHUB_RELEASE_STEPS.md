@@ -1,61 +1,21 @@
-# GitHub publication steps for v1.7.2
+# GitHub update steps for OrderOfTheLionGM 1.7.6 R5 Hotfix 1
 
-## 1. Preserve the old repository state
+## Updating `main` through the GitHub website
 
-Before replacing `main`, create a branch or tag from the current legacy commit:
+1. Extract the prepared ZIP.
+2. Open the included `OrderOfTheLionGM` folder.
+3. Upload all files and folders from inside it to the repository root.
+4. Commit directly to `main`.
+5. Wait for the `Validate OrderOfTheLionGM` workflow to finish successfully.
 
-- branch: `archive/legacy-1.5.7`
-- optional tag: `v1.5.7-legacy`
+The repository root must contain `OrderOfTheLionGM.toc`, `Assets/`, `Modules/`, `Tools/`, and `.github/` directly. Do not create an additional nested `OrderOfTheLionGM` directory in the repository.
 
-## 2. Upload this prepared repository tree
+No GitHub Release or tag is required for a normal update to `main`.
 
-Use a new branch:
+## Player installation ZIP
 
-- `release/1.7.2`
-
-Replace the repository contents with this package. Do not upload `node_modules`, local ZIP files, SavedVariables, or `WTF` data.
-
-## 3. Open a pull request
-
-Title:
-
-`Release OrderOfTheLionGM 1.7.2`
-
-Suggested body:
-
-- replaces the legacy 1.5.7 tree with the modular 1.7.2 source;
-- adds MIT licensing, current README, changelog, contributor guidance, and security notes;
-- adds validation and tagged-release GitHub Actions;
-- preserves schema 14 and protocol 3;
-- includes the stable TurtleRP transport fix and announcement read receipts.
-
-## 4. Wait for CI
-
-The `Validate addon` workflow must pass all four stages:
-
-- static validation;
-- Lua parsing;
-- duplicate-definition analysis;
-- deterministic runtime scenarios.
-
-## 5. Merge into main
-
-Prefer a squash merge titled:
-
-`Release OrderOfTheLionGM 1.7.2`
-
-## 6. Create the release tag
-
-Create and push:
-
-`v1.7.2`
-
-The release workflow will verify that the tag matches `## Version: 1.7.2`, run all tests, build the install ZIP, generate SHA-256, and create the GitHub Release.
-
-## 7. Verify the published archive
-
-The ZIP must contain this path at its root:
+A player installation ZIP must contain:
 
 `OrderOfTheLionGM/OrderOfTheLionGM.toc`
 
-Do not publish the source-package ZIP as the player installation download.
+Do not include SavedVariables, account data, `WTF`, `node_modules`, or local development caches.
