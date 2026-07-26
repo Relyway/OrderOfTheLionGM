@@ -1,3 +1,27 @@
+# Changelog
+
+## 1.7.6 performance-r5-hotfix1 (2026-07-26)
+
+- Scoped Treasury and Recent Whispers modal shading to the addon window or dialog bounds instead of dimming the entire game world.
+- Recursively raised modal controls above the shade and made new dialog surfaces fully opaque, restoring clickable buttons and edit boxes.
+- Added direct Ledger and + Gold actions to every Treasury funding-goal row.
+- Added live cached-roster class, guild-rank, level and class-color metadata to contributor summaries and individual contribution entries.
+- Added a cumulative Treasury donor achievement series at 5g, 25g, 50g and 100g. Credit belongs only to the named donor, not the leadership member recording the contribution.
+- Added bounded donor-total migration and explicit-event synchronization without a new OnUpdate handler, polling loop or background roster scan.
+- Updated the release gates for 30 TOC Lua files, 29 registered modules and build `performance-r5-hotfix1-20260726`.
+
+## 1.7.6 performance-r5-stability (2026-07-26)
+
+- Added a full stability-first R5 layer without adding another OnUpdate handler.
+- Suppressed mailbox/AH-result achievement scanning, capped network packets per heartbeat, throttled incremental bag slices outside combat, and prevented hidden-page rebuilds.
+- Preserved the R4 login, zone-transition, Thunder Bluff subzone, group-snapshot, achievement-cache, and risky-tracker protections.
+- Added an exclusive modal manager so Treasury and Recent Whispers windows cannot overlap.
+- Added Treasury Activity and a pageable per-goal ledger with contributor totals and individual contribution history.
+- Completed Recent Whispers guild invitations with correct row binding, permission checks, member checks, and Sent/Member states.
+- Reduced and lowered the OTL edge tab, reflowed Recruitment controls, quieted Guild Chat row actions, and removed visible actor-unavailable diagnostics.
+- Preserved SavedVariables schema 14 and network protocol 3.
+- Updated the full release validation gates for 29 TOC Lua files and build `performance-r5-stability-20260726`.
+
 ## 1.7.5 stable-r7 (2026-07-23)
 
 - Fixed Guild Chat page-level keyboard capture that blocked movement, jumping and normal gameplay keys while the page was merely open.
@@ -7,7 +31,6 @@
 - Pressing Escape while typing now saves the draft, releases input focus and immediately restores character controls without closing the addon.
 - No new OnUpdate handlers, schema changes or protocol changes.
 
-# Changelog
 ## 1.7.5 stable-r6 (2026-07-23)
 - Fixed the Overview card nil-field error and separated the Activity insight panel from the heatmap.
 - Added 21 previously missing approved achievements, bringing the catalog to 142.

@@ -1,0 +1,129 @@
+OrderOfTheLionGM 1.7.6 R5 Hotfix 1 Validation Report
+Build: performance-r5-hotfix1-20260726
+Generated: 2026-07-26
+
+=== Static release validator ===
+[PASS] addon root exists (<ADDON_ROOT>)
+[PASS] TOC exists (<ADDON_ROOT>/OrderOfTheLionGM.toc)
+[PASS] no nested duplicate addon folder
+[PASS] Interface 11200
+[PASS] Version 1.7.6
+[PASS] R5 build identifier
+[PASS] SavedVariables declared
+[PASS] 30 TOC Lua entries (30)
+[PASS] no duplicate TOC entries
+[PASS] all TOC files exist
+[PASS] Performance176, R5 and hotfix load in order (['Modules/Core/Performance176.lua', 'Modules/Core/Release176R5.lua', 'Modules/Core/Release176R5Hotfix.lua'])
+[PASS] R5 hotfix is final runtime module (Modules/Core/Release176R5Hotfix.lua)
+[PASS] 30 Lua files in package (30)
+[PASS] TOC covers every Lua file
+[PASS] all Lua files decode as UTF-8
+[PASS] Lua source is ASCII/Vanilla-font safe
+[PASS] Lua files have no UTF-8 BOM
+[PASS] no developer absolute paths
+[PASS] all raw UI controls explicitly prepared
+[PASS] no direct EditBox:HasFocus
+[PASS] no unsupported SetDesaturated call
+[PASS] no BackdropTemplate dependency
+[PASS] no modern C_ namespace
+[PASS] no goto statement
+[PASS] no continue statement
+[PASS] single shared OnUpdate heartbeat (1)
+[PASS] 29 registered modules (29)
+[PASS] registered module names unique
+[PASS] R5 module registered
+[PASS] R5 hotfix module registered
+[PASS] Performance layer remains unregistered
+[PASS] runtime version constant
+[PASS] runtime build constant
+[PASS] diagnostics module count updated
+[PASS] UNIT_HEALTH achievement path detached
+[PASS] old BAG_UPDATE path detached
+[PASS] incremental bag scanner installed
+[PASS] zone transition coalescing installed
+[PASS] mail achievement burst disabled in R5
+[PASS] network work bounded in R5
+[PASS] hidden page refresh guards installed
+[PASS] R5 adds no visual heartbeat maintenance
+[PASS] exclusive modal manager installed
+[PASS] modal shade scoped to addon window
+[PASS] modal controls recursively raised
+[PASS] modal surfaces fully opaque
+[PASS] functional whisper invite flow installed
+[PASS] Treasury Activity installed
+[PASS] per-goal Treasury ledger installed
+[PASS] per-goal Ledger and contribution buttons installed
+[PASS] current roster metadata installed
+[PASS] donor-owned Treasury achievements installed
+[PASS] donor total sync is targeted
+[PASS] hotfix adds no OnUpdate
+[PASS] all ledger contributors pageable
+[PASS] compact lower OTL edge tab installed
+[PASS] recruitment whisper button no longer overlaps world card
+[PASS] actor-unavailable UI cleanup installed
+[PASS] all Lua files compile
+[PASS] GitHub Actions validation workflow installed
+[PASS] GitHub workflow runs all release gates
+[PASS] GitHub workflow has no external npm validation dependency
+[PASS] required package files present
+[PASS] no development directories in install addon
+[PASS] R5 runtime smoke test (RELEASE176_R5_SMOKE_TEST_OK)
+[PASS] full addon load and UI-build smoke test (FULL_LOAD_R5_SMOKE_TEST_OK files=30 workflows=treasury+whisper+modal+donor-achievements+performance)
+RESULT passed=66 failed=0 total=66
+
+=== Performance validator ===
+[PASS] TOC exists (<ADDON_ROOT>/OrderOfTheLionGM.toc)
+[PASS] performance module exists (<ADDON_ROOT>/Modules/Core/Performance176.lua)
+[PASS] version 1.7.6
+[PASS] R5 package build id
+[PASS] performance module loaded before R5 hotfix chain (['Modules/Core/Performance176.lua', 'Modules/Core/Release176R5.lua', 'Modules/Core/Release176R5Hotfix.lua'])
+[PASS] no duplicate TOC entries (30)
+[PASS] no UTF-8 BOM
+[PASS] ASCII-safe Lua source
+[PASS] no additional OnUpdate
+[PASS] no modern C_ API
+[PASS] no goto/continue
+[PASS] R4 performance-layer identity
+[PASS] UNIT_HEALTH detached
+[PASS] all duplicate world-entry frames detached
+[PASS] R6 zone full-scan path detached
+[PASS] same-zone minimap guard installed
+[PASS] stable transition pass installed
+[PASS] transition queue pause installed
+[PASS] incremental bag scanner active
+[PASS] old R6 BAG_UPDATE detached
+[PASS] bag achievements finalized
+[PASS] capital money checks retained
+[PASS] achievement cache replacement guard
+[PASS] per-frame debounce throttled
+[PASS] idle queue guards installed
+[PASS] group snapshot cache installed
+[PASS] database cache replacement guard
+[PASS] maintenance reduced
+[PASS] R6 cold login detached
+[PASS] R4 threshold login detached
+[PASS] mailbox burst guarded
+[PASS] risky achievement trackers paused
+[PASS] cold-start work queue installed
+[PASS] window park commands installed
+[PASS] first UI refresh delayed
+[PASS] Lua syntax via texluac
+[PASS] module SHA-256 (3115a87ebd44f3d393eac7dc36ef60ef26e87e64a492673ecf1cdfab3dedff43)
+[PASS] smoke test exists (<ADDON_ROOT>/Tools/performance_smoke_test.lua)
+[PASS] runtime smoke test (PERFORMANCE176_R4_SMOKE_TEST_OK)
+RESULT passed=39 failed=0 total=39
+
+=== Performance runtime smoke ===
+PERFORMANCE176_R4_SMOKE_TEST_OK
+
+=== R5 hotfix runtime smoke ===
+RELEASE176_R5_SMOKE_TEST_OK
+
+=== Full addon load/UI/workflow smoke ===
+FULL_LOAD_R5_SMOKE_TEST_OK files=30 workflows=treasury+whisper+modal+donor-achievements+performance
+
+=== Lua compilation ===
+LUA_COMPILE_OK files=30
+
+=== Release statement ===
+No second OnUpdate handler, no background roster scan, no mailbox achievement scan, and no full BAG_UPDATE scan are introduced by this hotfix.

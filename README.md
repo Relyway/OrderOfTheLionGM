@@ -1,56 +1,91 @@
-# Order of the Lion Guild Manager 1.7.5
+# Order of the Lion Guild Manager 1.7.6
 
-OrderOfTheLionGM is the cross-faction guild companion for Order of the Lion on OctoWoW. It targets the Vanilla client (`Interface 11200`) and combines Guild Chat, Guild Achievements, roster history, leadership announcements, professions, crafting requests, raid and group coordination, recruitment, activity, treasury planning, and officer tools.
+OrderOfTheLionGM is the cross-faction guild companion for **Order of the Lion** on OctoWoW. It targets the Vanilla client (`Interface 11200`) and combines Guild Chat, Guild Achievements, roster and activity history, leadership announcements, professions and crafting requests, PvE coordination, recruitment, Treasury planning, and officer tools.
 
-Current public build: `stable-r7-20260723`. SavedVariables schema remains `14` and network protocol remains `3`, so compatible 1.7.x data is retained without deleting the `WTF` folder.
+Current build: `performance-r5-hotfix1-20260726`.
 
-## 1.7.5 highlights
+SavedVariables schema remains `14` and network protocol remains `3`. Normal updates preserve existing 1.7.x settings, achievement progress, roster data, profession data, Treasury goals, and PvE records.
 
-- **Corrective r6 integration pass:** achievement counters no longer wrap, Activity and Overview keep text above their buttons, Home panels fit within the content area, and the Guild Board composer keeps its counter inside the panel.
-- Guild Chat retains keyboard focus after sending, supports Enter-to-focus while its page is active, groups consecutive messages, measures wrapped text, and shows separate channel badges without covering the navigation label.
-- Neutral lion artwork replaces faction banners on general guild/tabard achievements.
-- Roster empty-state actions stay disabled until a member is selected, crafting synchronization uses the real shared sync state, and destructive Guild Board deletion requires confirmation.
-- **142 Guild Achievements** across Social, Group Finder, Professions, Dungeons, Raids, Legacy, and Secrets. The existing achievements remain intact, all 61 achievements from the latest approved implementation pack are represented, with 21 previously missing definitions added using collision-free IDs; threshold chains reuse the same stored counters and bounded sets.
-- Correct achievement pagination: changing pages replaces the visible rows instead of appending them. Overview prioritizes completed achievements, then active progress, then locked entries.
-- Stable achievement icons with curated Vanilla-safe fallbacks; recycled rows cannot inherit another achievement's texture.
-- Secret titles remain visible while exact conditions and numeric progress stay hidden until unlock.
-- Guild Chat layout now measures wrapped rows, preserves consecutive messages, suppresses duplicate capture, and uses a dedicated system-row presentation for achievement links.
-- Reaction, popup, Inbox, and Recent Activity notifications share canonical deduplication keys, preventing one reaction or network replay from creating multiple entries.
-- Professions now present Enchanting effects more clearly, hide the meaningless unknown-level marker, and show visible `+` / `-` favorite controls.
-- Guild Activity recommendations no longer overlap the action buttons.
-- Raid cards and details separate status, title, date, server time, countdown, meeting point, briefing, Raid Leader, Invite Contact, and Invite Helpers.
-- Raid planners can assign a Raid Leader, a main Invite Contact, and helpers. Authorized contacts can use **Start Invites**; guild members receive a compact popup whose Whisper action targets the assigned contact.
-- The sidebar keeps fixed primary navigation and utilities around a scrollable guild/officer section, so additional pages do not overlap Treasury or officer controls.
-- Home, Treasury, recruitment, Inbox, mention notifications, Addon Users, and version presentation retain the 1.7.4 visual and usability improvements.
+## Performance and stability priorities
 
-## Performance and compatibility
+Version 1.7.6 R5 is a stability-first rebuild over the 1.7.5 release. Hotfix 1 adds only four event-driven Treasury donor achievements; it does not restore any risky continuous tracker. Several expensive trackers remain paused where reliable detection is not worth client stalls.
 
-- The addon has one shared heartbeat and no achievement-owned `OnUpdate` handler.
-- Group timers use coarse checkpoints no more frequently than once per 60 seconds while relevant.
-- No full roster, bag, equipment, party-health, or profession scan runs continuously.
-- Boss, duel, resurrection, fishing, emote, and raid-invite state is temporary, bounded, deduplicated, and cleared by timeout or state changes.
-- Intermediate personal achievement progress is not broadcast to the guild.
-- Existing schema-14 SavedVariables migrate in place; protocol remains 3.
+- The addon retains one shared `OnUpdate` heartbeat. R5 adds no second heartbeat.
+- `UNIT_HEALTH` no longer drives achievement scans.
+- Duplicate group, raid, world-entry, and zone callbacks are coalesced into bounded stable passes.
+- Thunder Bluff and other same-zone subzone changes no longer trigger full group or achievement work.
+- Cold-login work is deferred and released in small slices.
+- Bag achievements use an incremental scanner, throttled outside combat. The old full `BAG_UPDATE` and login scans remain detached.
+- Mailbox/AH-result achievement scanning is paused. Opening a mailbox does not walk the inbox for achievements.
+- Hidden pages are marked dirty rather than rebuilt during gameplay.
+- `RefreshAll` refreshes only navigation and the currently visible page.
+- Network processing is capped to a small packet budget per heartbeat.
+- Empty crafting, PvE, Treasury, icon, and announcement queues return immediately.
+- Achievement UI refreshes only while the Achievements page is visible.
+- Risky broad combat/system-message trackers remain paused for performance safety.
 
-## Installation or update
+These changes reduce known Lua spikes but cannot guarantee that every client-side stutter comes from this addon. Live comparisons should disable only OrderOfTheLionGM and fully reload the client.
+
+## Completed R5 workflows
+
+### Treasury
+
+- **Treasury Activity** shows a bounded history of contributions, goal changes, and deletions.
+- **View Ledger** opens the selected funding goal in its own modal.
+- The ledger shows raised, target, remaining, every contributor's total, contribution count, and the paginated individual payment history.
+- Contribution records include contributor, amount, recorder, timestamp, and note.
+- Existing 1.7.6 contribution records and earlier goal history migrate into the activity stream once, without duplication.
+- Every goal row has direct **Ledger** and **+ Gold** actions.
+- Ledger and contribution rows resolve the contributor's current class, guild rank, level, and class color from the already-cached guild roster. No background roster scan is added.
+- Only one Treasury or Recruitment modal can be active at a time. The shade is limited to the addon window (or the dialog bounds when the main window is hidden), and every input/button is raised above it.
+
+### Treasury donor achievements
+
+The named donor receives cumulative local achievement progress; the officer who records somebody else's contribution receives nothing from that entry. Leadership broadcasts only the bounded donor total on an explicit contribution and can send the requesting donor's total during Treasury synchronization.
+
+- **First Coin for the Pride** — 5 gold
+- **Helping Paw** — 25 gold
+- **Patron of the Lion** — 50 gold
+- **Golden Benefactor** — 100 gold
+
+### Recruitment
+
+- Recent whisper rows bind the Invite action to the correct player.
+- Guild invites validate the player name, self-invites, existing guild membership, client API availability, and rank permission.
+- Recently sent invites show `Sent`; guild members show `Member`.
+- The recent-whisper list remains session-only and does not grow SavedVariables.
+
+### Interface corrections
+
+- The parked `OTL` edge tab is smaller and positioned lower.
+- `/otl center`, `/otl park`, `/otl park left`, and `/otl unpark` safely recover or park the main window.
+- Recruitment status controls no longer share the same text area.
+- Recent Whispers no longer overlaps the World Recruitment card.
+- Guild Chat pin controls are smaller and quieter.
+- Technical `actor unavailable` text is removed from visible activity/history rows.
+
+## Installation
 
 1. Close World of Warcraft completely.
-2. Back up the `WTF` folder.
-3. Delete only the old `Interface\AddOns\OrderOfTheLionGM` folder.
-4. Extract the install archive into `Interface\AddOns`.
-5. Confirm this file exists: `Interface\AddOns\OrderOfTheLionGM\OrderOfTheLionGM.toc`.
-6. Start the game and run `/otltest`.
+2. Delete the old `Interface\AddOns\OrderOfTheLionGM` folder.
+3. Extract the supplied ZIP into `Interface\AddOns`.
+4. Confirm the resulting file exists:
+
+   `Interface\AddOns\OrderOfTheLionGM\OrderOfTheLionGM.toc`
+
+5. Start the game and run `/otltest`.
+
+Do not delete SavedVariables or the `WTF` folder for a normal update.
 
 Expected identity:
 
-- Addon version: `1.7.5`
-- Build: `stable-r7-20260723`
+- Version: `1.7.6`
+- Build: `performance-r5-hotfix1-20260726`
 - Interface: `11200`
 - Schema: `14`
 - Protocol: `3`
-- Modules: `27/27`
-
-Do not delete SavedVariables during a normal update.
+- TOC Lua files: `30`
+- Registered modules: `29`
 
 ## Commands
 
@@ -59,15 +94,31 @@ Do not delete SavedVariables during a normal update.
 | `/otl` | Open or close the manager |
 | `/otl scan` | Request a roster update |
 | `/otl minimap` | Show or hide the minimap launcher |
-| `/otl wizard` | Open the first-run guide |
-| `/otl backup` | Export a full local backup |
-| `/otltest` | Print module, database, permission, interaction, and network diagnostics |
+| `/otl center` | Return the main window to the center |
+| `/otl park` | Park the window at the right edge |
+| `/otl park left` | Park the window at the left edge |
+| `/otl unpark` | Restore the normal window position |
+| `/otl backup` | Export a local backup |
+| `/otltest` | Print module, database, permission, UI, and network diagnostics |
+| `/otlperf` | Print performance counters |
+| `/otlperf reset` | Reset performance counters |
 
-## Verification
+## Release validation
 
-The release tree is checked with static publication rules, Vanilla-compatible Lua parsing for every TOC-loaded module, deterministic Vanilla-oriented runtime scenarios, interaction-tree checks, achievement catalog and threshold checks, notification deduplication, raid invite state protection, and clean install-ZIP extraction.
+The full package is checked with:
 
-Offline mocks cannot prove behavior inside the real OctoWoW executable, third-party addon hooks, localized combat/emote text, or a live multi-client dungeon/raid. Complete the supplied live checklist before guild-wide publication, especially boss rules, duel outcomes, resurrection, fishing state, loot messages, text-emote localization, raid invitation delivery, and several UI scales.
+- TOC/file coverage and clean-install structure checks;
+- UTF-8, BOM, ASCII/Vanilla-font, and absolute-path checks;
+- raw UI-control interaction checks;
+- unsupported API and syntax checks;
+- one-heartbeat enforcement;
+- Lua compilation for every TOC module;
+- performance-layer static rules;
+- focused R5 runtime scenarios;
+- full 30-file load, complete UI build, page navigation, modal interaction, donor ownership, and refresh smoke tests;
+- ZIP extraction and integrity verification before publication.
+
+These offline checks cannot reproduce every behavior of the OctoWoW executable, third-party hooks, live guild synchronization, or every localized game message. They are release gates, not a substitute for a short live test.
 
 ## License
 
