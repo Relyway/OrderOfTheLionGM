@@ -1,0 +1,70 @@
+name: Validate OrderOfTheLionGM
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Lua 5.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y lua5.1
+
+      - name: Static release validation
+        run: python3 Tools/validate.py .
+
+      - name: Performance validation
+        run: python3 Tools/validate_performance176.py .
+
+      - name: Compile every TOC Lua file
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r file; do
+            luac5.1 -p "$file"
+          done < <(grep -v '^##' OrderOfTheLionGM.toc | sed '/^[[:space:]]*$/d' | tr '\\' '/')
+
+      - name: Performance runtime smoke
+        run: lua5.1 Tools/performance_smoke_test.lua Modules/Core/Performance176.lua
+
+      - name: R5 runtime smoke
+        run: lua5.1 Tools/release176r5_smoke_test.lua .
+
+      - name: Full addon load and UI smoke
+        run: lua5.1 Tools/full_load_smoke_test.lua .
+
+      - name: Package gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf _release_check
+          mkdir -p _release_check/OrderOfTheLionGM
+          rsync -a \
+            --exclude '.git' \
+            --exclude 'node_modules' \
+            --exclude '_release_check' \
+            ./ _release_check/OrderOfTheLionGM/
+          (cd _release_check && zip -qr OrderOfTheLionGM-1.7.6-R5-HOTFIX1-FULL-READY.zip OrderOfTheLionGM)
+          unzip -t _release_check/OrderOfTheLionGM-1.7.6-R5-HOTFIX1-FULL-READY.zip
+          python3 Tools/validate.py _release_check/OrderOfTheLionGM
+          test -f _release_check/OrderOfTheLionGM/OrderOfTheLionGM.toc
+          test ! -f _release_check/OrderOfTheLionGM/OrderOfTheLionGM/OrderOfTheLionGM.toc
