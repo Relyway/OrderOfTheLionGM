@@ -3,38 +3,38 @@
 
 OTLGM.quality157Loaded = true
 
-local BaseEnsureDB157 = OTLGM.ApplySystemsDefaults
-local BaseEnsureCraftingDB157 = OTLGM._Stage_Quality156_EnsureCraftingDB_2
-local BaseScanCurrentProfession157 = OTLGM._Stage_Crafting_ScanCurrentProfession_1
-local BaseQueueCraftingProfessionShare157 = OTLGM._Stage_Crafting_QueueCraftingProfessionShare_1
-local BaseApplyRemoteRecipeSnapshot157 = OTLGM._Stage_Crafting_ApplyRemoteRecipeSnapshot155_1
-local BaseRequestCraftingSync157 = OTLGM._Stage_Quality156_RequestCraftingSync_2
-local BaseProcessCraftingTimers157 = OTLGM._Stage_Crafting_ProcessCraftingTimers_1
-local BaseHandleCommunityAddonMessage157 = OTLGM._Stage_Crafting_HandleCommunityAddonMessage_1
-local BaseBuildNextProfessionsPage157 = OTLGM._Stage_Quality156_BuildNextProfessionsPage_2
-local BaseRefreshCraftingRecipesPanel157 = OTLGM._Stage_Quality156_RefreshCraftingRecipesPanel_3
-local BaseBuildPvePage157 = OTLGM._Stage_Quality156_BuildPvePage_2
-local BaseRefreshPvePage157 = OTLGM._Stage_Quality156_RefreshPvePage_3
-local BaseBuildRaidPlanner157 = OTLGM.BuildRaidPlanner156
-local BaseOpenRaidEditor157 = OTLGM._Stage_Quality156_OpenRaidEditor156_1
-local BaseSerializePveRaid157 = OTLGM._Stage_Quality156_SerializePveRaid_2
-local BaseApplyRemotePveRaid157 = OTLGM._Stage_Quality156_ApplyRemotePveRaid_3
-local BaseHandlePveAddonMessage157 = OTLGM._Stage_PVE_HandlePveAddonMessage_1
-local BaseQueuePveSyncResponse157 = OTLGM._Stage_Quality156_QueuePveSyncResponse_2
-local BasePublishPveRaidEvent157 = OTLGM._Stage_Quality156_PublishPveRaidEvent156_1
-local BaseGetRaidList157 = OTLGM._Stage_Quality156_GetRaidList156_1
-local BaseRefreshRaidPlanner157 = OTLGM._Stage_Quality156_RefreshRaidPlanner156_1
-local BaseRefreshHomePveSummary157 = OTLGM._Stage_UI_RefreshHomePveSummary155_1
-local BaseOpenAnnouncementComposer157 = OTLGM._Stage_UI_OpenAnnouncementComposer152_1
-local BaseBuildActivityDialogs157 = OTLGM._Stage_UINext_BuildActivityDialogs153_1
-local BaseGetActivityEntries157 = OTLGM._Stage_UINext_GetActivityEntries153_1
-local BaseRefreshActivityDialog157 = OTLGM._Stage_UINext_RefreshActivityDialog153_1
-local BaseOpenGuildChatNameMenu157 = OTLGM._Stage_UI_OpenGuildChatNameMenu_1
-local BaseCloseTopModal157 = OTLGM._Stage_UINext_CloseTopModal152_2
-local BaseBuildNextUI157 = OTLGM._Stage_UINext_BuildNextUI_2
-local BaseSetCommunityReaction157 = OTLGM._Stage_Crafting_SetCommunityReaction_1
-local BaseRefreshGuildChatPage157 = OTLGM._Stage_Quality156_RefreshGuildChatPage_2
-local BaseGetDiagnosticsText157 = OTLGM._Stage_Systems152_GetDiagnosticsText_2
+local PreviousEnsureDB157 = OTLGM.ApplySystemsDefaults
+local PreviousEnsureCraftingDB157 = OTLGM.__impl180.Stage_Quality156_EnsureCraftingDB_2__impl1
+local PreviousScanCurrentProfession157 = OTLGM.__impl180.Stage_Crafting_ScanCurrentProfession_1__impl1
+local PreviousQueueCraftingProfessionShare157 = OTLGM.__impl180.Stage_Crafting_QueueCraftingProfessionShare_1__impl1
+local PreviousApplyRemoteRecipeSnapshot157 = OTLGM.__impl180.Stage_Crafting_ApplyRemoteRecipeSnapshot155_1__impl1
+local PreviousRequestCraftingSync157 = OTLGM.__impl180.Stage_Quality156_RequestCraftingSync_2__impl1
+local PreviousProcessCraftingTimers157 = OTLGM.__impl180.Stage_Crafting_ProcessCraftingTimers_1__impl1
+local PreviousHandleCommunityAddonMessage157 = OTLGM.__impl180.Stage_Crafting_HandleCommunityAddonMessage_1__impl1
+local PreviousBuildNextProfessionsPage157 = OTLGM.__impl180.Stage_Quality156_BuildNextProfessionsPage_2__impl1
+local PreviousRefreshCraftingRecipesPanel157 = OTLGM.__impl180.Stage_Quality156_RefreshCraftingRecipesPanel_3__impl1
+local PreviousBuildPvePage157 = OTLGM.__impl180.Stage_Quality156_BuildPvePage_2__impl1
+local PreviousRefreshPvePage157 = OTLGM.__impl180.Stage_Quality156_RefreshPvePage_3__impl1
+local PreviousBuildRaidPlanner157 = OTLGM.BuildRaidPlanner156
+local PreviousOpenRaidEditor157 = OTLGM.__impl180.Stage_Quality156_OpenRaidEditor156_1__impl1
+local PreviousSerializePveRaid157 = OTLGM.__impl180.Stage_Quality156_SerializePveRaid_2__impl1
+local PreviousApplyRemotePveRaid157 = OTLGM.__impl180.Stage_Quality156_ApplyRemotePveRaid_3__impl1
+local PreviousHandlePveAddonMessage157 = OTLGM.__impl180.Stage_PVE_HandlePveAddonMessage_1__impl1
+local PreviousQueuePveSyncResponse157 = OTLGM.__impl180.Stage_Quality156_QueuePveSyncResponse_2__impl1
+local PreviousPublishPveRaidEvent157 = OTLGM.__impl180.Stage_Quality156_PublishPveRaidEvent156_1__impl1
+local PreviousGetRaidList157 = OTLGM.__impl180.Stage_Quality156_GetRaidList156_1__impl1
+local PreviousRefreshRaidPlanner157 = OTLGM.__impl180.Stage_Quality156_RefreshRaidPlanner156_1__impl1
+local PreviousRefreshHomePveSummary157 = OTLGM.__impl180.Stage_UI_RefreshHomePveSummary155_1__impl1
+local PreviousOpenAnnouncementComposer157 = OTLGM.__impl180.Stage_UI_OpenAnnouncementComposer152_1__impl1
+local PreviousBuildActivityDialogs157 = OTLGM.__impl180.Stage_UINext_BuildActivityDialogs153_1__impl1
+local PreviousGetActivityEntries157 = OTLGM.__impl180.Stage_UINext_GetActivityEntries153_1__impl1
+local PreviousRefreshActivityDialog157 = OTLGM.__impl180.Stage_UINext_RefreshActivityDialog153_1__impl1
+local PreviousOpenGuildChatNameMenu157 = OTLGM.__impl180.Stage_UI_OpenGuildChatNameMenu_1__impl1
+local PreviousCloseTopModal157 = OTLGM.__impl180.Stage_UINext_CloseTopModal152_2__impl1
+local PreviousBuildNextUI157 = OTLGM.__impl180.Stage_UINext_BuildNextUI_2__impl1
+local PreviousSetCommunityReaction157 = OTLGM.__impl180.Stage_Crafting_SetCommunityReaction_1__impl1
+local PreviousRefreshGuildChatPage157 = OTLGM.__impl180.Stage_Quality156_RefreshGuildChatPage_2__impl1
+local PreviousGetDiagnosticsText157 = OTLGM.__impl180.Stage_Systems152_GetDiagnosticsText_2__impl1
 
 local QUESTION_TEXTURE_157 = "Interface\\Icons\\INV_Misc_QuestionMark"
 local MAIN_RAID_TEXTURE_157 = "Interface\\Icons\\INV_BannerPVP_02"
@@ -207,7 +207,7 @@ end
 -- ---------------------------------------------------------------------------
 
 function OTLGM:EnsureCraftingIconCache157(craft)
-    craft = craft or BaseEnsureCraftingDB157(self)
+    craft = craft or PreviousEnsureCraftingDB157(self)
     if not craft then return nil end
     craft.iconCache157 = craft.iconCache157 or { items = {}, names = {}, touched = self:Now() }
     craft.iconCache157.items = craft.iconCache157.items or {}
@@ -239,7 +239,7 @@ local function SanitizeCraftingObject160(object)
 end
 
 function OTLGM:RepairCraftingItemMetadata160(craft)
-    craft = craft or BaseEnsureCraftingDB157(self)
+    craft = craft or PreviousEnsureCraftingDB157(self)
     if not craft or craft.itemInfoCompat160 == 2 then return false end
     local changed = false
     local characterName, character, professionKey, profession, recipeKey, recipe, index
@@ -278,7 +278,7 @@ function OTLGM:RememberCraftingIcon157(object, professionKey)
     if not ValidTexture157(texture) then return false end
     texture = TextureValue157(texture)
     object.icon = texture
-    local craft = BaseEnsureCraftingDB157(self)
+    local craft = PreviousEnsureCraftingDB157(self)
     local cache = self:EnsureCraftingIconCache157(craft)
     if not cache then return false end
     local now = self:Now()
@@ -296,7 +296,7 @@ function OTLGM:ResolveCraftingIcon157(object, professionKey)
         self:RememberCraftingIcon157(object, professionKey)
         return object.icon
     end
-    local craft = BaseEnsureCraftingDB157(self)
+    local craft = PreviousEnsureCraftingDB157(self)
     local cache = self:EnsureCraftingIconCache157(craft)
     local itemId = tonumber(object.itemId) or ParseItemID157(object.itemLink)
     local entry
@@ -312,29 +312,151 @@ function OTLGM:ResolveCraftingIcon157(object, professionKey)
     return QUESTION_TEXTURE_157
 end
 
+local function CraftingHydrationObjectChanged180(beforeIcon, beforeLink, beforeQuality, object)
+    return beforeIcon ~= object.icon or beforeLink ~= object.itemLink or beforeQuality ~= object.quality
+end
+
+local function HydrateCraftingObject180(owner, object, professionKey)
+    if not object then return false end
+    local beforeIcon, beforeLink, beforeQuality = object.icon, object.itemLink, object.quality
+    local resolved = owner:ResolveCraftingIcon157(object, professionKey)
+    local itemId = tonumber(object.itemId) or ParseItemID157(object.itemLink)
+    if (not ValidTexture157(resolved) or not object.itemLink or object.itemLink == "") and itemId > 0 and owner.QueueCraftingCacheLookup then
+        owner:QueueCraftingCacheLookup(itemId, object)
+    end
+    return CraftingHydrationObjectChanged180(beforeIcon, beforeLink, beforeQuality, object)
+end
+
+-- This helper is deliberately bounded by OBJECT count, not recipe count. A
+-- recipe can contain many reagents, so the older implementation could perform
+-- hundreds of GetItemInfo/cache operations in one frame even with a nominal
+-- recipe budget. Long hydration is continued by ProcessCraftingIconHydration180.
 function OTLGM:HydrateProfessionIcons157(profession, budget)
     if not profession then return false end
-    budget = tonumber(budget) or 500
-    local changed = false
-    local key, recipe, reagent, i
-    for key, recipe in pairs(profession.recipes or {}) do
-        if budget <= 0 then break end
-        budget = budget - 1
-        local before = recipe.icon
-        local resolved = self:ResolveCraftingIcon157(recipe, profession.key)
-        if ValidTexture157(resolved) and before ~= resolved then recipe.icon = resolved changed = true end
+    budget = math.max(1, math.min(tonumber(budget) or 16, 24))
+    local changed, used = false, 0
+    local _, recipe, i
+    for _, recipe in pairs(profession.recipes or {}) do
+        if used >= budget then break end
+        used = used + 1
+        if HydrateCraftingObject180(self, recipe, profession.key) then changed = true end
         for i = 1, table.getn(recipe.reagents or {}) do
-            reagent = recipe.reagents[i]
-            before = reagent.icon
-            resolved = self:ResolveCraftingIcon157(reagent, profession.key)
-            if ValidTexture157(resolved) and before ~= resolved then reagent.icon = resolved changed = true end
+            if used >= budget then break end
+            used = used + 1
+            if HydrateCraftingObject180(self, recipe.reagents[i], profession.key) then changed = true end
         end
     end
     return changed
 end
 
+function OTLGM:QueueCraftingIconHydration180(ownerName, professionKey, profession, source)
+    if type(profession) ~= "table" or type(profession.recipes) ~= "table" then return false end
+    self.runtime = self.runtime or {}
+    self.runtime.craftingIconHydration180 = self.runtime.craftingIconHydration180 or {}
+    self.runtime.craftingMetrics180 = self.runtime.craftingMetrics180 or {}
+    local jobs = self.runtime.craftingIconHydration180
+    local key = N157(ownerName or "") .. ":" .. tostring(professionKey or profession.key or "")
+    if key == ":" then return false end
+    local existing = jobs[key]
+    if existing and existing.profession == profession then
+        if existing.source == "REMOTE" and source ~= "REMOTE" then existing.source = source end
+        return true
+    end
+    local count = 0
+    for _ in pairs(jobs) do count = count + 1 end
+    if count >= 24 then
+        local oldestKey, oldestAt
+        local candidateKey, candidate
+        for candidateKey, candidate in pairs(jobs) do
+            local queuedAt = tonumber(candidate and candidate.queuedAt) or 0
+            if not oldestAt or queuedAt < oldestAt then oldestKey, oldestAt = candidateKey, queuedAt end
+        end
+        if oldestKey then jobs[oldestKey] = nil end
+    end
+    local wasEmpty = next(jobs) == nil
+    jobs[key] = {
+        key = key,
+        owner = ownerName,
+        professionKey = professionKey or profession.key,
+        profession = profession,
+        source = source or "BACKGROUND",
+        cursor = nil,
+        activeRecipe = nil,
+        reagentIndex = 0,
+        changed = false,
+        queuedAt = self:Now(),
+        due = self:Now(),
+    }
+    local metrics = self.runtime.craftingMetrics180
+    metrics.iconHydrationQueued = (tonumber(metrics.iconHydrationQueued) or 0) + 1
+    if wasEmpty and self.WakeScheduler180 then self:WakeScheduler180("crafting-icon-hydration") end
+    return true
+end
+
+function OTLGM:ProcessCraftingIconHydration180(maximumObjects)
+    if self.InCombat and self:InCombat() then return false end
+    self.runtime = self.runtime or {}
+    local jobs = self.runtime.craftingIconHydration180 or {}
+    self.runtime.craftingIconHydration180 = jobs
+    self.runtime.craftingMetrics180 = self.runtime.craftingMetrics180 or {}
+    local metrics = self.runtime.craftingMetrics180
+    maximumObjects = math.max(1, math.min(tonumber(maximumObjects) or 20, 24))
+    local jobKey, job = next(jobs)
+    if not job then return false end
+    local profession = job.profession
+    if type(profession) ~= "table" or type(profession.recipes) ~= "table" then
+        jobs[jobKey] = nil
+        return false
+    end
+
+    local processed, finished = 0, false
+    while processed < maximumObjects do
+        if job.activeRecipe and job.reagentIndex > 0 and job.reagentIndex <= table.getn(job.activeRecipe.reagents or {}) then
+            local reagent = job.activeRecipe.reagents[job.reagentIndex]
+            job.reagentIndex = job.reagentIndex + 1
+            processed = processed + 1
+            if HydrateCraftingObject180(self, reagent, job.professionKey) then job.changed = true end
+        else
+            job.activeRecipe = nil
+            job.reagentIndex = 0
+            local recipeKey, recipe = next(profession.recipes, job.cursor)
+            if not recipeKey then finished = true break end
+            job.cursor = recipeKey
+            job.activeRecipe = recipe
+            job.reagentIndex = 1
+            processed = processed + 1
+            if HydrateCraftingObject180(self, recipe, job.professionKey) then job.changed = true end
+        end
+    end
+
+    metrics.iconHydrationSlices = (tonumber(metrics.iconHydrationSlices) or 0) + 1
+    metrics.iconHydrationObjects = (tonumber(metrics.iconHydrationObjects) or 0) + processed
+    if finished then
+        jobs[jobKey] = nil
+        metrics.iconHydrationCompleted = (tonumber(metrics.iconHydrationCompleted) or 0) + 1
+        if job.changed then
+            metrics.iconHydrationChanged = (tonumber(metrics.iconHydrationChanged) or 0) + 1
+            profession.iconRevision157 = (tonumber(profession.iconRevision157) or 0) + 1
+            profession.lastSharedAt = 0
+            if self.RehashCraftingProfession then self:RehashCraftingProfession(profession) end
+            if job.source ~= "REMOTE" and self.QueueCraftingChangeManifest157 then
+                self:QueueCraftingChangeManifest157(job.owner, job.professionKey)
+            end
+            if self.ui and self.ui.main and self.ui.main:IsVisible() and self.ui.currentPage == "professions" and self.RefreshProfessionsPage then
+                self:RefreshProfessionsPage()
+            elseif self.ui then
+                self.ui.pageDirty = self.ui.pageDirty or {}
+                self.ui.pageDirty.professions = true
+            end
+        end
+    else
+        job.due = self:Now()
+    end
+    return processed > 0
+end
+
 function OTLGM:PruneCraftingIconCache157()
-    local craft = BaseEnsureCraftingDB157(self)
+    local craft = PreviousEnsureCraftingDB157(self)
     local cache = self:EnsureCraftingIconCache157(craft)
     if not cache then return end
     local now = self:Now()
@@ -359,7 +481,7 @@ function OTLGM:PruneCraftingIconCache157()
 end
 
 function OTLGM:EnsureCraftingDB()
-    local craft = BaseEnsureCraftingDB157(self)
+    local craft = PreviousEnsureCraftingDB157(self)
     if craft then
         self:EnsureCraftingIconCache157(craft)
         self:RepairCraftingItemMetadata160(craft)
@@ -405,7 +527,7 @@ function OTLGM:CaptureOpenProfessionIcons157(mode)
         count = tonumber(GetNumTradeSkills()) or 0
     end
     local professionKey = self.NormalizeProfessionKey156 and self:NormalizeProfessionKey156(rawName, rawName) or string.upper(rawName or "")
-    local craft = BaseEnsureCraftingDB157(self)
+    local craft = PreviousEnsureCraftingDB157(self)
     local player = string.gsub(UnitName("player") or "Unknown", "%-.*$", "")
     local character = craft and craft.characters and craft.characters[player]
     local profession = character and character.professions and character.professions[professionKey]
@@ -467,17 +589,17 @@ function OTLGM:CaptureOpenProfessionIcons157(mode)
     return changed
 end
 
-function OTLGM:ScanCurrentProfession(mode, attempt)
+function OTLGM.__impl180.ScanCurrentProfession__impl1(self, mode, attempt)
     local rawName
     if mode == "CRAFT" and GetCraftName then rawName = GetCraftName()
     elseif mode ~= "CRAFT" and GetTradeSkillLine then rawName = GetTradeSkillLine() end
     local professionKey = self.NormalizeProfessionKey156 and self:NormalizeProfessionKey156(rawName, rawName) or string.upper(rawName or "")
-    local craftBefore = BaseEnsureCraftingDB157(self)
+    local craftBefore = PreviousEnsureCraftingDB157(self)
     local player = string.gsub(UnitName("player") or "Unknown", "%-.*$", "")
     local oldProfession = craftBefore and craftBefore.characters and craftBefore.characters[player] and craftBefore.characters[player].professions and craftBefore.characters[player].professions[professionKey]
     local oldIcons = SnapshotOldIcons157(oldProfession)
-    local ok, changed = BaseScanCurrentProfession157(self, mode, attempt)
-    local craft = BaseEnsureCraftingDB157(self)
+    local ok, changed = PreviousScanCurrentProfession157(self, mode, attempt)
+    local craft = PreviousEnsureCraftingDB157(self)
     local profession = craft and craft.characters and craft.characters[player] and craft.characters[player].professions and craft.characters[player].professions[professionKey]
     local restored = false
     if profession then
@@ -538,7 +660,8 @@ function OTLGM:ScanCurrentProfession(mode, attempt)
             end
         end
         if self:CaptureOpenProfessionIcons157(mode) then restored = true end
-        if self:HydrateProfessionIcons157(profession, 600) then restored = true end
+        if self:HydrateProfessionIcons157(profession, 16) then restored = true end
+        self:QueueCraftingIconHydration180(player, professionKey, profession, "LOCAL")
         if restored then
             profession.iconRevision157 = (tonumber(profession.iconRevision157) or 0) + 1
             profession.lastSharedAt = 0
@@ -551,22 +674,28 @@ function OTLGM:ScanCurrentProfession(mode, attempt)
 end
 
 function OTLGM:QueueCraftingProfessionShare(ownerName, professionKey, target)
-    local craft = BaseEnsureCraftingDB157(self)
+    local craft = PreviousEnsureCraftingDB157(self)
     local character = craft and craft.characters and craft.characters[ownerName]
     local profession = character and character.professions and character.professions[professionKey]
-    if profession then self:HydrateProfessionIcons157(profession, 800) end
+    if profession then
+        self:HydrateProfessionIcons157(profession, 12)
+        self:QueueCraftingIconHydration180(ownerName, professionKey, profession, "SHARE")
+    end
     if not target then return self:QueueCraftingChangeManifest157(ownerName, professionKey) end
-    return BaseQueueCraftingProfessionShare157(self, ownerName, professionKey, target, true)
+    return PreviousQueueCraftingProfessionShare157(self, ownerName, professionKey, target, true)
 end
 
 function OTLGM:ApplyRemoteRecipeSnapshot155(fields, sender, channel)
-    local result = BaseApplyRemoteRecipeSnapshot157(self, fields, sender, channel)
+    local result = PreviousApplyRemoteRecipeSnapshot157(self, fields, sender, channel)
     if result then
         local owner = string.gsub(Unescape157(fields[3] or ""), "%-.*$", "")
         local professionKey = fields[4] or ""
-        local craft = BaseEnsureCraftingDB157(self)
+        local craft = PreviousEnsureCraftingDB157(self)
         local profession = craft and craft.characters and craft.characters[owner] and craft.characters[owner].professions and craft.characters[owner].professions[professionKey]
-        if profession then self:HydrateProfessionIcons157(profession, 800) end
+        if profession then
+            self:HydrateProfessionIcons157(profession, 12)
+            self:QueueCraftingIconHydration180(owner, professionKey, profession, "REMOTE")
+        end
         if craft and craft.syncState then
             craft.syncState.wanted157 = craft.syncState.wanted157 or {}
             local wantedKey = N157(owner) .. ":" .. professionKey
@@ -605,7 +734,7 @@ local function ProfessionCompleteness157(profession)
 end
 
 function OTLGM:QueueCraftingChangeManifest157(ownerName, professionKey)
-    local craft = BaseEnsureCraftingDB157(self)
+    local craft = PreviousEnsureCraftingDB157(self)
     local character = craft and craft.characters and craft.characters[ownerName]
     local profession = character and character.professions and character.professions[professionKey]
     if not profession or not profession.localOwner then return false end
@@ -621,7 +750,7 @@ function OTLGM:QueueCraftingChangeManifest157(ownerName, professionKey)
 end
 
 function OTLGM:QueueCraftingManifest157(target)
-    local craft = BaseEnsureCraftingDB157(self)
+    local craft = PreviousEnsureCraftingDB157(self)
     if not craft or not target or target == "" then return false end
     local networkLimit = self.GetNetworkPayloadLimit and self:GetNetworkPayloadLimit("WHISPER", target) or 250
     if networkLimit < string.len("C1^CMEND") then return false end
@@ -650,8 +779,105 @@ function OTLGM:QueueCraftingManifest157(target)
     return self:QueueCommunityPayload("C1^CMEND", "WHISPER", target, 2)
 end
 
+
+local MAX_CRAFTING_WANTED_R2 = 6
+local MAX_CRAFTING_OUTBOUND_R2 = 6
+
+function OTLGM:GetDetectedPeerInfoR2(name)
+    if not name or name == "" then return nil end
+    local db = self.GetGuildDB and self:GetGuildDB() or nil
+    local wanted = N157(name)
+    local storedName, info
+    for storedName, info in pairs(db and db.detectedVersions or {}) do
+        if N157(storedName) == wanted then return type(info) == "table" and info or nil end
+    end
+    return nil
+end
+
+function OTLGM:IsModernSyncVersionR2(version)
+    version = tostring(version or "")
+    local major, minor, patch = 0, 0, 0
+    if self.VersionParts then major, minor, patch = self:VersionParts(version) end
+    major, minor, patch = tonumber(major) or 0, tonumber(minor) or 0, tonumber(patch) or 0
+    if major > 1 then return true end
+    if major < 1 or minor < 8 then return false end
+    if minor > 8 or patch > 0 then return true end
+    -- 1.8.0 release candidates use the explicit-session transfer contract.
+    local _, _, rc = string.find(version, "%-rc(%d+)")
+    if rc then return (tonumber(rc) or 0) >= 5 end
+    -- A plain 1.8.0 is the final release and therefore compatible.
+    if version == "1.8.0" then return true end
+    return false
+end
+
+function OTLGM:IsModernSyncPeerR2(name, advertisedVersion)
+    if N157(name) == N157(UnitName("player") or "") then return true end
+    if advertisedVersion and advertisedVersion ~= "" and self:IsModernSyncVersionR2(advertisedVersion) then return true end
+    local info = self:GetDetectedPeerInfoR2(name)
+    return info and self:IsModernSyncVersionR2(info.version) and true or false
+end
+
+function OTLGM:GetCompatibleSyncPeersR2(maxAge)
+    local peers, seen = {}, {}
+    local db = self.GetGuildDB and self:GetGuildDB() or nil
+    local now = self:Now()
+    maxAge = math.max(30, tonumber(maxAge) or 360)
+    local storedName, info
+    for storedName, info in pairs(db and db.detectedVersions or {}) do
+        if type(info) == "table" and now - (tonumber(info.ts) or 0) <= maxAge and self:IsModernSyncVersionR2(info.version) then
+            local name = string.gsub(tostring(info.sender or storedName), "%-.*$", "")
+            local key = N157(name)
+            if key ~= "" and key ~= N157(UnitName("player") or "") and not seen[key] then
+                local member = self.GetMember and self:GetMember(name) or nil
+                if not member or member.online ~= false then
+                    seen[key] = true
+                    table.insert(peers, name)
+                end
+            end
+        end
+    end
+    table.sort(peers)
+    return peers
+end
+
+function OTLGM:HasCompatibleSyncPeerR2()
+    return table.getn(self:GetCompatibleSyncPeersR2(360)) > 0
+end
+
+local function QueueWantedCraftingR2(self, state, key, wanted)
+    if not state or not wanted or not wanted.sender then return false end
+    state.wanted157 = state.wanted157 or {}
+    if Count157(state.wanted157) >= MAX_CRAFTING_WANTED_R2 then return false end
+    local now = self:Now()
+    wanted.ts = now
+    wanted.createdAt = wanted.createdAt or now
+    wanted.lastProgress = now
+    wanted.tries = tonumber(wanted.tries) or 1
+    state.wanted157[key] = wanted
+    if self.RegisterExpectedCraftingTransfer180 then self:RegisterExpectedCraftingTransfer180(wanted.sender, wanted.owner, wanted.professionKey, wanted.hash or "0", 120) end
+    return self:QueueCommunityPayload(table.concat({ "C1", "CWANT", Escape157(wanted.owner, 36), Escape157(wanted.professionKey, 20), Escape157(wanted.hash or "0", 20) }, "^"), "WHISPER", wanted.sender, 1)
+end
+
+local function FillDeferredCraftingR2(self, state)
+    if not state then return 0 end
+    state.deferred157 = state.deferred157 or {}
+    local moved = 0
+    while Count157(state.wanted157 or {}) < MAX_CRAFTING_WANTED_R2 do
+        local bestKey, best
+        local key, candidate
+        for key, candidate in pairs(state.deferred157) do
+            if candidate and (not best or (tonumber(candidate.score) or 0) > (tonumber(best.score) or 0)) then bestKey, best = key, candidate end
+        end
+        if not bestKey then break end
+        state.deferred157[bestKey] = nil
+        if QueueWantedCraftingR2(self, state, bestKey, best) then moved = moved + 1 end
+    end
+    return moved
+end
+
 function OTLGM:ScheduleCraftingManifest157(target)
     if not target or target == "" or N157(target) == N157(UnitName("player") or "") then return false end
+    if self.IsModernSyncPeerR2 and not self:IsModernSyncPeerR2(target) then return false end
     self.craftingManifestTargets157 = self.craftingManifestTargets157 or {}
     local name = UnitName("player") or "Player"
     local score = 0
@@ -661,26 +887,45 @@ function OTLGM:ScheduleCraftingManifest157(target)
     local due = self:Now() + 1 + math.mod(score, 5)
     local old = self.craftingManifestTargets157[key]
     if not old or due < (old.due or due) then self.craftingManifestTargets157[key] = { name = target, due = due } end
+    if self.WakeScheduler180 then self:WakeScheduler180("crafting-manifest") end
     return true
 end
 
-function OTLGM:RequestCraftingSync(force)
-    local craft = BaseEnsureCraftingDB157(self)
+function OTLGM.__impl180.RequestCraftingSync__impl1(self, force, manual)
+    local craft = PreviousEnsureCraftingDB157(self)
     if not craft or not SendAddonMessage or not GetGuildInfo("player") then return false end
     local now = self:Now()
-    if craft.syncState and craft.syncState.active then return false end
-    if not force and craft.lastSync and now - craft.lastSync < 45 then return false end
-    if not self:QueueCommunityPayload("C1^SYNC157^" .. tostring(self.version), "GUILD", nil, 2, "crafting:manifest-sync") then return false end
+    self.runtime = self.runtime or {}
+    manual = manual and self.ui and self.ui.currentPage == "professions" and true or false
+    if craft.syncState and craft.syncState.active then
+        self.runtime.craftingSyncCoalesced180 = (tonumber(self.runtime.craftingSyncCoalesced180) or 0) + 1
+        return false
+    end
+    if not force and craft.lastSync and now - craft.lastSync < 90 then return false end
+    local peers = self.GetCompatibleSyncPeersR2 and self:GetCompatibleSyncPeersR2(360) or {}
+    if table.getn(peers) == 0 then
+        self.runtime.craftingNoCompatiblePeerR2 = (tonumber(self.runtime.craftingNoCompatiblePeerR2) or 0) + 1
+        if manual and self.SetStatus then self:SetStatus("No compatible 1.8 profession peer is online yet. Cached recipes were kept.", nil, { source = "crafting", manual = true }) end
+        return false
+    end
+    local queued = 0
+    local index, target
+    for index = 1, math.min(4, table.getn(peers)) do
+        target = peers[index]
+        if self:QueueCommunityPayload("C1^SYNC157^" .. tostring(self.version), "WHISPER", target, 2, "crafting:manifest-sync:" .. N157(target)) then queued = queued + 1 end
+    end
+    if queued == 0 then return false end
     craft.lastSync = now
     self.lastCraftingSyncRequestAt = now
-    craft.syncState = { active = true, started = now, received = 0, manifests157 = 0, requested157 = 0, wanted157 = {}, legacyFallback157 = false }
-    if self.SetOperationState156 then self:SetOperationState156("CRAFTING", "WORKING", "Waiting for profession manifests") end
-    if self.SetStatus then self:SetStatus("Requesting crafting manifests from online addon users...") end
+    craft.syncState = { active = true, started = now, received = 0, manifests157 = 0, requested157 = 0, wanted157 = {}, deferred157 = {}, legacyFallback157 = false, manual180 = manual, compatiblePeersR2 = queued }
+    self.runtime.craftingSyncContext180 = manual and "manual" or "background"
+    if self.SetOperationState156 then self:SetOperationState156("CRAFTING", "WORKING", "Waiting for profession manifests", nil, { source = "crafting", manual = manual }) end
+    if manual and self.SetStatus then self:SetStatus("Requesting current profession manifests from compatible 1.8 addon users...", nil, { source = "crafting", manual = true }) end
     return true
 end
 
 function OTLGM:HandleCraftingManifest157(payload, sender)
-    local craft = BaseEnsureCraftingDB157(self)
+    local craft = PreviousEnsureCraftingDB157(self)
     if not craft then return false end
     craft.syncState = craft.syncState or {}
     if not craft.syncState.active then
@@ -713,11 +958,16 @@ function OTLGM:HandleCraftingManifest157(payload, sender)
                 or (tostring(localProfession.hash or "0") ~= tostring(hash) and tostring(localProfession.wireHash or "") ~= tostring(hash))
                 or localCount ~= count or localIcons < remoteIcons or localMaterials < remoteMaterials
             local wanted = craft.syncState.wanted157[key]
-            if needs and (not wanted or score > (wanted.score or -1)) then
+            local deferred = craft.syncState.deferred157 and craft.syncState.deferred157[key]
+            if needs and (not wanted or score > (wanted.score or -1)) and (not deferred or score > (deferred.score or -1)) then
                 local requestedAt = self:Now()
-                craft.syncState.wanted157[key] = { sender = sender, ts = requestedAt, createdAt = requestedAt, lastProgress = requestedAt, tries = 1, hash = hash, expected = count, owner = owner, professionKey = professionKey, score = score }
-                if not wanted then craft.syncState.requested157 = (tonumber(craft.syncState.requested157) or 0) + 1 end
-                self:QueueCommunityPayload(table.concat({ "C1", "CWANT", Escape157(owner, 36), Escape157(professionKey, 20), Escape157(hash, 20) }, "^"), "WHISPER", sender, 1)
+                local candidate = { sender = sender, ts = requestedAt, createdAt = requestedAt, lastProgress = requestedAt, tries = 1, hash = hash, expected = count, owner = owner, professionKey = professionKey, score = score }
+                craft.syncState.deferred157 = craft.syncState.deferred157 or {}
+                if Count157(craft.syncState.wanted157) < MAX_CRAFTING_WANTED_R2 then
+                    if QueueWantedCraftingR2(self, craft.syncState, key, candidate) and not wanted then craft.syncState.requested157 = (tonumber(craft.syncState.requested157) or 0) + 1 end
+                else
+                    craft.syncState.deferred157[key] = candidate
+                end
             end
         end
     end
@@ -729,31 +979,47 @@ function OTLGM:HandleCommunityAddonMessage(message, channel, sender)
         local fields = Split157(message, "^")
         local kind = fields[2]
         if kind == "SYNC157" then
-            if sender and N157(sender) ~= N157(UnitName("player") or "") then self:ScheduleCraftingManifest157(sender) end
+            local advertised = fields[3] or ""
+            if sender and N157(sender) ~= N157(UnitName("player") or "") and self:IsModernSyncPeerR2(sender, advertised) then self:ScheduleCraftingManifest157(sender) end
+            return true
+        elseif kind == "SYNC" and self.IsModernSyncPeerR2 and not self:IsModernSyncPeerR2(sender, fields[3]) then
+            -- Old 1.7 clients used broad full-state replies. Ignore that sync
+            -- generation in 1.8 so a mixed-version guild cannot create a storm.
+            self.runtime = self.runtime or {}
+            self.runtime.legacyCraftSyncIgnoredR2 = (tonumber(self.runtime.legacyCraftSyncIgnoredR2) or 0) + 1
             return true
         elseif kind == "CCHG" then
             return self:HandleCraftingManifest157(fields[3] or "", sender)
         elseif kind == "CMAN" then
             return self:HandleCraftingManifest157(fields[3] or "", sender)
         elseif kind == "CMEND" then
-            local craft = BaseEnsureCraftingDB157(self)
+            local craft = PreviousEnsureCraftingDB157(self)
             if craft and craft.syncState then craft.syncState.manifestComplete157 = true end
             return true
         elseif kind == "CWANT" then
             local owner = Unescape157(fields[3] or "")
             local professionKey = Unescape157(fields[4] or "")
-            local craft = BaseEnsureCraftingDB157(self)
+            local craft = PreviousEnsureCraftingDB157(self)
             local profession = craft and craft.characters and craft.characters[owner] and craft.characters[owner].professions and craft.characters[owner].professions[professionKey]
             if profession and sender then
                 self.runtime = self.runtime or {}
                 self.runtime.craftingOutboundTransfers157 = self.runtime.craftingOutboundTransfers157 or {}
-                local transferKey = N157(sender) .. ":" .. N157(owner) .. ":" .. professionKey
+                local requestedHash = tostring(Unescape157(fields[5] or "0"))
+                local currentHash = tostring(profession.hash or "0")
+                if requestedHash ~= "0" and requestedHash ~= currentHash then
+                    -- The snapshot changed after the manifest was observed. Send a
+                    -- compact targeted manifest so the receiver requests the current
+                    -- hash instead of accepting an obsolete transfer.
+                    if self.QueueCraftingManifest157 then self:QueueCraftingManifest157(sender) end
+                    return true
+                end
+                local transferKey = N157(sender) .. ":" .. N157(owner) .. ":" .. professionKey .. ":" .. currentHash
                 local lastQueued = tonumber(self.runtime.craftingOutboundTransfers157[transferKey]) or 0
                 -- A retry must not enqueue a second copy behind an already
                 -- queued multi-packet snapshot. If the first queue attempt had
                 -- no room it is not recorded, so the retry remains useful.
                 if self:Now() - lastQueued >= 120 and self:QueueCraftingProfessionShare(owner, professionKey, sender) then
-                    if Count157(self.runtime.craftingOutboundTransfers157) >= 240 then
+                    if Count157(self.runtime.craftingOutboundTransfers157) >= 120 then
                         local storedKey, storedAt, oldestKey, oldestAt
                         for storedKey, storedAt in pairs(self.runtime.craftingOutboundTransfers157) do
                             if not oldestAt or (tonumber(storedAt) or 0) < oldestAt then oldestKey, oldestAt = storedKey, tonumber(storedAt) or 0 end
@@ -766,11 +1032,11 @@ function OTLGM:HandleCommunityAddonMessage(message, channel, sender)
             return true
         end
     end
-    return BaseHandleCommunityAddonMessage157(self, message, channel, sender)
+    return PreviousHandleCommunityAddonMessage157(self, message, channel, sender)
 end
 
-function OTLGM:ProcessCraftingTimers()
-    local craft = BaseEnsureCraftingDB157(self)
+function OTLGM.__impl180.ProcessCraftingTimers__impl1(self)
+    local craft = PreviousEnsureCraftingDB157(self)
     local now = self:Now()
     local manifestKey, manifestPending
     for manifestKey, manifestPending in pairs(self.craftingManifestTargets157 or {}) do
@@ -782,55 +1048,54 @@ function OTLGM:ProcessCraftingTimers()
     end
     if craft and craft.syncState and craft.syncState.active then
         local elapsed = now - (craft.syncState.started or now)
-        if elapsed > 7 and (tonumber(craft.syncState.manifests157) or 0) == 0 and not craft.syncState.legacyFallback157 then
-            craft.syncState.legacyFallback157 = true
-            self:QueueCommunityPayload("C1^SYNC^" .. tostring(self.version), "GUILD", nil, 2, "crafting:fallback-sync")
-            if self.SetStatus then self:SetStatus("No current manifest received yet; requesting a legacy profession snapshot...") end
-        end
         -- Do not leave the UI in Syncing forever when no current addon peer
         -- replies. Existing cached professions remain intact; a later manual
         -- request can try again after the normal cooldown.
-        if elapsed > 20 and (tonumber(craft.syncState.manifests157) or 0) == 0 then
+        if elapsed >= 15 and (tonumber(craft.syncState.manifests157) or 0) == 0 then
             local received = tonumber(craft.syncState.received) or 0
             craft.syncState.active = false
             craft.syncState.completed = now
-            if self.SetOperationState156 then self:SetOperationState156("CRAFTING", "DONE", received > 0 and ("Received " .. tostring(received) .. " legacy snapshots") or "No current profession manifest received", 4) end
-            if self.SetStatus then
-                if received > 0 then self:SetStatus("Crafting sync finished: received " .. tostring(received) .. " legacy profession snapshot(s).")
-                else self:SetStatus("Crafting sync finished: no current profession manifest was received; existing recipes were kept.") end
+            if self.SetOperationState156 then self:SetOperationState156("CRAFTING", "DONE", received > 0 and ("Received " .. tostring(received) .. " legacy snapshots") or "No current profession manifest received", 4, { source = "crafting", manual = craft.syncState.manual180 }) end
+            if craft.syncState.manual180 and self.SetStatus and self.ui and self.ui.currentPage == "professions" then
+                if received > 0 then self:SetStatus("Crafting sync finished: received " .. tostring(received) .. " profession snapshot(s).", nil, { source = "crafting", manual = true })
+                else self:SetStatus("No compatible profession manifest replied; existing recipes were kept.", nil, { source = "crafting", manual = true }) end
             end
         end
         local key, wanted
         for key, wanted in pairs(craft.syncState.wanted157 or {}) do
             local idle = wanted and now - (wanted.lastProgress or wanted.ts or now) or 0
             local age = wanted and now - (wanted.createdAt or wanted.ts or now) or 0
-            if wanted and idle > 20 and (wanted.tries or 1) < 2 then
+            if wanted and idle >= 20 and (wanted.tries or 1) < 2 then
                 wanted.tries = (wanted.tries or 1) + 1
                 wanted.ts = now
                 wanted.lastProgress = now
                 local owner = wanted.owner
                 local professionKey = wanted.professionKey
-                if wanted.sender and owner and professionKey then self:QueueCommunityPayload(table.concat({ "C1", "CWANT", Escape157(owner, 36), Escape157(professionKey, 20), Escape157(wanted.hash or "0", 20) }, "^"), "WHISPER", wanted.sender, 1) end
-            elseif wanted and (idle > 90 or age > 120) then
+                if wanted.sender and owner and professionKey then
+                    if self.RegisterExpectedCraftingTransfer180 then self:RegisterExpectedCraftingTransfer180(wanted.sender, owner, professionKey, wanted.hash or "0", 120) end
+                    self:QueueCommunityPayload(table.concat({ "C1", "CWANT", Escape157(owner, 36), Escape157(professionKey, 20), Escape157(wanted.hash or "0", 20) }, "^"), "WHISPER", wanted.sender, 1)
+                end
+            elseif wanted and (idle >= 90 or age >= 120) then
                 craft.syncState.wanted157[key] = nil
             end
         end
     end
     if craft and craft.syncState and craft.syncState.active and (tonumber(craft.syncState.manifests157) or 0) > 0 then
-        local outstanding = Count157(craft.syncState.wanted157)
+        FillDeferredCraftingR2(self, craft.syncState)
+        local outstanding = Count157(craft.syncState.wanted157) + Count157(craft.syncState.deferred157 or {})
         local quiet = now - (craft.syncState.lastManifestAt157 or craft.syncState.started or now)
         if outstanding == 0 and quiet >= 5 then
             craft.syncState.active = false
             craft.syncState.completed = now
-            if self.SetOperationState156 then self:SetOperationState156("CRAFTING", "DONE", "Received " .. tostring(craft.syncState.received or 0) .. " snapshots", 4) end
-            if self.SetStatus then
-                if (tonumber(craft.syncState.received) or 0) > 0 then self:SetStatus("Crafting sync complete: " .. tostring(craft.syncState.received) .. " updated profession snapshot(s).")
-                else self:SetStatus("Crafting sync complete: shared recipe database is already up to date.") end
+            if self.SetOperationState156 then self:SetOperationState156("CRAFTING", "DONE", "Received " .. tostring(craft.syncState.received or 0) .. " snapshots", 4, { source = "crafting", manual = craft.syncState.manual180 }) end
+            if craft.syncState.manual180 and self.SetStatus and self.ui and self.ui.currentPage == "professions" then
+                if (tonumber(craft.syncState.received) or 0) > 0 then self:SetStatus("Crafting sync complete: " .. tostring(craft.syncState.received) .. " updated profession snapshot(s).", nil, { source = "crafting", manual = true })
+                else self:SetStatus("Crafting sync complete: shared recipe database is already up to date.", nil, { source = "crafting", manual = true }) end
             end
         end
     end
-    BaseProcessCraftingTimers157(self)
-    if self.ProcessCraftingDetailQueue then self:ProcessCraftingDetailQueue(4) end
+    PreviousProcessCraftingTimers157(self)
+    if not (self.InCombat and self:InCombat()) and self.ProcessCraftingDetailQueue then self:ProcessCraftingDetailQueue(4) end
 end
 
 -- ---------------------------------------------------------------------------
@@ -838,7 +1103,7 @@ end
 -- ---------------------------------------------------------------------------
 
 function OTLGM:BuildNextProfessionsPage(page)
-    BaseBuildNextProfessionsPage157(self, page)
+    PreviousBuildNextProfessionsPage157(self, page)
     self:BuildCrafterInteraction157(page)
     if self.InitializeCraftingDetailsUI then self:InitializeCraftingDetailsUI() end
 end
@@ -909,8 +1174,8 @@ function OTLGM:CloseCrafterMenu157()
     if self.ui and self.ui.crafterShield157 then self.ui.crafterShield157:Hide() end
 end
 
-function OTLGM:RefreshCraftingRecipesPanel(summary)
-    BaseRefreshCraftingRecipesPanel157(self, summary)
+function OTLGM.__impl180.RefreshCraftingRecipesPanel__impl1(self, summary)
+    PreviousRefreshCraftingRecipesPanel157(self, summary)
     local i, row, result, professionKey, recipe, reagent
     for i = 1, table.getn(self.ui and self.ui.craftingRecipeRows or {}) do
         row = self.ui.craftingRecipeRows[i]
@@ -959,12 +1224,12 @@ function OTLGM:HideLegacyRaidUI157()
 end
 
 function OTLGM:BuildPvePage(page)
-    BaseBuildPvePage157(self, page)
+    PreviousBuildPvePage157(self, page)
     self:BuildRaidEnhancements157()
     self:HideLegacyRaidUI157()
 end
 
-function OTLGM:BuildRaidEnhancements157()
+function OTLGM.__impl180.BuildRaidEnhancements157__impl1(self)
     if not self.ui or not self.ui.raidPlanner156 or self.ui.raidEnhancements157 then return end
     self.ui.raidEnhancements157 = true
     local i, row
@@ -993,49 +1258,17 @@ function OTLGM:BuildRaidEnhancements157()
     end
 end
 
-function OTLGM:RefreshRaidDatePreview157()
-    if not self.ui or not self.ui.raidDatePreview157 then return end
-    local dayOffset = math.max(0, math.min(60, tonumber(self.ui.raidDay156 and self.ui.raidDay156:GetText()) or 0))
-    local hour = math.max(0, math.min(23, tonumber(self.ui.raidHour156 and self.ui.raidHour156:GetText()) or 20))
-    local minute = math.max(0, math.min(59, tonumber(self.ui.raidMinute156 and self.ui.raidMinute156:GetText()) or 0))
-    local now = self:Now()
-    local serverHour, serverMinute = 0, 0
-    if GetGameTime then serverHour, serverMinute = GetGameTime() end
-    serverHour = tonumber(serverHour) or tonumber(date("%H", now)) or 0
-    serverMinute = tonumber(serverMinute) or tonumber(date("%M", now)) or 0
-    local target = now - ((serverHour * 3600) + (serverMinute * 60)) + (dayOffset * 86400) + (hour * 3600) + (minute * 60)
-    if target <= now and dayOffset == 0 then target = target + 86400 end
-    self.ui.raidDatePreview157:SetText(date("%A, %d %B %Y", target) .. "  [" .. string.format("%02d:%02d", hour, minute) .. " ST]")
-end
-
-function OTLGM:OpenRaidEditor156(raid, duplicate)
-    BaseOpenRaidEditor157(self, raid, duplicate)
+function OTLGM.__impl180.OpenRaidEditor156__impl1(self, raid, duplicate)
+    PreviousOpenRaidEditor157(self, raid, duplicate)
     self.ui.raidFeatured157 = raid and raid.featured and true or false
     ButtonText157(self.ui.raidFeaturedButton157, self.ui.raidFeatured157 and "Main Raid: On" or "Main Raid: Off")
     SetButtonSelected157(self.ui.raidFeaturedButton157, self.ui.raidFeatured157)
+    if self.PrepareRaidRosterEditor180 then self:PrepareRaidRosterEditor180(raid, duplicate) end
     self:RefreshRaidDatePreview157()
 end
 
-function OTLGM:SaveRaidEditor156()
-    local data = {
-        name = self.ui.raidName156:GetText(), location = self.ui.raidLocation156:GetText(), note = self.ui.raidNote156:GetText(),
-        dayOffset = self.ui.raidDay156:GetText(), hour = self.ui.raidHour156:GetText(), minute = self.ui.raidMinute156:GetText(),
-        gatherHour = self.ui.raidGatherHour156:GetText(), gatherMinute = self.ui.raidGatherMinute156:GetText(),
-        recurring = self.ui.raidRecurring156, reminderMinutes = self.ui.raidReminder156:GetText(), featured = self.ui.raidFeatured157,
-    }
-    local editId = self.ui.raidEditor156.editId156
-    local ok, result = self:PublishPveRaidEvent156(data, editId)
-    if ok then
-        self.ui.raidEditor156:Hide()
-        self.ui.raidFilter156 = "UPCOMING"
-        self.ui.raidSelected156 = result.id
-        self:RefreshRaidPlanner156()
-        self:SetStatus(editId and "Raid event updated." or "New raid event created.")
-    else self:ShowNotice("Raid Event", result or "The raid event could not be saved.") end
-end
-
-function OTLGM:PublishPveRaidEvent156(data, existingId)
-    local ok, record = BasePublishPveRaidEvent157(self, data, existingId)
+function OTLGM.__impl180.PublishPveRaidEvent156__impl1(self, data, existingId)
+    local ok, record = PreviousPublishPveRaidEvent157(self, data, existingId)
     if ok and record then
         local featured = data and data.featured and true or false
         if record.featured ~= featured then
@@ -1045,45 +1278,28 @@ function OTLGM:PublishPveRaidEvent156(data, existingId)
             self:QueuePvePayload(self:SerializePveRaid(record), "GUILD")
         end
         self:QueueRaidMeta157(record)
+        if self.ApplyRaidRosterSourceAfterPublish180 then
+            local rosterOk, rosterError = self:ApplyRaidRosterSourceAfterPublish180(record, data, existingId)
+            if not rosterOk then return false, rosterError or "The raid roster snapshot could not be created." end
+        end
     end
     return ok, record
 end
 
 function OTLGM:SerializePveRaid(record)
-    -- Keep the core raid packet below the Vanilla 250-byte hard limit.
-    return BaseSerializePveRaid157(self, record)
+    -- Keep the core packet backward-compatible while carrying the two short C6
+    -- access fields early enough to avoid a private-event visibility flash before
+    -- the optional RMETA1 packet arrives. Older clients ignore trailing fields.
+    local core = PreviousSerializePveRaid157(self, record)
+    local visibility = tostring(record and record.visibility180 or "GUILD_VISIBLE")
+    local audience = tostring(record and record.notifyAudience180 or "ASSIGNED")
+    local extended = core .. "^" .. visibility .. "^" .. audience
+    if string.len(extended) <= 250 then return extended end
+    return core
 end
 
-function OTLGM:QueueRaidMeta157(record, target)
-    if not record or not record.id then return false end
-    local payload = table.concat({
-        self.pveProtocol, "RDMETA", tostring(record.id), tostring(record.rev or 1),
-        record.featured and "1" or "0", Escape157(record.cancelReason or "", 60)
-    }, "^")
-    return self:QueuePvePayload(payload, target and "WHISPER" or "GUILD", target)
-end
-
-function OTLGM:ApplyRaidMeta157(fields)
-    local id = fields[3] or ""
-    local revision = tonumber(fields[4]) or 0
-    if id == "" then return false end
-    local pve = self:EnsureRaid156DB()
-    if not pve then return false end
-    pve.raidMeta157 = pve.raidMeta157 or {}
-    local meta = { rev = revision, featured = fields[5] == "1", cancelReason = Unescape157(fields[6] or ""), ts = self:Now() }
-    local record = self:GetRaidById156(id)
-    if record and revision >= (tonumber(record.rev) or 0) then
-        record.featured = meta.featured
-        record.cancelReason = meta.cancelReason
-    else
-        local old = pve.raidMeta157[id]
-        if not old or revision >= (tonumber(old.rev) or 0) then pve.raidMeta157[id] = meta end
-    end
-    return true
-end
-
-function OTLGM:ApplyRemotePveRaid(fields)
-    local result = BaseApplyRemotePveRaid157(self, fields)
+function OTLGM.__impl180.ApplyRemotePveRaid__impl1(self, fields)
+    local result = PreviousApplyRemotePveRaid157(self, fields)
     if result then
         local id = fields and fields[3]
         local pve = self:EnsureRaid156DB()
@@ -1101,13 +1317,13 @@ end
 function OTLGM:HandlePveAddonMessage(message, channel, sender)
     if string.sub(message or "", 1, 3) == tostring(self.pveProtocol or "P1") .. "^" then
         local fields = Split157(message, "^")
-        if fields[2] == "RDMETA" then return self:ApplyRaidMeta157(fields) end
+        if fields[2] == "RDMETA" then return self:ApplyRaidMeta157(fields, sender, channel) end
     end
-    return BaseHandlePveAddonMessage157(self, message, channel, sender)
+    return PreviousHandlePveAddonMessage157(self, message, channel, sender)
 end
 
 function OTLGM:QueuePveSyncResponse(target)
-    local result = BaseQueuePveSyncResponse157(self, target)
+    local result = PreviousQueuePveSyncResponse157(self, target)
     local pve = self:EnsureRaid156DB()
     local id, record
     for id, record in pairs(pve and pve.raids or {}) do self:QueueRaidMeta157(record, target) end
@@ -1116,13 +1332,19 @@ function OTLGM:QueuePveSyncResponse(target)
 end
 
 function OTLGM:GetRaidList156(filter)
-    local list = BaseGetRaidList157(self, filter)
+    local source = PreviousGetRaidList157(self, filter)
     if filter == "UPCOMING" then
         local pve = self:EnsureRaid156DB()
         local id, record
         for id, record in pairs(pve and pve.cancelledRaids156 or {}) do
-            if (tonumber(record.startTs) or 0) + 14400 >= self:Now() then table.insert(list, record) end
+            if (tonumber(record.startTs) or 0) + 14400 >= self:Now() then table.insert(source, record) end
         end
+    end
+    local list, index, candidate = {}, 1, nil
+    for index = 1, table.getn(source or {}) do
+        candidate = source[index]
+        local access = self.GetRaidEventAccess180 and self:GetRaidEventAccess180(candidate) or { canView = true }
+        if access.canView then table.insert(list, candidate) end
     end
     table.sort(list, function(a, b)
         if filter == "UPCOMING" then
@@ -1135,8 +1357,8 @@ function OTLGM:GetRaidList156(filter)
     return list
 end
 
-function OTLGM:RefreshRaidPlanner156()
-    BaseRefreshRaidPlanner157(self)
+function OTLGM.__impl180.RefreshRaidPlanner156__impl1(self)
+    PreviousRefreshRaidPlanner157(self)
     self:HideLegacyRaidUI157()
     local filter = self.ui.raidFilter156 or "UPCOMING"
     local i, row, raid
@@ -1180,11 +1402,11 @@ function OTLGM:RefreshRaidPlanner156()
 end
 
 function OTLGM:RefreshPvePage()
-    return BaseRefreshPvePage157(self)
+    return PreviousRefreshPvePage157(self)
 end
 
-function OTLGM:RefreshHomePveSummary155()
-    BaseRefreshHomePveSummary157(self)
+function OTLGM.__impl180.RefreshHomePveSummary155__impl1(self)
+    PreviousRefreshHomePveSummary157(self)
     if not self.ui or not self.ui.homeRaidText then return end
     local all = self:GetRaidList156("UPCOMING")
     local active = {}
@@ -1200,7 +1422,7 @@ function OTLGM:RefreshHomePveSummary155()
     raid = active[1]
     if raid then
         local startTs = tonumber(raid.startTs) or 0
-        local dateText = startTs > 0 and date("%A, %d %b", startTs) or "Date TBA"
+        local dateText = startTs > 0 and (self.FormatServerDate180 and self:FormatServerDate180(startTs, "%A, %d %b") or date("%A, %d %b", startTs)) or "Date TBA"
         local timeText = self.GetPveRaidServerTime155 and self:GetPveRaidServerTime155(raid) or (raid.serverTime or "Time TBA")
         local remaining = self.GetPveRaidRemainingText and self:GetPveRaidRemainingText(raid) or ""
         local header = raid.featured and "|cffff5b3dIMPORTANT RAID|r" or "|cffffcc44NEXT RAID|r"
@@ -1220,7 +1442,7 @@ end
 -- ---------------------------------------------------------------------------
 
 function OTLGM:OpenAnnouncementComposer152(id)
-    BaseOpenAnnouncementComposer157(self, id)
+    PreviousOpenAnnouncementComposer157(self, id)
     if not id and self.ui and self.ui.announcementComposer152 then
         local dialog = self.ui.announcementComposer152
         dialog.editId = nil
@@ -1257,7 +1479,7 @@ local function ActivityMatch157(entry, filter)
 end
 
 function OTLGM:GetActivityEntries153(mode, filter)
-    local source = BaseGetActivityEntries157(self, mode, "ALL") or {}
+    local source = PreviousGetActivityEntries157(self, mode, "ALL") or {}
     local result = {}
     local i
     for i = 1, table.getn(source) do if ActivityMatch157(source[i], filter or "ALL") then table.insert(result, source[i]) end end
@@ -1267,7 +1489,7 @@ function OTLGM:GetActivityEntries153(mode, filter)
 end
 
 function OTLGM:BuildActivityDialogs153()
-    BaseBuildActivityDialogs157(self)
+    PreviousBuildActivityDialogs157(self)
     local dialog = self.ui and self.ui.activityDialog153
     if not dialog or dialog.filters157 then return end
     dialog.filters157 = true
@@ -1307,7 +1529,7 @@ function OTLGM:RefreshActivityDialog153()
         if dialog.filterButtons[7] then dialog.filterButtons[7]:Hide() end
         local ci
         for ci = 1, 5 do if dialog.filterButtons[ci] then dialog.filterButtons[ci]:Show() end end
-        return BaseRefreshActivityDialog157(self)
+        return PreviousRefreshActivityDialog157(self)
     end
     if dialog.filterButtons[6] then dialog.filterButtons[6]:Show() end
     if dialog.filterButtons[7] then dialog.filterButtons[7]:Show() end
@@ -1348,23 +1570,23 @@ function OTLGM:RefreshActivityDialog153()
     ButtonEnabled157(dialog.nextButton, offset < maximum, "There are no more activity entries.")
 end
 
-function OTLGM:SetCommunityReaction(targetType, targetId, reaction, force)
+function OTLGM.__impl180.SetCommunityReaction__impl1(self, targetType, targetId, reaction, force)
     if string.upper(targetType or "") == "RAID" and string.upper(reaction or "") == "READY" and not self:IsRaidNoticeEligible() then
         if self.ShowNotice then self:ShowNotice("Raider Role Required", "You can mark the raid as Seen, but Ready requires an approved raider guild role. Register in the guild Discord under your in-game name.") end
         return false
     end
-    return BaseSetCommunityReaction157(self, targetType, targetId, reaction, force)
+    return PreviousSetCommunityReaction157(self, targetType, targetId, reaction, force)
 end
 
 -- ---------------------------------------------------------------------------
 -- Context menus: stable during chat updates, but easy to close again
 -- ---------------------------------------------------------------------------
 
-function OTLGM:RefreshGuildChatPage()
+function OTLGM.__impl180.RefreshGuildChatPage__impl1(self)
     local menu = self.ui and self.ui.chatNameMenu
     local wasVisible = menu and menu:IsVisible()
     local target = menu and menu.targetName
-    local result = BaseRefreshGuildChatPage157(self)
+    local result = PreviousRefreshGuildChatPage157(self)
     if wasVisible and menu and target and (OTLGM_DB.settings.guildChatView or "GUILD") ~= "BOARD" then
         menu.targetName = target
         if self.ui.chatMenuShield157 then self.ui.chatMenuShield157:Show() end
@@ -1396,7 +1618,7 @@ function OTLGM:OpenGuildChatNameMenu(sender, owner)
     local short = string.gsub(sender or "", "%-.*$", "")
     local menu = self.ui and self.ui.chatNameMenu
     if menu and menu:IsVisible() and N157(menu.targetName) == N157(short) then self:CloseChatNameMenu157() return end
-    BaseOpenGuildChatNameMenu157(self, sender, owner)
+    PreviousOpenGuildChatNameMenu157(self, sender, owner)
     if self.ui and self.ui.chatMenuShield157 then self.ui.chatMenuShield157:Show() end
     if menu then menu:Show() end
 end
@@ -1409,11 +1631,11 @@ end
 function OTLGM:CloseTopModal152()
     if self.ui and self.ui.crafterMenu157 and self.ui.crafterMenu157:IsVisible() then self:CloseCrafterMenu157() return true end
     if self.ui and self.ui.chatNameMenu and self.ui.chatNameMenu:IsVisible() then self:CloseChatNameMenu157() return true end
-    return BaseCloseTopModal157(self)
+    return PreviousCloseTopModal157(self)
 end
 
-function OTLGM:GetDiagnosticsText()
-    local base = BaseGetDiagnosticsText157 and BaseGetDiagnosticsText157(self) or ""
+function OTLGM.__impl180.GetDiagnosticsText__impl1(self)
+    local base = PreviousGetDiagnosticsText157 and PreviousGetDiagnosticsText157(self) or ""
     local craft = self:EnsureCraftingDB()
     local cache = craft and self:EnsureCraftingIconCache157(craft)
     local pve = self.EnsureRaid156DB and self:EnsureRaid156DB() or nil
@@ -1424,6 +1646,7 @@ function OTLGM:GetDiagnosticsText()
         or (self.runtime and self.runtime.tooltipCompatibility160) or {}
     local backoff = math.max(0, (tonumber(transport.nextAttemptAt) or 0) - self:Now())
     local interaction = self.runtime and self.runtime.interactionAudit170 or {}
+    local nativeUI = self.GetNativeUIDiagnostics180 and self:GetNativeUIDiagnostics180() or {}
     local result = base ..
         "\nRuntime foundation " .. tostring(self.version) .. ": Loaded" ..
         "\nRegistered modules: " .. tostring(Count157(self.modules)) ..
@@ -1440,8 +1663,11 @@ function OTLGM:GetDiagnosticsText()
         "\nRecovered network errors: " .. tostring(metrics.recovered or 0) ..
         "\nNetwork backoff: " .. tostring(backoff) .. "s" ..
         "\nTurtleRP tooltip recursion guard: " .. tostring(tooltipCompatibility.wrapper and "Active" or "Not needed") ..
-        "\nUI interactive controls (buttons/editboxes/repaired): " .. tostring(interaction.buttons or 0) .. "/" .. tostring(interaction.editBoxes or 0) .. "/" .. tostring(interaction.repaired or 0) ..
-        "\nPersistent chat menu shield: " .. tostring(self.ui and self.ui.chatMenuShield157 and "Loaded" or "Not built yet")
+        "\nNative UI layer: " .. tostring(nativeUI.loaded and "Loaded" or "Unavailable") ..
+        "\nNative pages registered/built/active: " .. tostring(nativeUI.registered or 0) .. "/" .. tostring(nativeUI.built or 0) .. "/" .. tostring(nativeUI.activePage or "none") ..
+        "\nLegacy interaction audit (buttons/editboxes/repaired): " .. tostring(interaction.buttons or 0) .. "/" .. tostring(interaction.editBoxes or 0) .. "/" .. tostring(interaction.repaired or 0) ..
+        "\nChat menu shield: " .. tostring(nativeUI.chatShield or "Inactive / not required") ..
+        "\nModal stack depth/active: " .. tostring(nativeUI.modalDepth or 0) .. "/" .. tostring(nativeUI.activeModal or "none")
     if metrics.lastError then
         result = result .. "\nLast network error (" .. tostring(metrics.lastErrorChannel or "?") .. "/" .. tostring(metrics.lastErrorSource or "?") .. "): " .. tostring(metrics.lastError)
     end
@@ -1449,7 +1675,7 @@ function OTLGM:GetDiagnosticsText()
 end
 
 function OTLGM:BuildNextUI()
-    BaseBuildNextUI157(self)
+    PreviousBuildNextUI157(self)
     self:EnsureChatMenuShield157()
     if self.BuildExperience170 then self:BuildExperience170() end
     if self.RefreshNavigation then self:RefreshNavigation() end
@@ -1457,16 +1683,28 @@ function OTLGM:BuildNextUI()
 end
 
 -- Keep the icon cache bounded without polling. This is called by the existing
--- one-second heartbeat, but the expensive prune runs only once every six hours.
-local BaseProcessQuality156Timers157 = OTLGM._Stage_Quality156_ProcessQuality156Timers_1
-function OTLGM:ProcessQuality156Timers()
-    BaseProcessQuality156Timers157(self)
+-- keyed sleeping scheduler, but the expensive prune runs only once every six hours.
+local PreviousProcessQuality156Timers157 = OTLGM.__impl180.Stage_Quality156_ProcessQuality156Timers_1__impl1
+function OTLGM.__impl180.ProcessQuality156Timers__impl1(self)
+    if PreviousProcessQuality156Timers157 then
+        local ok, problem = pcall(PreviousProcessQuality156Timers157, self)
+        if not ok and self.RecordInternalIssueRC3 then pcall(self.RecordInternalIssueRC3, self, "Quality/COORDINATION", problem) end
+    end
     local now = self:Now()
     if not self.lastIconPrune157 or now - self.lastIconPrune157 > 21600 then
         self.lastIconPrune157 = now
-        self:PruneCraftingIconCache157()
-        if self.PruneCraftingDetails then self:PruneCraftingDetails(1200) end
-        if self.PruneDetectedAddonUsers170 then self:PruneDetectedAddonUsers170() end
+        if self.PruneCraftingIconCache157 then
+            local ok, problem = pcall(self.PruneCraftingIconCache157, self)
+            if not ok and self.RecordInternalIssueRC3 then pcall(self.RecordInternalIssueRC3, self, "Quality/ICON_PRUNE", problem) end
+        end
+        if self.PruneCraftingDetails then
+            local ok, problem = pcall(self.PruneCraftingDetails, self, 1200)
+            if not ok and self.RecordInternalIssueRC3 then pcall(self.RecordInternalIssueRC3, self, "Quality/CRAFT_DETAIL_PRUNE", problem) end
+        end
+        if self.PruneDetectedAddonUsers170 then
+            local ok, problem = pcall(self.PruneDetectedAddonUsers170, self)
+            if not ok and self.RecordInternalIssueRC3 then pcall(self.RecordInternalIssueRC3, self, "Quality/ADDON_USER_PRUNE", problem) end
+        end
     end
 end
 

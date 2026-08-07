@@ -259,12 +259,12 @@ function OTLGM:RefreshProfessionExperience170()
     end
 end
 
-function OTLGM:BuildTreasuryPage170(page)
+function OTLGM.__impl180.BuildTreasuryPage170__impl1(self, page)
     if not page or self.ui.treasury170 then return end
     local ui = { page = page, offset = 0 }
     self.ui.treasury170 = ui
-    XText(page, "GameFontNormalLarge", "Guild Treasury", 0, -2, 360, "LEFT")
-    XWrapped(page, "GameFontNormalSmall", "Shared funding goals now; conservative read-only guild-bank support when the server exposes a compatible API.", 0, -28, 700, 32)
+    ui.legacyTitle180 = XText(page, "GameFontNormalLarge", "Guild Treasury", 0, -2, 360, "LEFT")
+    ui.legacySubtitle180 = XWrapped(page, "GameFontNormalSmall", "Shared funding goals now; conservative read-only guild-bank support when the server exposes a compatible API.", 0, -28, 700, 32)
 
     ui.banner = XPanel(page, 0, -64, 718, 86, "raised")
     ui.bannerIcon = ui.banner:CreateTexture(nil, "OVERLAY")
@@ -280,11 +280,12 @@ function OTLGM:BuildTreasuryPage170(page)
     ui.copyMorrow = XButton(ui.banner, "Copy Morrow", 598, -10, 108, 28, function()
         OTLGM:ShowCopyDialog("Treasury recipient", "Morrow")
     end, "primary")
-    ui.sync = XButton(ui.banner, "Sync Goals", 598, -46, 108, 28, function()
-        if OTLGM:RequestTreasurySync170(true) then OTLGM:SetStatus("Requesting treasury goals from online leadership...") end
+    ui.sync = XButton(ui.banner, "Sync Ledger", 598, -46, 108, 28, function()
+        OTLGM:RequestTreasurySync170(true)
     end, "utility")
 
     local list = XPanel(page, 0, -160, 448, 358, "background")
+    ui.list = list
     XText(list, "GameFontNormal", "FUNDING GOALS", 12, -12, 220, "LEFT")
     ui.newGoal = XButton(list, "+ New Goal", 324, -8, 112, 26, function()
         ui.selected = nil
@@ -292,8 +293,10 @@ function OTLGM:BuildTreasuryPage170(page)
         ui.editorTitle:SetText("NEW FUNDING GOAL")
     end, "confirm")
     ui.rows = {}
+    ui.visibleRows180 = 5
+    ui.rowPoolCount180 = 10
     local index
-    for index = 1, 5 do
+    for index = 1, ui.rowPoolCount180 do
         local row = XButton(list, "", 10, -42 - ((index - 1) * 62), 428, 56, function(button)
             if button.goal170 then
                 ui.selected = button.goal170.id
@@ -320,6 +323,7 @@ function OTLGM:BuildTreasuryPage170(page)
     ui.status = XText(list, "GameFontNormalSmall", "", 12, -330, 300, "LEFT")
 
     local detail = XPanel(page, 458, -160, 260, 358, "background")
+    ui.detail = detail
     ui.serverTitle = XText(detail, "GameFontNormal", "GUILD BANK ADAPTER", 12, -12, 236, "LEFT")
     ui.serverState = XWrapped(detail, "GameFontNormalSmall", "", 12, -34, 236, 48)
     ui.detect = XButton(detail, "Check Server Support", 12, -82, 236, 26, function() OTLGM:RefreshGuildBankAdapter170() OTLGM:RefreshTreasuryPage170() end, "utility")
@@ -347,26 +351,46 @@ function OTLGM:BuildTreasuryPage170(page)
     end
 end
 
-function OTLGM:RefreshTreasuryPage170(forceEditor)
+function OTLGM.__impl180.RefreshTreasuryPage170__impl1(self, forceEditor)
     local ui = self.ui and self.ui.treasury170
     if not ui then return end
-    local treasury = self:EnsureTreasury170()
-    local goals = self:GetTreasuryGoals170()
+    -- Guild identity can be temporarily unavailable during login/reload or after
+    -- a guild transition.  Keep the page read-only and empty instead of indexing
+    -- a nil guild database; the normal roster/guild refresh will repopulate it.
+    local treasury = self:EnsureTreasury170() or { history = {}, contributions176 = {} }
+    if type(treasury.history) ~= "table" then treasury.history = {} end
+    if type(treasury.contributions176) ~= "table" then treasury.contributions176 = {} end
+    local goals = self:GetTreasuryGoals170() or {}
     local capability = self:GetGuildBankCapability170()
     local snapshot = self.runtime and self.runtime.guildBank170
+    local sync = self.runtime and self.runtime.treasurySync170 or nil
+    local ledgerRows = 0
+    local goalId, entries
+    for goalId, entries in pairs(treasury.contributions176 or {}) do ledgerRows = ledgerRows + table.getn(entries or {}) end
+    local syncText = "Ledger: " .. tostring(ledgerRows) .. " local entr" .. (ledgerRows == 1 and "y" or "ies")
+    if sync and sync.active then
+        syncText = syncText .. "  |  syncing..."
+    elseif sync and tonumber(sync.completed) and tonumber(sync.completed) > 0 then
+        syncText = syncText .. "  |  synced " .. tostring(math.max(0, math.floor((self:Now() - sync.completed) / 60))) .. "m ago"
+    elseif sync and sync.noPeerR2 then
+        syncText = syncText .. "  |  no compatible leadership peer online"
+    else
+        syncText = syncText .. "  |  local/cached"
+    end
     if capability.available then
-        ui.bannerStatus:SetText(self.colors.green .. "Read-only server guild-bank data is available; addon goals remain leadership-recorded." .. self.colors.reset)
+        ui.bannerStatus:SetText(self.colors.green .. "Server bank adapter available." .. self.colors.reset .. "  " .. syncText)
         ui.serverState:SetText("Detected: " .. (capability.money and "balance  " or "") .. (capability.tabs and "tabs  " or "") .. (capability.items and "items  " or "") .. (capability.history and "history" or "") .. (snapshot and snapshot.money and ("\nBalance: " .. XMoney(snapshot.money)) or ""))
     else
-        ui.bannerStatus:SetText("Manual goals - the addon never reads mail or moves money/items on this client.")
+        ui.bannerStatus:SetText(syncText .. "  |  recorded manually; the addon never moves money/items.")
         ui.serverState:SetText("Unavailable on this client build. The adapter is prepared and remains dormant until compatible APIs appear.")
     end
-    local maximum = math.max(0, table.getn(goals) - 5)
+    local visibleRows = math.max(1, tonumber(ui.visibleRows180) or 5)
+    local maximum = math.max(0, table.getn(goals) - visibleRows)
     if ui.offset > maximum then ui.offset = maximum end
     local index, row, goal, percentage
-    for index = 1, 5 do
+    for index = 1, table.getn(ui.rows or {}) do
         row = ui.rows[index]
-        goal = goals[ui.offset + index]
+        goal = index <= visibleRows and goals[ui.offset + index] or nil
         if goal then
             row.goal170 = goal
             percentage = (tonumber(goal.target) or 0) > 0 and math.min(1, (tonumber(goal.current) or 0) / goal.target) or 0
@@ -378,7 +402,17 @@ function OTLGM:RefreshTreasuryPage170(forceEditor)
             row:Show()
         else row.goal170 = nil row:Hide() end
     end
-    ui.status:SetText(tostring(table.getn(goals)) .. " shared goal" .. (table.getn(goals) == 1 and "" or "s") .. "  -  manual planning")
+    local sync = self.runtime and self.runtime.treasurySync170 or nil
+    local syncText = "Local ledger"
+    if sync and sync.active then syncText = "Sync pending"
+    elseif sync and tonumber(sync.completed) then
+        local minutes = math.max(0, math.floor((self:Now() - tonumber(sync.completed)) / 60))
+        syncText = "Synced " .. tostring(minutes) .. "m ago"
+    elseif tonumber(self.lastTreasurySync170) then
+        local minutes = math.max(0, math.floor((self:Now() - tonumber(self.lastTreasurySync170)) / 60))
+        syncText = "Sync requested " .. tostring(minutes) .. "m ago"
+    end
+    ui.status:SetText(tostring(table.getn(goals)) .. " shared goal" .. (table.getn(goals) == 1 and "" or "s") .. "  -  " .. syncText)
     XEnable(ui.prev, ui.offset > 0, "First page")
     XEnable(ui.next, ui.offset < maximum, "Last page")
     local selected = ui.selected and self:GetTreasuryGoal170(ui.selected)
@@ -619,34 +653,77 @@ function OTLGM:OpenChatHighlight170(message)
     if self.SetStatus then self:SetStatus("That pinned message is no longer in the bounded local chat history.") end
 end
 
-function OTLGM:BuildGuildChatExperience170()
-    if self.ui.chatHighlights170 or not self.ui.chatClearButton or not self.ui.pages.guildchat then return end
-    local page = self.ui.pages.guildchat
-    self.ui.chatClearButton.text:SetText("Highlights")
-    self.ui.chatClearButton:SetScript("OnClick", function()
-        local panel = OTLGM.ui.chatHighlights170
-        if panel:IsVisible() then panel:Hide()
-        else
-            if OTLGM.ui.chatNameMenu then OTLGM.ui.chatNameMenu:Hide() end
-            OTLGM:CloseInbox170()
-            panel:Show()
-            OTLGM:RefreshChatHighlights170()
-            OTLGM:StartExperienceMotion170(panel, 0.45, 1, 0.10)
+function OTLGM:ToggleChatHighlights180()
+    local panel = self.ui and self.ui.chatHighlights170
+    if not panel and self.BuildGuildChatExperience170 then
+        self:BuildGuildChatExperience170()
+        panel = self.ui and self.ui.chatHighlights170
+    end
+    if not panel then
+        if self.SetStatus then self:SetStatus("Chat highlights are not ready yet. Reopen Guild Chat and retry.") end
+        return false
+    end
+    if panel:IsVisible() then
+        panel:Hide()
+    else
+        if self.ui.chatNameMenu then self.ui.chatNameMenu:Hide() end
+        self:CloseInbox170()
+        -- Highlights is an information overlay, not a decorative toast.  A
+        -- fade starting below full alpha made the panel effectively transparent
+        -- on some 1.12-derived clients when the shared motion scheduler was
+        -- delayed.  Keep it deterministically opaque.
+        if self.runtime and self.runtime.motion170 then
+            local motionIndex
+            for motionIndex = table.getn(self.runtime.motion170), 1, -1 do
+                if self.runtime.motion170[motionIndex].frame == panel then table.remove(self.runtime.motion170, motionIndex) end
+            end
         end
-    end)
+        panel:SetAlpha(1)
+        local chatLayout = self.ui and self.ui.chatLayout180
+        if chatLayout and self.LayoutChatHighlights180 then
+            self:LayoutChatHighlights180(chatLayout.page, chatLayout.chatWidth, chatLayout.bodyY, chatLayout.bodyHeight)
+        end
+        panel:Show()
+        self:RefreshChatHighlights170()
+    end
+    return true
+end
 
-    local panel = XPanel(page, 394, -72, 324, 414, "raised")
-    panel:SetFrameLevel(page:GetFrameLevel() + 52)
+function OTLGM:BuildGuildChatExperience170()
+    if self.ui.chatHighlights170 or not self.ui.chatHighlightsButton180 or not self.ui.pages.guildchat then return end
+    local page = self.ui.pages.guildchat
+    -- Bind once to the dedicated control.  No load-order layer is allowed to
+    -- turn the old destructive chatClearButton into Highlights again.
+    if not self.ui.chatHighlightsButton180.otlHighlightsBound180 then
+        self.ui.chatHighlightsButton180:SetScript("OnClick", function() OTLGM:ToggleChatHighlights180() end)
+        self.ui.chatHighlightsButton180.otlHighlightsBound180 = true
+    end
+    if self.ui.chatClearButton then self.ui.chatClearButton:Hide() end
+
+    local panel = XPanel(page, 394, -72, 360, 414, "raised")
+    panel:SetFrameStrata("DIALOG")
+    panel:SetFrameLevel(page:GetFrameLevel() + 120)
+    panel:EnableMouse(true)
+    -- Tooltip backdrops can remain translucent on Vanilla-derived clients
+    -- even at alpha 1.  Own a real solid colour texture, exactly like the 1.8
+    -- UI toolkit surfaces, and use the backdrop only for the border.
+    panel.solidBackground180 = panel:CreateTexture(nil, "BACKGROUND")
+    panel.solidBackground180:SetAllPoints(panel)
+    panel.solidBackground180:SetTexture(0.014, 0.012, 0.010, 1)
+    panel.solidBackground180:SetAlpha(1)
+    if panel.SetBackdropColor then panel:SetBackdropColor(0.014, 0.012, 0.010, 1) end
+    if panel.SetBackdropBorderColor then panel:SetBackdropBorderColor(0.58, 0.40, 0.14, 1) end
+    panel:SetAlpha(1)
     panel:Hide()
     panel.mode = "MENTIONS"
     panel.offset = 0
     self.ui.chatHighlights170 = panel
-    XText(panel, "GameFontNormal", "CHAT HIGHLIGHTS", 14, -13, 214, "LEFT")
-    panel.close = XButton(panel, "X", 282, -8, 28, 26, function() panel:Hide() end, "danger")
-    panel.subtitle = XText(panel, "GameFontNormalSmall", "Focus without changing the real guild chat.", 14, -34, 286, "LEFT")
+    panel.title = XText(panel, "GameFontNormal", "CHAT HIGHLIGHTS", 14, -13, 250, "LEFT")
+    panel.close = XButton(panel, "X", 318, -8, 28, 26, function() panel:Hide() end, "danger")
+    panel.subtitle = XText(panel, "GameFontNormalSmall", "Focus without changing the real guild chat.", 14, -34, 322, "LEFT")
     panel.tabs = {
-        MENTIONS = XButton(panel, "Mentions", 12, -58, 142, 26, function() panel.mode = "MENTIONS" panel.offset = 0 OTLGM:RefreshChatHighlights170() end, "utility"),
-        PINNED = XButton(panel, "Pinned", 162, -58, 148, 26, function() panel.mode = "PINNED" panel.offset = 0 OTLGM:RefreshChatHighlights170() end, "utility"),
+        MENTIONS = XButton(panel, "Mentions", 12, -58, 160, 26, function() panel.mode = "MENTIONS" panel.offset = 0 OTLGM:RefreshChatHighlights170() end, "utility"),
+        PINNED = XButton(panel, "Pinned", 180, -58, 166, 26, function() panel.mode = "PINNED" panel.offset = 0 OTLGM:RefreshChatHighlights170() end, "utility"),
     }
     panel.rows = {}
     local rowIndex
@@ -655,19 +732,19 @@ function OTLGM:BuildGuildChatExperience170()
             if button.message170 then panel:Hide() OTLGM:OpenChatHighlight170(button.message170) end
         end, "normal")
         row.text:Hide()
-        row.sender = XText(row, "GameFontNormalSmall", "", 8, -5, 112, "LEFT")
-        row.time = XText(row, "GameFontNormalSmall", "", 216, -5, 70, "RIGHT")
+        row.sender = XText(row, "GameFontNormalSmall", "", 8, -5, 132, "LEFT")
+        row.time = XText(row, "GameFontNormalSmall", "", 238, -5, 84, "RIGHT")
         row.time:SetTextColor(0.50, 0.50, 0.48)
-        row.body = XText(row, "GameFontNormalSmall", "", 8, -20, 278, "LEFT")
+        row.body = XText(row, "GameFontNormalSmall", "", 8, -20, 314, "LEFT")
         row.body:SetTextColor(0.68, 0.68, 0.66)
         panel.rows[rowIndex] = row
     end
-    panel.empty = XWrapped(panel, "GameFontNormal", "No highlights here yet.\nMentions appear automatically; pin a useful message with its star.", 30, -172, 264, 78)
+    panel.empty = XWrapped(panel, "GameFontNormal", "No highlights here yet.\nMentions appear automatically; pin a useful message with its star.", 30, -172, 300, 78)
     panel.empty:SetTextColor(0.60, 0.60, 0.58)
     panel.previous = XButton(panel, "<", 12, -380, 34, 24, function() panel.offset = math.max(0, (panel.offset or 0) - 7) OTLGM:RefreshChatHighlights170() end, "utility")
     panel.next = XButton(panel, ">", 52, -380, 34, 24, function() panel.offset = (panel.offset or 0) + 7 OTLGM:RefreshChatHighlights170() end, "utility")
     panel.status = XText(panel, "GameFontNormalSmall", "", 94, -386, 82, "LEFT")
-    panel.clear = XButton(panel, "Clear Local", 202, -380, 108, 24, function()
+    panel.clear = XButton(panel, "Clear Local", 238, -380, 108, 24, function()
         local channel = OTLGM:GetGuildChatChannel()
         OTLGM:ShowConfirm("Clear Local Chat History", "Remove the locally stored " .. string.lower(channel) .. " chat history from this addon? This does not delete normal game chat.", "Clear", function() OTLGM:ClearGuildChatHistory(channel) panel:Hide() end)
     end, "danger")
@@ -694,6 +771,84 @@ function OTLGM:BuildGuildChatExperience170()
         pin:SetScript("OnClick", function() if this.message170 then OTLGM:ToggleChatMessagePin170(this.message170) end end)
         row.pinButton170 = pin
     end
+end
+
+function OTLGM:LayoutChatHighlights180(page, chatWidth, bodyY, bodyHeight)
+    local panel = self.ui and self.ui.chatHighlights170
+    if not panel or not page then return false end
+    chatWidth = math.max(360, tonumber(chatWidth) or 776)
+    bodyY = math.max(34, tonumber(bodyY) or 46)
+    bodyHeight = math.max(360, tonumber(bodyHeight) or 414)
+
+    local panelWidth = math.max(340, math.min(460, math.floor(chatWidth * 0.48)))
+    local panelHeight = math.max(360, math.min(540, bodyHeight - 8))
+    if panelHeight > bodyHeight - 4 then panelHeight = math.max(340, bodyHeight - 4) end
+    local x = math.max(2, chatWidth - panelWidth - 6)
+    local y = -(bodyY + 4)
+    panel:ClearAllPoints()
+    panel:SetPoint("TOPLEFT", page, "TOPLEFT", x, y)
+    panel:SetWidth(panelWidth)
+    panel:SetHeight(panelHeight)
+    panel:SetAlpha(1)
+    if panel.solidBackground180 then
+        panel.solidBackground180:SetAllPoints(panel)
+        panel.solidBackground180:SetAlpha(1)
+    end
+
+    if panel.title then panel.title:SetWidth(math.max(160, panelWidth - 74)) end
+    panel.close:ClearAllPoints()
+    panel.close:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -8)
+    panel.subtitle:SetWidth(math.max(180, panelWidth - 28))
+
+    local tabGap = 8
+    local tabWidth = math.floor((panelWidth - 24 - tabGap) / 2)
+    panel.tabs.MENTIONS:ClearAllPoints()
+    panel.tabs.MENTIONS:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -58)
+    panel.tabs.MENTIONS:SetWidth(tabWidth)
+    panel.tabs.PINNED:ClearAllPoints()
+    panel.tabs.PINNED:SetPoint("TOPLEFT", panel.tabs.MENTIONS, "TOPRIGHT", tabGap, 0)
+    panel.tabs.PINNED:SetWidth(tabWidth)
+
+    local bottomTop = panelHeight - 34
+    local rowsTop = 92
+    -- Reserve a real gap above the paging/clear controls.  The former 238px
+    -- floor forced seven 34px rows even when a compact host had only ~210px,
+    -- so the last rows could overlap the bottom controls despite the opaque
+    -- panel itself being correct.
+    local availableRows = math.max(210, bottomTop - rowsTop - 8)
+    local rowHeight = math.max(30, math.min(48, math.floor(availableRows / 7)))
+    local rowWidth = panelWidth - 24
+    local index
+    for index = 1, table.getn(panel.rows or {}) do
+        local row = panel.rows[index]
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -(rowsTop + ((index - 1) * rowHeight)))
+        row:SetWidth(rowWidth)
+        row:SetHeight(math.max(30, rowHeight - 4))
+        if row.sender then row.sender:SetWidth(math.max(92, math.floor(rowWidth * 0.44))) end
+        if row.time then
+            row.time:ClearAllPoints()
+            row.time:SetPoint("TOPRIGHT", row, "TOPRIGHT", -8, -5)
+            row.time:SetWidth(math.max(72, math.floor(rowWidth * 0.32)))
+        end
+        if row.body then row.body:SetWidth(math.max(160, rowWidth - 16)) end
+    end
+
+    panel.empty:ClearAllPoints()
+    panel.empty:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -154)
+    panel.empty:SetWidth(math.max(220, panelWidth - 48))
+    panel.empty:SetHeight(math.max(70, panelHeight - 220))
+
+    panel.previous:ClearAllPoints()
+    panel.previous:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 12, 10)
+    panel.next:ClearAllPoints()
+    panel.next:SetPoint("LEFT", panel.previous, "RIGHT", 6, 0)
+    panel.status:ClearAllPoints()
+    panel.status:SetPoint("LEFT", panel.next, "RIGHT", 8, 0)
+    panel.status:SetWidth(math.max(60, panelWidth - 220))
+    panel.clear:ClearAllPoints()
+    panel.clear:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 10)
+    return true
 end
 
 function OTLGM:RefreshChatHighlights170()
@@ -748,7 +903,12 @@ function OTLGM:RefreshGuildChatExperience170()
                 row.pinButton170:SetPoint("TOPRIGHT", row, "TOPRIGHT", -2, -2)
                 if row.newLine:IsVisible() then row.pinButton170:Hide() else row.pinButton170:Show() end
                 local isAchievement = string.find(tostring(message.text or ""), "^%[Guild Achievement%]") ~= nil
-                row.messageFrame:SetWidth(isAchievement and 582 or ((compact and 284 or 444) - 24))
+                -- NativePages owns the current responsive chat widths. Do not
+                -- restore the old 718px-era constants while refreshing pins;
+                -- doing so caused text to jump/overlap after resize.
+                local responsiveWidth = isAchievement and (tonumber(self.ui.chatAchievementWidth180) or 548)
+                    or (tonumber(self.ui.chatMessageWidth180) or (compact and 262 or 422))
+                row.messageFrame:SetWidth(math.max(isAchievement and 220 or 180, responsiveWidth))
                 -- Keep every message self-identifying. Hiding the sender on consecutive
                 -- messages looked like broken wrapping and made separate messages merge visually.
                 grouped = false
@@ -760,9 +920,9 @@ function OTLGM:RefreshGuildChatExperience170()
             end
         end
     end
-    if self.ui.chatClearButton and self.ui.chatClearButton.text then
+    if self.ui.chatHighlightsButton180 and self.ui.chatHighlightsButton180.text then
         local count = table.getn(self:GetChatHighlights170("MENTIONS", self:GetGuildChatChannel()))
-        self.ui.chatClearButton.text:SetText(count > 0 and ("Highlights " .. tostring(count)) or "Highlights")
+        self.ui.chatHighlightsButton180.text:SetText(count > 0 and ("Highlights " .. tostring(count)) or "Highlights")
     end
     if self.ui.chatHighlights170 and self.ui.chatHighlights170:IsVisible() then self:RefreshChatHighlights170() end
 end
@@ -877,18 +1037,33 @@ function OTLGM:RaiseGroupFinderComposer170()
     form:EnableMouse(true)
 end
 
-function OTLGM:CloseGroupFinderComposer170()
-    if self.ui and self.ui.pveGroupForm170 then
-        self.ui.pveGroupForm170:Hide()
-        if self.ui.pveRequestActivityEdit then self.ui.pveRequestActivityEdit:ClearFocus() end
-        if self.ui.pveRequestNoteEdit then self.ui.pveRequestNoteEdit:ClearFocus() end
+function OTLGM:CloseGroupFinderComposer170(clearComposer)
+    if not self.ui then return end
+    if self.ui.pveGroupForm170 then self.ui.pveGroupForm170:Hide() end
+    if self.ui.pveGroupForm180 then self.ui.pveGroupForm180:Hide() end
+    if self.ui.pveGroupFormShield170 then self.ui.pveGroupFormShield170:Hide() end
+    local fields = {
+        self.ui.pveRequestActivityEdit, self.ui.pveRequestNoteEdit,
+        self.ui.pveGroupSizeEdit, self.ui.pveNeedTankEdit,
+        self.ui.pveNeedHealEdit, self.ui.pveNeedDpsEdit,
+        self.ui.pveMinLevelEdit, self.ui.pveMaxLevelEdit,
+    }
+    local index
+    for index = 1, table.getn(fields) do
+        if fields[index] and fields[index].ClearFocus then fields[index]:ClearFocus() end
     end
-    if self.ui and self.ui.pveGroupFormShield170 then self.ui.pveGroupFormShield170:Hide() end
+    if clearComposer then
+        if self.ui.pveRequestActivityEdit then self.ui.pveRequestActivityEdit:SetText("") end
+        if self.ui.pveRequestNoteEdit then self.ui.pveRequestNoteEdit:SetText("") end
+        if self.ui.pveMinLevelEdit then self.ui.pveMinLevelEdit:SetText("") end
+        if self.ui.pveMaxLevelEdit then self.ui.pveMaxLevelEdit:SetText("") end
+    end
 end
 
 function OTLGM:OpenGroupFinderComposer170()
     local form = self.ui and self.ui.pveGroupForm170
     if not form then return end
+    if self.PopulatePveGroupEditor180 then self:PopulatePveGroupEditor180(self.GetOwnPveGroup180 and self:GetOwnPveGroup180() or nil) end
     self:RaiseGroupFinderComposer170()
     if self.ui.pveGroupFormShield170 then self.ui.pveGroupFormShield170:Show() end
     form:Show()
@@ -949,6 +1124,10 @@ end
 function OTLGM:RefreshGroupFinderExperience170()
     if not self.ui or not self.ui.pveGroupExperience170 then return end
     local requests = self.GetPveRequests and self:GetPveRequests() or {}
+    local ownGroup = self.GetOwnPveGroup180 and self:GetOwnPveGroup180() or nil
+    if self.ui.pveGroupCreateToggle170 and self.ui.pveGroupCreateToggle170.text then
+        self.ui.pveGroupCreateToggle170.text:SetText(ownGroup and "Edit My Group" or "Create Group")
+    end
     if self.ui.pveGroupEmpty170 then
         if table.getn(requests) == 0 then self.ui.pveGroupEmpty170:Show() else self.ui.pveGroupEmpty170:Hide() end
     end
@@ -986,9 +1165,9 @@ function OTLGM:BuildExperience170()
     self:RefreshExperienceSettings170()
 end
 
-local XBaseRefreshPveGroupsPanel170 = OTLGM.RefreshPveGroupsPanel
+local XBaseRefreshPveGroupsPanel170 = OTLGM.__impl180.RefreshPveGroupsPanel__impl1
 if XBaseRefreshPveGroupsPanel170 then
-    OTLGM.RefreshPveGroupsPanel = function(self)
+    OTLGM.__impl180.RefreshPveGroupsPanel__impl1 = function(self)
         local result = XBaseRefreshPveGroupsPanel170(self)
         if self.RefreshGroupFinderExperience170 then self:RefreshGroupFinderExperience170() end
         return result

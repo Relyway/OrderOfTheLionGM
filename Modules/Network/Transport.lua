@@ -5,9 +5,13 @@ local PRIORITY_CRITICAL = 3
 local PRIORITY_NORMAL = 2
 local PRIORITY_BULK = 1
 local MAX_PAYLOAD = 250
-local MAX_QUEUED = 420
+local MAX_QUEUED = 180
 local MAX_RETRIES = 4
 local RETRY_DELAYS = { 2, 4, 8, 16 }
+local NETWORK_SLICE_GAP_180 = 0.25
+local NETWORK_RATE_WINDOW_180 = tonumber(OTLGM.networkRateWindow180) or 10
+local NETWORK_OUTBOUND_MAXIMUM_180 = tonumber(OTLGM.networkOutboundMaximum180) or 80
+local NETWORK_PACKET_BUDGET_180 = tonumber(OTLGM.networkPacketBudget180) or 2
 local TARGET_ENVELOPE = "T1^"
 
 -- TurtleRP embeds an old ChatThrottleLib that validates chat escape codes even
@@ -86,7 +90,11 @@ local function FitTargetPayload(self, payload, channel, target)
     elseif protocol == "P1" and kind == "BOARD" then shrink = { 10 }
     elseif protocol == "P1" and kind == "RAID" then shrink = { 11, 9, 8 }
     elseif protocol == "P1" and kind == "RDMETA" then shrink = { 6 }
+    elseif protocol == "P1" and kind == "RTEAM1" then shrink = { 6 }
+    elseif protocol == "P1" and kind == "RTMEM1" then shrink = { 9 }
+    elseif protocol == "P1" and kind == "RMETA1" then shrink = { 9, 8 }
     elseif protocol == "C1" and kind == "CREQ" then shrink = { 13, 12 }
+    elseif protocol == "C1" and kind == "CMETA1" then shrink = { 11, 10 }
     elseif protocol == "C1" and kind == "CRES" then shrink = { 12 }
     else return payload, false end
 
@@ -127,6 +135,19 @@ local function EnsureTransport(self)
     self.runtime.metrics = self.runtime.metrics or {}
     self.runtime.metrics.network = self.runtime.metrics.network or { queued = 0, sent = 0, retried = 0, dropped = 0, rejected = 0 }
     return self.runtime.transport, self.runtime.metrics.network
+end
+
+local function OutboundRateWindow180(transport, now)
+    local state = transport.outboundRate180
+    if type(state) ~= "table" then
+        state = { started = now, count = 0 }
+        transport.outboundRate180 = state
+    end
+    if now < (tonumber(state.started) or now) or now - (tonumber(state.started) or 0) >= NETWORK_RATE_WINDOW_180 then
+        state.started = now
+        state.count = 0
+    end
+    return state
 end
 
 local function QueueFor(transport, priority)
@@ -186,8 +207,10 @@ end
 local function ClassifyPve(payload)
     local _, _, kind = string.find(payload or "", "^P1%^([^%^]+)")
     kind = kind or ""
-    if kind == "APP" or kind == "APPACK" or kind == "REQDEL" or kind == "BOARDDEL" or kind == "RAIDDEL" then return PRIORITY_CRITICAL end
-    if kind == "REQ" or kind == "BOARD" or kind == "RAID" or kind == "RDMETA" or kind == "NOTICE" then return PRIORITY_NORMAL end
+    if kind == "APP" or kind == "APPACK" or kind == "REQDEL" or kind == "BOARDDEL" or kind == "RAIDDEL"
+        or kind == "RTDEL1" or kind == "RRDEL1" or kind == "RSTATUS1" or kind == "RINV1" then return PRIORITY_CRITICAL end
+    if kind == "REQ" or kind == "GMETA1" or kind == "BOARD" or kind == "RAID" or kind == "RDMETA" or kind == "NOTICE"
+        or kind == "RTEAM1" or kind == "RMETA1" then return PRIORITY_NORMAL end
     return PRIORITY_BULK
 end
 
@@ -196,7 +219,7 @@ local function ClassifyCommunity(payload, legacyPriority)
     if protocol == "A3" then return PRIORITY_NORMAL end
     if protocol == "B1" then return PRIORITY_NORMAL end
     if protocol == "C1" then
-        if kind == "CREQ" or kind == "CRES" or kind == "CDEL" or kind == "REACT" then return PRIORITY_CRITICAL end
+        if kind == "CREQ" or kind == "CMETA1" or kind == "CRES" or kind == "CDEL" or kind == "REACT" then return PRIORITY_CRITICAL end
         if kind == "CWANT" or kind == "CMAN" or kind == "CMEND" or kind == "CCHG" or kind == "SYNC" or kind == "SYNC157" then return PRIORITY_NORMAL end
         if kind == "RC3" or kind == "RC2" or kind == "RCP" then return PRIORITY_BULK end
     end
@@ -205,7 +228,7 @@ local function ClassifyCommunity(payload, legacyPriority)
     return PRIORITY_BULK
 end
 
-function OTLGM:QueueNetworkPayload(payload, channel, target, priority, source, coalesceKey)
+function OTLGM.__impl180.QueueNetworkPayload__impl1(self, payload, channel, target, priority, source, coalesceKey)
     payload = tostring(payload or "")
     channel = channel or "GUILD"
     priority = tonumber(priority) or PRIORITY_NORMAL
@@ -240,9 +263,13 @@ function OTLGM:QueueNetworkPayload(payload, channel, target, priority, source, c
         existing.wirePayload = wirePayload
         existing.physicalChannel = physicalChannel
         existing.updatedAt = self:Now()
+        metrics.coalesced = (tonumber(metrics.coalesced) or 0) + 1
+        if priority == PRIORITY_CRITICAL and not transport.retryBackoff180 then transport.nextAttemptAt = nil end
+        if self.WakeScheduler180 then self:WakeScheduler180("network-coalesced") end
         return true
     end
 
+    local queueWasEmpty = TotalCount(transport) == 0
     while TotalCount(transport) >= MAX_QUEUED do
         if not DropOldestBulk(transport) then
             metrics.dropped = metrics.dropped + 1
@@ -270,6 +297,10 @@ function OTLGM:QueueNetworkPayload(payload, channel, target, priority, source, c
     metrics.queued = metrics.queued + 1
     if channel == "WHISPER" then metrics.targetedQueued = (metrics.targetedQueued or 0) + 1 end
     transport.highWater = math.max(transport.highWater or 0, TotalCount(transport))
+    metrics.highWater = math.max(tonumber(metrics.highWater) or 0, transport.highWater or 0)
+    if priority == PRIORITY_CRITICAL and not transport.retryBackoff180 then transport.nextAttemptAt = nil end
+    if self.WakeScheduler180 and queueWasEmpty then self:WakeScheduler180("network-enqueue")
+    elseif self.UpdateSchedulerState180 then self:UpdateSchedulerState180("network-enqueue") end
     return true
 end
 
@@ -292,16 +323,29 @@ function OTLGM:CanQueueNetworkPayloads(amount, reserve)
     return TotalCount(transport) + amount <= MAX_QUEUED - reserve
 end
 
-function OTLGM:ProcessNetworkQueue(maximum)
+function OTLGM.__impl180.ProcessNetworkQueue__impl1(self, maximum)
     if not SendAddonMessage then return 0 end
     local transport, metrics = EnsureTransport(self)
     local settings = OTLGM_DB and OTLGM_DB.settings or {}
-    maximum = tonumber(maximum) or tonumber(settings.networkPacketBudget) or 5
-    maximum = math.max(1, math.min(8, maximum))
+    maximum = tonumber(maximum) or NETWORK_PACKET_BUDGET_180
+    maximum = math.max(1, math.min(NETWORK_PACKET_BUDGET_180, maximum))
     local pauseBulk = settings.pauseBulkSyncInCombat ~= false and self:InCombat()
     local sent = 0
-    local now = self:Now()
+    local now = self.GetPreciseTime180 and self:GetPreciseTime180() or self:Now()
     if (tonumber(transport.nextAttemptAt) or 0) > now then return 0 end
+
+    -- RC5 network contract: critical queue wakes may bypass the normal 0.25 s
+    -- slice deadline, but they may never bypass the shared sender window. This
+    -- guarantees that a legitimate RC5 client cannot exceed the receiver's
+    -- per-sender abuse threshold even under a large sync or critical burst.
+    local outboundRate = OutboundRateWindow180(transport, now)
+    local allowance = NETWORK_OUTBOUND_MAXIMUM_180 - (tonumber(outboundRate.count) or 0)
+    if allowance <= 0 then
+        transport.nextAttemptAt = math.max(tonumber(transport.nextAttemptAt) or 0, (tonumber(outboundRate.started) or now) + NETWORK_RATE_WINDOW_180)
+        metrics.rateLimitedSlices180 = (tonumber(metrics.rateLimitedSlices180) or 0) + 1
+        return 0
+    end
+    maximum = math.min(maximum, allowance)
 
     while sent < maximum do
         local item = Pop(transport.critical, now)
@@ -315,6 +359,7 @@ function OTLGM:ProcessNetworkQueue(maximum)
         if not wirePayload then wirePayload, physicalChannel = WirePacket(item.payload, item.channel, item.target) end
         local ok, problem = pcall(SendAddonMessage, "OTLGM", wirePayload, physicalChannel or item.channel)
         if ok then
+            outboundRate.count = (tonumber(outboundRate.count) or 0) + 1
             metrics.sent = metrics.sent + 1
             if item.channel == "WHISPER" then metrics.targetedRouted = (metrics.targetedRouted or 0) + 1 end
             if metrics.lastError then
@@ -328,12 +373,15 @@ function OTLGM:ProcessNetworkQueue(maximum)
             end
             transport.consecutiveFailures = 0
             transport.nextAttemptAt = nil
+            transport.retryBackoff180 = nil
             sent = sent + 1
         else
             item.retries = (item.retries or 0) + 1
             transport.consecutiveFailures = (tonumber(transport.consecutiveFailures) or 0) + 1
             local delay = RETRY_DELAYS[item.retries] or RETRY_DELAYS[table.getn(RETRY_DELAYS)]
             transport.nextAttemptAt = now + delay
+            transport.retryBackoff180 = true
+            if self.WakeScheduler180 then self:WakeScheduler180("network-retry") end
             metrics.lastError = self:Utf8Truncate(tostring(problem or "unknown transport error"), 180)
             metrics.lastErrorAt = now
             metrics.lastErrorChannel = item.channel
@@ -347,11 +395,22 @@ function OTLGM:ProcessNetworkQueue(maximum)
                 metrics.dropped = metrics.dropped + 1
             end
             sent = sent + 1
-            -- One failing C API call is enough for this heartbeat. Continuing
-            -- through the queue only amplifies a throttle or compatibility
+            -- One failing C API call is enough for this scheduler slice.
+            -- Continuing through the queue only amplifies a throttle or compatibility
             -- error and used to generate hundreds of retries in a few minutes.
             break
         end
+    end
+    local remaining = TotalCount(transport)
+    if remaining <= 0 then
+        transport.nextAttemptAt = nil
+        transport.retryBackoff180 = nil
+    elseif not transport.retryBackoff180 then
+        -- The former once-per-second heartbeat accidentally supplied pacing.
+        -- A sleeping scheduler needs an explicit short deadline or a queue can
+        -- otherwise emit two packets on every rendered frame.
+        transport.nextAttemptAt = now + NETWORK_SLICE_GAP_180
+        metrics.slices = (tonumber(metrics.slices) or 0) + 1
     end
     return sent
 end
@@ -370,5 +429,8 @@ OTLGM:RegisterModule("Transport", {
     payloadLimit = MAX_PAYLOAD,
     targetedEnvelope = TARGET_ENVELOPE,
     queueLimit = MAX_QUEUED,
+    packetBudget = NETWORK_PACKET_BUDGET_180,
+    rateWindow = NETWORK_RATE_WINDOW_180,
+    outboundMaximum = NETWORK_OUTBOUND_MAXIMUM_180,
     priorities = { critical = PRIORITY_CRITICAL, normal = PRIORITY_NORMAL, bulk = PRIORITY_BULK },
 })

@@ -3,13 +3,23 @@
 -- Compatible with the Lua runtime used by Vanilla/OctoWoW (Interface 11200).
 
 OTLGM = OTLGM or {}
+OTLGM.__impl180 = OTLGM.__impl180 or {}
 
 OTLGM.name = "Order of the Lion Guild Manager"
 OTLGM.addonName = "OrderOfTheLionGM"
-OTLGM.version = "1.7.6"
-OTLGM.build = "performance-r5-hotfix1-20260726"
-OTLGM.schemaVersion = 14
+OTLGM.version = "1.8.0"
+OTLGM.build = "final-public-20260808"
+OTLGM.hotfix = nil
+OTLGM.schemaVersion = 15
 OTLGM.protocolVersion = 3
+-- 1.8 network contract. These constants are the single source of truth for
+-- sender pacing, receiver abuse protection and the per-slice queue budget.
+-- The receiver keeps modest headroom above the maximum legitimate 1.8 sender
+-- window so the addon can never rate-limit its own normal synchronization.
+OTLGM.networkPacketBudget180 = 2
+OTLGM.networkRateWindow180 = 10
+OTLGM.networkOutboundMaximum180 = 80
+OTLGM.networkInboundMaximum180 = 90
 OTLGM.useRaidPlanner160 = true
 
 OTLGM.ui = OTLGM.ui or {}
@@ -21,6 +31,7 @@ OTLGM.colors = {
     gold = "|cffffd36b",
     green = "|cff69cc73",
     red = "|cffff7777",
+    orange = "|cffffa63d",
     grey = "|cffaaaaaa",
     darkGrey = "|cff777777",
     white = "|cffffffff",
@@ -30,9 +41,9 @@ OTLGM.colors = {
 }
 
 OTLGM.theme = {
-    background = { 0.010, 0.012, 0.014, 0.985 },
-    surface = { 0.025, 0.028, 0.032, 0.985 },
-    surfaceRaised = { 0.042, 0.044, 0.047, 1.0 },
+    background = { 0.010, 0.012, 0.014, 1.0 },
+    surface = { 0.028, 0.030, 0.034, 1.0 },
+    surfaceRaised = { 0.054, 0.052, 0.048, 1.0 },
     border = { 0.26, 0.22, 0.14, 0.92 },
     borderSoft = { 0.15, 0.15, 0.14, 0.88 },
     gold = { 0.92, 0.67, 0.22, 1.0 },
@@ -41,7 +52,7 @@ OTLGM.theme = {
     green = { 0.18, 0.62, 0.32, 1.0 },
     red = { 0.70, 0.20, 0.14, 1.0 },
     text = { 0.92, 0.90, 0.84, 1.0 },
-    textMuted = { 0.58, 0.58, 0.55, 1.0 },
+    textMuted = { 0.64, 0.63, 0.59, 1.0 },
     disabled = { 0.27, 0.27, 0.27, 1.0 },
 }
 
@@ -182,12 +193,43 @@ function OTLGM:VersionParts(version)
     return tonumber(major) or 0, tonumber(minor) or 0, tonumber(patch) or 0
 end
 
+local function VersionStage180(version)
+    local lower = string.lower(tostring(version or ""))
+    local _, _, rc = string.find(lower, "%-rc(%d+)")
+    if rc then
+        local _, _, revision = string.find(lower, "%-r(%d+)")
+        return 3, tonumber(rc) or 0, tonumber(revision) or 0, 0
+    end
+    local _, _, beta = string.find(lower, "beta(%d*)")
+    if beta ~= nil then
+        local _, _, revision = string.find(lower, "%-r(%d+)")
+        return 2, tonumber(beta) or 0, tonumber(revision) or 0, 0
+    end
+    local _, _, alpha = string.find(lower, "alpha(%d*)")
+    local _, _, cstage = string.find(lower, "%-c(%d+)")
+    if alpha ~= nil or cstage ~= nil then
+        local _, _, revision = string.find(lower, "%-r(%d+)")
+        return 1, tonumber(alpha) or 0, tonumber(cstage) or 0, tonumber(revision) or 0
+    end
+    -- A plain semantic version is the final/stable release and sorts above
+    -- every same-base prerelease. Unknown custom suffixes sort below final but
+    -- above the old alpha family only when explicitly marked beta/RC above.
+    if not string.find(lower, "-", 1, true) then return 4, 0, 0, 0 end
+    return 0, 0, 0, 0
+end
+
 function OTLGM:IsVersionNewer(left, right)
     local leftMajor, leftMinor, leftPatch = self:VersionParts(left)
     local rightMajor, rightMinor, rightPatch = self:VersionParts(right)
     if leftMajor ~= rightMajor then return leftMajor > rightMajor end
     if leftMinor ~= rightMinor then return leftMinor > rightMinor end
-    return leftPatch > rightPatch
+    if leftPatch ~= rightPatch then return leftPatch > rightPatch end
+    local leftStage, leftA, leftB, leftC = VersionStage180(left)
+    local rightStage, rightA, rightB, rightC = VersionStage180(right)
+    if leftStage ~= rightStage then return leftStage > rightStage end
+    if leftA ~= rightA then return leftA > rightA end
+    if leftB ~= rightB then return leftB > rightB end
+    return leftC > rightC
 end
 
 function OTLGM:InCombat()
@@ -198,6 +240,83 @@ end
 
 function OTLGM:IsUIVisible()
     return self.ui and self.ui.main and self.ui.main.IsVisible and self.ui.main:IsVisible() and true or false
+end
+
+-- RC4: one canonical server-time adapter. Any text labelled ST must flow
+-- through these helpers rather than the user's local operating-system clock.
+function OTLGM:GetServerOffsetSeconds180(now)
+    now = tonumber(now) or (self.Now and self:Now()) or (time and time() or 0)
+    if not GetGameTime or not date then return 0 end
+    local ok, serverHour, serverMinute = pcall(GetGameTime)
+    if not ok or serverHour == nil then return 0 end
+    local localHour = tonumber(date("%H", now)) or 0
+    local localMinute = tonumber(date("%M", now)) or 0
+    local delta = ((tonumber(serverHour) or 0) * 60 + (tonumber(serverMinute) or 0)) - (localHour * 60 + localMinute)
+    -- Choose the nearest same-instant wall-clock offset. This handles clients
+    -- on the previous/next local calendar day without inventing a date API.
+    while delta > 720 do delta = delta - 1440 end
+    while delta < -720 do delta = delta + 1440 end
+    return delta * 60
+end
+
+function OTLGM:GetServerNow180(now)
+    now = tonumber(now) or (self.Now and self:Now()) or (time and time() or 0)
+    return now + self:GetServerOffsetSeconds180(now)
+end
+
+function OTLGM:FormatServerClock180(ts, includeDate)
+    ts = tonumber(ts) or (self.Now and self:Now()) or (time and time() or 0)
+    -- GetGameTime describes the server wall clock at the current instant. Reuse
+    -- that current offset when formatting a future/past event timestamp; asking
+    -- GetServerOffsetSeconds180(targetTs) would incorrectly compare today's
+    -- server clock with the target timestamp's local hour and make every event
+    -- drift toward the current server time.
+    local sampleNow = (self.Now and self:Now()) or (time and time() or ts)
+    local shifted = ts + self:GetServerOffsetSeconds180(sampleNow)
+    if includeDate then return date("%H:%M  %d %b", shifted) end
+    return date("%H:%M", shifted)
+end
+
+function OTLGM:FormatServerDate180(ts, pattern)
+    ts = tonumber(ts) or (self.Now and self:Now()) or (time and time() or 0)
+    local sampleNow = (self.Now and self:Now()) or (time and time() or ts)
+    local shifted = ts + self:GetServerOffsetSeconds180(sampleNow)
+    return date(pattern or "%d %b", shifted)
+end
+
+function OTLGM:GetServerDayOffset180(targetTs, nowTs)
+    targetTs = tonumber(targetTs) or 0
+    nowTs = tonumber(nowTs) or (self.Now and self:Now()) or (time and time() or 0)
+    if targetTs <= 0 then return 0 end
+    local offset = self:GetServerOffsetSeconds180(nowTs)
+    local nowParts = date("*t", nowTs + offset)
+    local targetParts = date("*t", targetTs + offset)
+    if not nowParts or not targetParts then
+        return math.max(0, math.floor(((targetTs - nowTs) + 86399) / 86400))
+    end
+    -- Noon avoids DST/midnight discontinuities when converting calendar days.
+    local nowDay = time({ year=nowParts.year, month=nowParts.month, day=nowParts.day, hour=12, min=0, sec=0 })
+    local targetDay = time({ year=targetParts.year, month=targetParts.month, day=targetParts.day, hour=12, min=0, sec=0 })
+    return math.max(0, math.floor(((targetDay - nowDay) / 86400) + 0.5))
+end
+
+function OTLGM:GetServerDayStart180(nowTs, dayOffset)
+    nowTs = tonumber(nowTs) or (self.Now and self:Now()) or (time and time() or 0)
+    dayOffset = tonumber(dayOffset) or 0
+    local offset = self:GetServerOffsetSeconds180(nowTs)
+    local parts = date("*t", nowTs + offset)
+    if not parts then return nowTs - math.mod(nowTs, 86400) + (dayOffset * 86400) end
+    local shiftedMidnight = time({ year=parts.year, month=parts.month, day=parts.day, hour=0, min=0, sec=0 }) + (dayOffset * 86400)
+    return shiftedMidnight - offset
+end
+
+function OTLGM:FormatServerDayTime180(targetTs, recurring)
+    targetTs = tonumber(targetTs) or 0
+    if targetTs <= 0 then return "Time TBA" end
+    local dayOffset = self:GetServerDayOffset180(targetTs)
+    local prefix = dayOffset == 0 and "Today" or (dayOffset == 1 and "Tomorrow" or ("+" .. tostring(dayOffset) .. "d"))
+    local clock = self:FormatServerClock180(targetTs, false)
+    return prefix .. " " .. clock .. " ST" .. (recurring == "WEEKLY" and "  -  Weekly" or "")
 end
 
 -- OctoWoW keeps the Vanilla API name but some client builds return the item

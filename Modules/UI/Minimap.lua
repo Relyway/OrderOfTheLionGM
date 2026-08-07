@@ -74,9 +74,13 @@ function OTLGM:BuildMinimapButton()
 
     button:SetScript("OnClick", function()
         if arg1 == "RightButton" then
-            OTLGM:RequestScan("MANUAL")
+            if type(OTLGM.RequestScan) == "function" then
+                OTLGM:RequestScan("MANUAL")
+            elseif DEFAULT_CHAT_FRAME then
+                DEFAULT_CHAT_FRAME:AddMessage("|cffff3333[Lion GM]|r Roster scan is unavailable because the core API did not finish loading. Type /otltest.")
+            end
         else
-            if OTLGM.ToggleUI then OTLGM:ToggleUI()
+            if type(OTLGM.ToggleUI) == "function" then OTLGM:ToggleUI()
             elseif DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage("|cffff3333[Lion GM]|r The UI module did not load. Type /otltest.") end
         end
     end)

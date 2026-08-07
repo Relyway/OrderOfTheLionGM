@@ -176,12 +176,12 @@ OTLGM.rankInformation = {
     },
 }
 
-local BaseEnsureDB = OTLGM.ApplyCoreDefaults
-local BaseGetGuildDB = OTLGM.GetOrCreateGuildDB
-local BaseMigrateGuildDB = OTLGM.MigrateLegacySchema2
+local PreviousEnsureDB = OTLGM.ApplyCoreDefaults
+local PreviousGetGuildDB = OTLGM.GetOrCreateGuildDB
+local PreviousMigrateGuildDB = OTLGM.MigrateLegacySchema2
 
 function OTLGM:ApplyAdvancedDefaults()
-    BaseEnsureDB(self)
+    PreviousEnsureDB(self)
     local settings = OTLGM_DB.settings
 
     if not settings.v100Migrated then
@@ -221,7 +221,7 @@ function OTLGM:ApplyAdvancedDefaults()
 end
 
 function OTLGM:MigrateLegacySchema6(db)
-    BaseMigrateGuildDB(self, db)
+    PreviousMigrateGuildDB(self, db)
     if not db then return end
     if (db.schemaVersion or 0) >= self.schemaVersion then return end
 
@@ -506,13 +506,15 @@ function OTLGM:GetLeadershipRole(member)
     if not member then return nil, nil end
     local index = tonumber(member.rankIndex) or 99
     local rankLabel = member.rank and member.rank ~= "" and member.rank or "Leadership"
+    local canonicalLeader = self.IsCanonicalGuildLeaderName180 and self:IsCanonicalGuildLeaderName180(member.name)
 
-    -- Guild ranks are authoritative. Names may be changed by the guild without
-    -- breaking icons or ordering. Rank index 0 is always the guild leader.
-    if index == 0 then
+    -- For Order of the Lion the visible Guild Leader identity is deliberately
+    -- fixed to Morrow/Lucks.  Live rank indexes still drive permissions, but a
+    -- stale rank-0 snapshot must never give another character the crown badge.
+    if canonicalLeader then
         return "Interface\\Icons\\INV_Crown_01", rankLabel, 1.0, 0.76, 0.18
     end
-    if index == 1 then
+    if index == 0 or index == 1 then
         return "Interface\\Icons\\INV_Shield_06", rankLabel, 1.0, 0.50, 0.12
     end
     if index == 2 then
@@ -521,10 +523,8 @@ function OTLGM:GetLeadershipRole(member)
 
     -- Defensive compatibility for old snapshots that predate rank indexes.
     local rank = string.lower(member.rank or "")
-    if string.find(rank, "guild leader", 1, true) or string.find(rank, "guild master", 1, true) then
-        return "Interface\\Icons\\INV_Crown_01", rankLabel, 1.0, 0.76, 0.18
-    end
-    if string.find(rank, "officer", 1, true) or string.find(rank, "helper", 1, true) then
+    if string.find(rank, "officer", 1, true) or string.find(rank, "helper", 1, true)
+        or string.find(rank, "guild leader", 1, true) or string.find(rank, "guild master", 1, true) then
         return "Interface\\Icons\\INV_Shield_06", rankLabel, 1.0, 0.50, 0.12
     end
     return nil, nil
@@ -607,7 +607,7 @@ function OTLGM:SetUIMode(mode)
     if self.RefreshVisiblePage then self:RefreshVisiblePage() elseif self.RefreshAll then self:RefreshAll() end
 end
 
-function OTLGM:_Stage_Advanced_RequestScan_2(reason)
+function OTLGM.__impl180.Stage_Advanced_RequestScan_2__impl1(self, reason)
     local mode = reason
     if reason == true then mode = "INTERNAL" end
     if reason == false or reason == nil then mode = "MANUAL" end
@@ -665,6 +665,7 @@ end
 
 function OTLGM:ScheduleConfirmScan()
     self.confirmScanAt = self:Now() + 3
+    if self.WakeScheduler180 then self:WakeScheduler180("roster-confirm-scan") end
 end
 
 function OTLGM:IsSuspiciousSnapshot(db, current, total)
@@ -693,16 +694,129 @@ function OTLGM:IsSuspiciousSnapshot(db, current, total)
     return false, previousTotal, 0, nil
 end
 
-function OTLGM:RecordActivitySample(db, total, online)
+local function ActivityDayParts180(key)
+    local _, _, year, month, day = string.find(tostring(key or ""), "^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    return tonumber(year), tonumber(month), tonumber(day)
+end
+
+local function ActivityServerOffset180(self, now)
+    if self and self.GetServerOffsetSeconds180 then
+        local ok, value = pcall(self.GetServerOffsetSeconds180, self, now)
+        if ok then return tonumber(value) or 0 end
+    end
+    return 0
+end
+
+-- Activity was historically bucketed through the operating-system clock while
+-- the page labels its heatmap as ST.  Convert the durable legacy buckets once,
+-- then record all new samples in server-time calendar buckets.  The conversion
+-- only reshuffles already stored sums/counts; it never requests a roster scan.
+function OTLGM:EnsureActivityServerTimeBasis180(db)
+    db = db or self:GetGuildDB()
+    if not db then return false end
     db.activity = db.activity or { days = {}, allTimePeak = 0, allTimePeakAt = nil, totalScans = 0 }
     local activity = db.activity
+    if activity.timeBasis180 == "ST" then return false end
+
+    local offset = ActivityServerOffset180(self, self:Now())
+    local migrated = {}
+    local oldKey, oldDay
+    for oldKey, oldDay in pairs(activity.days or {}) do
+        if type(oldDay) == "table" then
+            local year, month, dayNumber = ActivityDayParts180(oldKey)
+            local movedAny = false
+            if year and month and dayNumber and time and date then
+                local oldHour, bucket
+                for oldHour, bucket in pairs(oldDay.hours or {}) do
+                    oldHour = tonumber(oldHour)
+                    if oldHour and oldHour >= 0 and oldHour <= 23 and type(bucket) == "table" then
+                        local localTs = time({ year=year, month=month, day=dayNumber, hour=oldHour, min=0, sec=0 })
+                        local shifted = (tonumber(localTs) or 0) + offset
+                        local newKey = date("%Y-%m-%d", shifted)
+                        local newHour = tonumber(date("%H", shifted)) or 0
+                        local newWeekday = tonumber(date("%w", shifted)) or 0
+                        local target = migrated[newKey]
+                        if not target then
+                            target = { ts = tonumber(localTs) or 0, weekday = newWeekday, peak = 0, peakAt = nil, sum = 0, count = 0, hours = {}, timeBasis180 = "ST" }
+                            migrated[newKey] = target
+                        elseif (tonumber(localTs) or 0) > 0 and ((tonumber(target.ts) or 0) <= 0 or localTs < target.ts) then
+                            -- Keep ts as a real absolute timestamp for retention / period cutoffs.
+                            -- Only the calendar key/hour is shifted into ST.
+                            target.ts = localTs
+                        end
+                        local targetBucket = target.hours[newHour]
+                        if not targetBucket then targetBucket = { sum = 0, count = 0, max = 0 } target.hours[newHour] = targetBucket end
+                        targetBucket.sum = (tonumber(targetBucket.sum) or 0) + (tonumber(bucket.sum) or 0)
+                        targetBucket.count = (tonumber(targetBucket.count) or 0) + (tonumber(bucket.count) or 0)
+                        targetBucket.max = math.max(tonumber(targetBucket.max) or 0, tonumber(bucket.max) or 0)
+                        target.sum = target.sum + (tonumber(bucket.sum) or 0)
+                        target.count = target.count + (tonumber(bucket.count) or 0)
+                        movedAny = true
+                    end
+                end
+            end
+
+            local sampleTs = tonumber(oldDay.lastSampleAt) or tonumber(oldDay.ts) or 0
+            local sampleShifted = sampleTs > 0 and (sampleTs + offset) or 0
+            local sampleKey = sampleShifted > 0 and date and date("%Y-%m-%d", sampleShifted) or oldKey
+            local sampleWeekday = sampleShifted > 0 and date and (tonumber(date("%w", sampleShifted)) or 0) or (tonumber(oldDay.weekday) or 0)
+            local target = migrated[sampleKey]
+            if not target then
+                target = { ts = sampleTs > 0 and sampleTs or (tonumber(oldDay.ts) or self:Now()), weekday = sampleWeekday, peak = 0, peakAt = nil, sum = 0, count = 0, hours = {}, timeBasis180 = "ST" }
+                migrated[sampleKey] = target
+            elseif sampleTs > 0 and ((tonumber(target.ts) or 0) <= 0 or sampleTs < target.ts) then
+                target.ts = sampleTs
+            end
+            if not movedAny then
+                target.sum = target.sum + (tonumber(oldDay.sum) or 0)
+                target.count = target.count + (tonumber(oldDay.count) or 0)
+            end
+            -- A legacy local-calendar day can split across two ST dates. Place
+            -- its recorded peak on the ST date containing the real peakAt rather
+            -- than blindly attaching it to the last-sample date.
+            local peakTs = tonumber(oldDay.peakAt) or 0
+            local peakShifted = peakTs > 0 and (peakTs + offset) or 0
+            local peakKey = peakShifted > 0 and date and date("%Y-%m-%d", peakShifted) or sampleKey
+            local peakWeekday = peakShifted > 0 and date and (tonumber(date("%w", peakShifted)) or sampleWeekday) or sampleWeekday
+            local peakTarget = migrated[peakKey]
+            if not peakTarget then
+                peakTarget = { ts = peakTs > 0 and peakTs or (tonumber(target.ts) or self:Now()), weekday = peakWeekday, peak = 0, peakAt = nil, sum = 0, count = 0, hours = {}, timeBasis180 = "ST" }
+                migrated[peakKey] = peakTarget
+            end
+            if (tonumber(oldDay.peak) or 0) >= (tonumber(peakTarget.peak) or 0) then
+                peakTarget.peak = tonumber(oldDay.peak) or 0
+                peakTarget.peakAt = peakTs > 0 and peakTs or peakTarget.peakAt
+            end
+            if sampleTs >= (tonumber(target.lastSampleAtLocal180) or 0) then
+                target.lastSampleAtLocal180 = sampleTs
+                target.lastSampleAt = tonumber(oldDay.lastSampleAt) or tonumber(oldDay.ts) or target.lastSampleAt
+                target.total = tonumber(oldDay.total) or target.total
+                target.online = tonumber(oldDay.online) or target.online
+                target.level60 = tonumber(oldDay.level60) or target.level60
+                target.active7 = tonumber(oldDay.active7) or target.active7
+            end
+        end
+    end
+    for _, migratedDay in pairs(migrated) do migratedDay.lastSampleAtLocal180 = nil end
+    activity.days = migrated
+    activity.timeBasis180 = "ST"
+    activity.timeBasisMigratedAt180 = self:Now()
+    activity.timeBasisOffset180 = offset
+    return true
+end
+
+function OTLGM:RecordActivitySample(db, total, online)
+    db.activity = db.activity or { days = {}, allTimePeak = 0, allTimePeakAt = nil, totalScans = 0 }
+    self:EnsureActivityServerTimeBasis180(db)
+    local activity = db.activity
     local now = self:Now()
-    local dayKey = date("%Y-%m-%d", now)
-    local hour = tonumber(date("%H", now)) or 0
-    local weekday = tonumber(date("%w", now)) or 0
+    local serverNow = now + ActivityServerOffset180(self, now)
+    local dayKey = date("%Y-%m-%d", serverNow)
+    local hour = tonumber(date("%H", serverNow)) or 0
+    local weekday = tonumber(date("%w", serverNow)) or 0
     local day = activity.days[dayKey]
     if not day then
-        day = { ts = now, weekday = weekday, peak = 0, peakAt = nil, sum = 0, count = 0, hours = {} }
+        day = { ts = now, weekday = weekday, peak = 0, peakAt = nil, sum = 0, count = 0, hours = {}, timeBasis180 = "ST" }
         activity.days[dayKey] = day
     end
     day.sum = (day.sum or 0) + online
@@ -740,7 +854,11 @@ function OTLGM:RecordActivitySample(db, total, online)
     local cutoff = now - (90 * 86400)
     local key, item
     for key, item in pairs(activity.days) do
-        if item.ts and item.ts < cutoff then activity.days[key] = nil end
+        -- Retain a boundary day until its newest real sample falls outside the
+        -- 90-day window. Using the first sample (day.ts) could discard almost
+        -- a full day of still-valid activity after the ST migration.
+        local activityAt = tonumber(item.lastSampleAt) or tonumber(item.ts) or 0
+        if activityAt > 0 and activityAt < cutoff then activity.days[key] = nil end
     end
     for key, item in pairs(db.weeklySnapshots or {}) do
         if item.ts and item.ts < cutoff then db.weeklySnapshots[key] = nil end
@@ -763,6 +881,7 @@ end
 local metadataFields = {
     "trackedSince", "joinedAt", "promotedAt", "rankChangedAt", "returnedAt",
     "returnAfterDays", "lastMilestoneAt", "lastMilestone",
+    "faction180", "factionSeenAt180", "factionSource180", "race180",
 }
 
 function OTLGM:CarryMemberMetadata(old, current)
@@ -770,11 +889,18 @@ function OTLGM:CarryMemberMetadata(old, current)
     local i, field
     for i = 1, table.getn(metadataFields) do
         field = metadataFields[i]
-        current[field] = old[field]
+        -- A fresh roster read can now provide explicit faction/race evidence
+        -- (extended client tuple or the established officer-note race code).
+        -- Never replace that newer evidence with an older cached observation.
+        if (field == "faction180" or field == "factionSeenAt180" or field == "factionSource180" or field == "race180") then
+            if current[field] == nil or current[field] == "" then current[field] = old[field] end
+        else
+            current[field] = old[field]
+        end
     end
 end
 
-function OTLGM:_Stage_Advanced_Scan_2(reason)
+function OTLGM.__impl180.Stage_Advanced_Scan_2__impl1(self, reason)
     local db = self:GetGuildDB()
     if not db then return end
     reason = reason or "INTERNAL"
@@ -1022,7 +1148,7 @@ function OTLGM:_Stage_Advanced_Scan_2(reason)
     if self.SetStatus then self:SetStatus("Roster database updated at " .. date("%H:%M", now) .. ".") end
 end
 
-function OTLGM:GetStats(days)
+function OTLGM.__impl180.GetStats__impl1(self, days)
     local db = self:GetGuildDB()
     local stats = { joins = 0, leaves = 0, ranks = 0, levels = 0, level60 = 0, notes = 0, returns = 0, net = 0, inactive30 = 0, unread = 0 }
     if not db then return stats end
@@ -1051,16 +1177,18 @@ function OTLGM:GetStats(days)
     return stats
 end
 
-function OTLGM:_Stage_Advanced_GetActivitySummary_1(days)
+function OTLGM.__impl180.Stage_Advanced_GetActivitySummary_1__impl1(self, days)
     local db = self:GetGuildDB()
     local result = {
         todayPeak = 0, todayPeakAt = nil, periodPeak = 0, periodPeakAt = nil,
         allTimePeak = 0, allTimePeakAt = nil, average = 0, samples = 0,
     }
     if not db or not db.activity then return result end
+    if self.EnsureActivityServerTimeBasis180 then self:EnsureActivityServerTimeBasis180(db) end
     local now = self:Now()
     local cutoff = now - ((days or 7) * 86400)
-    local todayKey = date("%Y-%m-%d", now)
+    local serverNow = now + ActivityServerOffset180(self, now)
+    local todayKey = date("%Y-%m-%d", serverNow)
     local sum, count = 0, 0
     local key, day
     for key, day in pairs(db.activity.days or {}) do
@@ -1068,11 +1196,17 @@ function OTLGM:_Stage_Advanced_GetActivitySummary_1(days)
             result.todayPeak = day.peak or 0
             result.todayPeakAt = day.peakAt
         end
-        if (day.ts or 0) >= cutoff then
-            if (day.peak or 0) > result.periodPeak then
-                result.periodPeak = day.peak or 0
-                result.periodPeakAt = day.peakAt
-            end
+        -- A retained day spans multiple samples. Use the newest real sample to
+        -- decide whether the day overlaps the requested window, and the exact
+        -- peak timestamp for the peak itself. The former day.ts-only check could
+        -- drop the newest part of the boundary day up to ~24 hours too early.
+        local activityAt = tonumber(day.lastSampleAt) or tonumber(day.ts) or 0
+        local peakAt = tonumber(day.peakAt) or activityAt
+        if peakAt >= cutoff and (day.peak or 0) > result.periodPeak then
+            result.periodPeak = day.peak or 0
+            result.periodPeakAt = day.peakAt
+        end
+        if activityAt >= cutoff then
             sum = sum + (day.sum or 0)
             count = count + (day.count or 0)
         end
@@ -1084,8 +1218,9 @@ function OTLGM:_Stage_Advanced_GetActivitySummary_1(days)
     return result
 end
 
-function OTLGM:_Stage_Advanced_GetActivityHeatmap_1()
+function OTLGM.__impl180.Stage_Advanced_GetActivityHeatmap_1__impl1(self)
     local db = self:GetGuildDB()
+    if db and self.EnsureActivityServerTimeBasis180 then self:EnsureActivityServerTimeBasis180(db) end
     local matrix = {}
     local counts = {}
     local weekday, slot
@@ -1115,23 +1250,106 @@ function OTLGM:_Stage_Advanced_GetActivityHeatmap_1()
     return matrix, maxValue
 end
 
+local function NormalizeObservedFaction180(value)
+    value = string.upper(ATrim(tostring(value or "")))
+    if value == "ALLIANCE" then return "Alliance" end
+    if value == "HORDE" then return "Horde" end
+    return nil
+end
+
+function OTLGM:RememberRosterFaction180(name, faction, source)
+    faction = NormalizeObservedFaction180(faction)
+    if not faction or not name or name == "" then return false end
+    local member = self:GetMember(name)
+    if not member then return false end
+    local changed = member.faction180 ~= faction
+    member.faction180 = faction
+    member.factionSeenAt180 = self:Now()
+    if source and source ~= "" then member.factionSource180 = self:SafeText(tostring(source), 24, false, false) end
+    if changed then
+        self.runtime = self.runtime or {}
+        self.runtime.factionObservationRevision180 = (tonumber(self.runtime.factionObservationRevision180) or 0) + 1
+    end
+    return changed
+end
+
+-- Opportunistically add direct unit-token faction evidence. The committed
+-- roster can also carry explicit faction/race evidence from a compatible
+-- extended guild tuple or a structured officer-note race code. This pass is
+-- intentionally bounded (player + at most 4 party + 40 raid units), event-
+-- driven, and never starts a roster scan or network request.
+function OTLGM:RefreshObservedGuildFactions180(reason)
+    if not UnitName or not UnitFactionGroup then return 0 end
+    local changed = 0
+    local seen = {}
+    local function Observe(unit)
+        if UnitExists and not UnitExists(unit) then return end
+        local okName, name = pcall(UnitName, unit)
+        if not okName or not name or name == "" then return end
+        local key = ANormalizeName(name)
+        if key == "" or seen[key] then return end
+        seen[key] = true
+        if not self:GetMember(name) then return end
+        local okFaction, faction = pcall(UnitFactionGroup, unit)
+        if okFaction and self:RememberRosterFaction180(name, faction, "unit") then changed = changed + 1 end
+    end
+
+    Observe("player")
+    local index
+    for index = 1, 4 do Observe("party" .. tostring(index)) end
+    for index = 1, 40 do Observe("raid" .. tostring(index)) end
+    self.runtime = self.runtime or {}
+    self.runtime.lastFactionObservationAt180 = self:Now()
+    self.runtime.lastFactionObservationReason180 = tostring(reason or "visible")
+    return changed
+end
+
+local function EmptyComposition180()
+    return {
+        classes = {}, levels = { low = 0, mid = 0, high = 0, max = 0 }, total = 0,
+        factions = { Alliance = 0, Horde = 0, Unknown = 0 }, factionKnown = 0,
+    }
+end
+
+local function AddCompositionMember180(result, member)
+    result.total = result.total + 1
+    local class = member.class or "Unknown"
+    result.classes[class] = (result.classes[class] or 0) + 1
+    local faction = NormalizeObservedFaction180(member.faction180)
+    if faction then
+        result.factions[faction] = (result.factions[faction] or 0) + 1
+        result.factionKnown = result.factionKnown + 1
+    else
+        result.factions.Unknown = result.factions.Unknown + 1
+    end
+    if (member.level or 0) >= 60 then result.levels.max = result.levels.max + 1
+    elseif (member.level or 0) >= 40 then result.levels.high = result.levels.high + 1
+    elseif (member.level or 0) >= 20 then result.levels.mid = result.levels.mid + 1
+    else result.levels.low = result.levels.low + 1 end
+end
+
+-- Activity asks for total and online composition together. Build both snapshots in
+-- one roster pass and reuse them until either the committed roster or directly
+-- observed faction evidence changes. This keeps the new statistics effectively
+-- free while the page is merely being repainted.
 function OTLGM:GetComposition(onlineOnly)
     local db = self:GetGuildDB()
-    local result = { classes = {}, levels = { low = 0, mid = 0, high = 0, max = 0 }, total = 0 }
-    if not db then return result end
-    local name, member, class
-    for name, member in pairs(db.roster or {}) do
-        if not onlineOnly or member.online then
-            result.total = result.total + 1
-            class = member.class or "Unknown"
-            result.classes[class] = (result.classes[class] or 0) + 1
-            if (member.level or 0) >= 60 then result.levels.max = result.levels.max + 1
-            elseif (member.level or 0) >= 40 then result.levels.high = result.levels.high + 1
-            elseif (member.level or 0) >= 20 then result.levels.mid = result.levels.mid + 1
-            else result.levels.low = result.levels.low + 1 end
+    if not db then return EmptyComposition180() end
+    self.runtime = self.runtime or {}
+    local revision = tostring(tonumber(db.lastScan) or 0) .. ":" .. tostring(tonumber(self.runtime.factionObservationRevision180) or 0)
+    local cache = self.runtime.compositionCache180
+    if not cache or cache.revision ~= revision then
+        local total = EmptyComposition180()
+        local online = EmptyComposition180()
+        local _, member
+        for _, member in pairs(db.roster or {}) do
+            AddCompositionMember180(total, member)
+            if member.online then AddCompositionMember180(online, member) end
         end
+        cache = { revision = revision, total = total, online = online }
+        self.runtime.compositionCache180 = cache
     end
-    return result
+    return onlineOnly and cache.online or cache.total
 end
 
 function OTLGM:GetSortedRoster(searchText, filter, rankFilter, professionFilter)
@@ -1290,7 +1508,7 @@ function OTLGM:LoadRosterView(slot)
     if self.RefreshRosterPage then self:RefreshRosterPage() end
 end
 
-function OTLGM:GetFilteredHistory(filter, search)
+function OTLGM.__impl180.GetFilteredHistory__impl1(self, filter, search)
     local db = self:GetGuildDB()
     local list = {}
     if not db then return list end
@@ -1458,53 +1676,160 @@ function OTLGM:ShowPermissionNotice(action)
 end
 
 function OTLGM:SaveMemberNotes(name, publicNote, officerNote)
-    if not self:CanUseOfficerAction("NOTE") then self:ShowPermissionNotice("NOTE") return end
+    if not self:CanUseOfficerAction("NOTE") then self:ShowPermissionNotice("NOTE") return false end
     local index = self:FindRosterIndex(name)
-    if not index then self:Notify("Member Not Found", "Scan the live roster and try again.") return end
+    if not index then self:Notify("Member Not Found", "Scan the live roster and try again.") return false end
     local changed = false
     if self:CanEditPublicNotes() and GuildRosterSetPublicNote then GuildRosterSetPublicNote(index, publicNote or "") changed = true end
     if self:CanEditOfficerNotes() and GuildRosterSetOfficerNote then GuildRosterSetOfficerNote(index, officerNote or "") changed = true end
     if changed then
         self:RememberGuildAction("NOTE", name, UnitName("player") or "You", "local action")
-        if self.SetStatus then self:SetStatus("Notes saved for " .. tostring(name) .. ".") end
-        self:RequestScan("INTERNAL")
+        if self.SetStatus then self:SetStatus("Notes submitted for " .. tostring(name) .. ".") end
+        local live = self.GetLiveRosterEntry180 and self:GetLiveRosterEntry180(name, index) or nil
+        if self.BeginRosterAction180 and not self.rosterActionPending180 then
+            self:BeginRosterAction180("NOTE", name, publicNote, officerNote, live)
+        end
+        if self.RequestTargetedRosterRefresh180 and self.rosterActionPending180 then
+            self:RequestTargetedRosterRefresh180(true)
+        elseif GuildRoster then
+            pcall(GuildRoster)
+        end
+        return true
     end
+    return false
 end
 
-function OTLGM:PromoteMember(name)
-    local allowed, reason = self:CanUseOfficerActionForMember170("PROMOTE", name)
-    if not allowed then self:Notify("Promotion Unavailable", reason or "This member cannot be promoted.") return end
-    local fn = GuildPromote or GuildPromoteByName or PromoteByName
-    if not fn then self:Notify("Promotion Unavailable", "This client does not expose a promotion function.") return end
+function OTLGM:ExecuteGuildRankApi180(kind, name, options)
+    kind = tostring(kind or "")
+    options = type(options) == "table" and options or {}
+    local action = kind == "DEMOTE" and "DEMOTE" or "PROMOTE"
+    local permissionTarget = options.verifiedMember180 or name
+    local allowed, reason = self:CanUseOfficerActionForMember170(action, permissionTarget)
+    if not allowed then
+        self:Notify(action == "PROMOTE" and "Promotion Unavailable" or "Demotion Unavailable",
+            reason or (action == "PROMOTE" and "This member cannot be promoted." or "This member cannot be demoted."))
+        return false
+    end
+    local fn
+    if action == "PROMOTE" then fn = GuildPromote or GuildPromoteByName or PromoteByName
+    else fn = GuildDemote or GuildDemoteByName or DemoteByName end
+    if not fn then
+        self:Notify(action == "PROMOTE" and "Promotion Unavailable" or "Demotion Unavailable",
+            action == "PROMOTE" and "This client does not expose a promotion function." or "This client does not expose a demotion function.")
+        return false
+    end
     local ok, errorText = pcall(fn, name)
-    if not ok then self:Notify("Promotion Failed", tostring(errorText or "The game client rejected the promotion request.")) return end
-    self:RememberGuildAction("PROMOTE", name, UnitName("player") or "You", "local action")
-    if self.SetStatus then self:SetStatus("Promotion requested for " .. tostring(name) .. ".") end
-    self:RequestScan("INTERNAL")
+    if not ok then
+        self:Notify(action == "PROMOTE" and "Promotion Failed" or "Demotion Failed",
+            tostring(errorText or "The game client rejected the guild rank request."))
+        return false
+    end
+    if self.SetStatus then
+        self:SetStatus((action == "PROMOTE" and "Promotion" or "Demotion") .. " requested for " .. tostring(name) .. ".")
+    end
+    return true
 end
 
-function OTLGM:DemoteMember(name)
-    local allowed, reason = self:CanUseOfficerActionForMember170("DEMOTE", name)
-    if not allowed then self:Notify("Demotion Unavailable", reason or "This member cannot be demoted.") return end
-    local fn = GuildDemote or GuildDemoteByName or DemoteByName
-    if not fn then self:Notify("Demotion Unavailable", "This client does not expose a demotion function.") return end
-    local ok, errorText = pcall(fn, name)
-    if not ok then self:Notify("Demotion Failed", tostring(errorText or "The game client rejected the demotion request.")) return end
-    self:RememberGuildAction("DEMOTE", name, UnitName("player") or "You", "local action")
-    if self.SetStatus then self:SetStatus("Demotion requested for " .. tostring(name) .. ".") end
-    self:RequestScan("INTERNAL")
+function OTLGM:PromoteMember(name, options)
+    if type(options) == "table" and options.raw180 then return self:ExecuteGuildRankApi180("PROMOTE", name, options) end
+    if self.StartRosterRankAction180 then return self:StartRosterRankAction180("PROMOTE", name) end
+    local ok = self:ExecuteGuildRankApi180("PROMOTE", name)
+    if ok then
+        self:RememberGuildAction("PROMOTE", name, UnitName("player") or "You", "local action")
+        if GuildRoster then pcall(GuildRoster) end
+    end
+    return ok
+end
+
+function OTLGM:DemoteMember(name, options)
+    if type(options) == "table" and options.raw180 then return self:ExecuteGuildRankApi180("DEMOTE", name, options) end
+    if self.StartRosterRankAction180 then return self:StartRosterRankAction180("DEMOTE", name) end
+    local ok = self:ExecuteGuildRankApi180("DEMOTE", name)
+    if ok then
+        self:RememberGuildAction("DEMOTE", name, UnitName("player") or "You", "local action")
+        if GuildRoster then pcall(GuildRoster) end
+    end
+    return ok
+end
+
+function OTLGM:FinalizeRosterRemoval180(success, reason)
+    local pending = self.rosterRemovalPending180
+    if not pending then return false end
+    self.rosterRemovalPending180 = nil
+    if success then
+        local db = self:GetGuildDB()
+        local storedName
+        if db and db.roster then
+            if db.roster[pending.name] then storedName = pending.name
+            else
+                local candidate
+                for candidate in pairs(db.roster) do
+                    if self:NormalizeName(candidate) == self:NormalizeName(pending.name) then storedName = candidate break end
+                end
+            end
+            if storedName then db.roster[storedName] = nil end
+            db.lastTotal = math.max(0, (tonumber(db.lastTotal) or 1) - (storedName and 1 or 0))
+            -- The exact mutation is applied immediately; a later stale-on-open
+            -- scan reconciles any unrelated roster changes without blocking this action.
+            db.lastScan = 0
+            db.lastScanReason = "TARGETED_REMOVE"
+        end
+        self:RememberGuildAction("REMOVE", pending.name, UnitName("player") or "You", "live targeted confirmation")
+        if self.ui and self.ui.rosterSelectedName and self:NormalizeName(self.ui.rosterSelectedName) == self:NormalizeName(pending.name) then
+            self.ui.rosterSelectedName = nil
+        end
+        if self.ShowToast then self:ShowToast(tostring(pending.name) .. " was removed from the guild roster.", "success") end
+        if self.ui and self.ui.currentPage == "roster" and self.RefreshRosterPage then self:RefreshRosterPage()
+        elseif self.runtime then
+            self.runtime.pageDirtyR5 = self.runtime.pageDirtyR5 or {}
+            self.runtime.pageDirtyR5.roster = true
+        end
+        return true
+    end
+    if self.SetStatus then self:SetStatus(reason or "The removal was not confirmed by the live guild roster.") end
+    return false
+end
+
+function OTLGM:ProcessRosterRemoval180(force)
+    local pending = self.rosterRemovalPending180
+    if not pending then return false end
+    local now = self:Now()
+    if not force and now < (tonumber(pending.nextCheckAt) or 0) then return false end
+    local live = self.GetLiveRosterEntry180 and self:GetLiveRosterEntry180(pending.name, pending.rosterIndex) or nil
+    if not live then return self:FinalizeRosterRemoval180(true) end
+    if now - (tonumber(pending.startedAt) or now) >= 15 then
+        return self:FinalizeRosterRemoval180(false, "Removal was not confirmed within 15 seconds; verify the member in the live guild roster before retrying.")
+    end
+    pending.nextCheckAt = now + 1
+    if force or not pending.lastRosterRequestAt or now - pending.lastRosterRequestAt >= 1 then
+        pending.lastRosterRequestAt = now
+        if SetGuildRosterShowOffline then pcall(SetGuildRosterShowOffline, true) end
+        if GuildRoster then pcall(GuildRoster) end
+    end
+    if self.WakeScheduler180 then self:WakeScheduler180("roster-removal-wait") end
+    return false
 end
 
 function OTLGM:RemoveMember(name)
     local allowed, reason = self:CanUseOfficerActionForMember170("REMOVE", name)
-    if not allowed then self:Notify("Removal Unavailable", reason or "This member cannot be removed.") return end
+    if not allowed then self:Notify("Removal Unavailable", reason or "This member cannot be removed.") return false end
+    if self.rosterRemovalPending180 or self.rosterActionPending180 then
+        if self.SetStatus then self:SetStatus("Another roster action is already waiting for server confirmation.") end
+        return false
+    end
     local fn = GuildUninvite or GuildUninviteByName or GuildRemove
-    if not fn then self:Notify("Removal Unavailable", "This client does not expose a remove-member function.") return end
+    if not fn then self:Notify("Removal Unavailable", "This client does not expose a remove-member function.") return false end
+    local live = self.GetLiveRosterEntry180 and self:GetLiveRosterEntry180(name) or nil
     local ok, errorText = pcall(fn, name)
-    if not ok then self:Notify("Removal Failed", tostring(errorText or "The game client rejected the removal request.")) return end
-    self:RememberGuildAction("REMOVE", name, UnitName("player") or "You", "local action")
-    if self.SetStatus then self:SetStatus("Removal requested for " .. tostring(name) .. ".") end
-    self:RequestScan("INTERNAL")
+    if not ok then self:Notify("Removal Failed", tostring(errorText or "The game client rejected the removal request.")) return false end
+    self.rosterRemovalPending180 = {
+        name = tostring(live and live.name or name), rosterIndex = live and live.rosterIndex or nil,
+        startedAt = self:Now(), nextCheckAt = self:Now() + 1,
+    }
+    if self.SetStatus then self:SetStatus("Removal requested for " .. tostring(name) .. "; waiting for live confirmation.") end
+    if GuildRoster then pcall(GuildRoster) end
+    if self.WakeScheduler180 then self:WakeScheduler180("roster-removal") end
+    return true
 end
 
 function OTLGM:GetLeadershipOnline()
@@ -1527,13 +1852,17 @@ end
 function OTLGM:GetPeriodActivityPeak(daysAgoStart, daysAgoEnd)
     local db = self:GetGuildDB()
     if not db or not db.activity then return 0 end
+    if self.EnsureActivityServerTimeBasis180 then self:EnsureActivityServerTimeBasis180(db) end
     local now = self:Now()
     local newer = now - ((daysAgoStart or 0) * 86400)
     local older = now - ((daysAgoEnd or 7) * 86400)
     local peak = 0
     local key, day
     for key, day in pairs(db.activity.days or {}) do
-        local ts = day.ts or 0
+        -- Peak windows should be decided by the peak's real timestamp rather
+        -- than the day's first sample; otherwise a peak just inside a 7-day
+        -- boundary can be excluded because the same day began before it.
+        local ts = tonumber(day.peakAt) or tonumber(day.lastSampleAt) or tonumber(day.ts) or 0
         if ts <= newer and ts > older and (day.peak or 0) > peak then peak = day.peak or 0 end
     end
     return peak
@@ -1596,7 +1925,7 @@ function OTLGM:GetFreshnessText(timestamp)
     return "STALE - " .. self:FormatElapsedShort(elapsed), self.colors.red
 end
 
-function OTLGM:_Stage_Advanced_GetDiagnosticsText_1()
+function OTLGM.__impl180.Stage_Advanced_GetDiagnosticsText_1__impl1(self)
     local db = self:GetGuildDB()
     if not db then return "No guild database is available for this character." end
     local apiRoster = GetGuildRosterInfo and "Available" or "Missing"
@@ -1631,10 +1960,11 @@ function OTLGM:_Stage_Advanced_GetDiagnosticsText_1()
         "Last successful scan: " .. self:Stamp(db.lastScan)
 end
 
-function OTLGM:BroadcastVersion(target)
+function OTLGM.__impl180.BroadcastVersion__impl1(self, target)
     if not SendAddonMessage or not GetGuildInfo("player") then return false end
     self.lastVersionBroadcastAt = self:Now()
-    local payload = table.concat({ "V", tostring(self.version or "Detected"), tostring(self.build or "unknown") }, "^")
+    local ownFaction180 = UnitFactionGroup and UnitFactionGroup("player") or ""
+    local payload = table.concat({ "V", tostring(self.version or "Detected"), tostring(self.build or "unknown"), tostring(ownFaction180 or "") }, "^")
     if target and target ~= "" then
         return self:QueueNetworkPayload(payload, "WHISPER", target, 2, "presence")
     else
@@ -1650,7 +1980,8 @@ function OTLGM:RequestAddonUserPing()
         return false
     end
     self.lastAddonUserPingAt = now
-    self:QueueNetworkPayload(table.concat({ "Q", tostring(self.version or "Detected"), tostring(self.build or "unknown") }, "^"), "GUILD", nil, 2, "presence", "presence:query")
+    local ownFaction180 = UnitFactionGroup and UnitFactionGroup("player") or ""
+    self:QueueNetworkPayload(table.concat({ "Q", tostring(self.version or "Detected"), tostring(self.build or "unknown"), tostring(ownFaction180 or "") }, "^"), "GUILD", nil, 2, "presence", "presence:query")
     -- PvE synchronization uses the same hidden addon channel. Triggering both paths
     -- makes presence detection reliable even on servers that handle guild pings oddly.
     if self.RequestPveSync then self:RequestPveSync(true) end
@@ -1658,7 +1989,7 @@ function OTLGM:RequestAddonUserPing()
     return true
 end
 
-function OTLGM:RememberAddonUser(sender, version, build)
+function OTLGM:RememberAddonUser(sender, version, build, faction)
     self:EnsureDB()
     local db = self:GetGuildDB()
     if not db or not sender or sender == "" then return end
@@ -1674,7 +2005,13 @@ function OTLGM:RememberAddonUser(sender, version, build)
     end
     local storedBuild = self:SafeText(build or "", 48, false, false)
     if storedBuild == "" then storedBuild = existing and existing.build or nil end
-    db.detectedVersions[key] = { version = storedVersion, build = storedBuild, ts = self:Now(), sender = sender }
+    local storedFaction180 = existing and existing.faction180 or nil
+    if faction and faction ~= "" and self.RememberRosterFaction180 then
+        self:RememberRosterFaction180(sender, faction, "presence")
+        local member180 = self:GetMember(sender)
+        if member180 and (member180.faction180 == "Alliance" or member180.faction180 == "Horde") then storedFaction180 = member180.faction180 end
+    end
+    db.detectedVersions[key] = { version = storedVersion, build = storedBuild, faction180 = storedFaction180, ts = self:Now(), sender = sender }
     if sender ~= key then db.detectedVersions[sender] = nil end
     if storedVersion ~= "Detected" and self:IsVersionNewer(storedVersion, OTLGM_DB.settings.latestDetectedVersion or self.version) then
         OTLGM_DB.settings.latestDetectedVersion = storedVersion
@@ -1686,13 +2023,18 @@ function OTLGM:HandlePresenceAddonMessageLegacy(prefix, message, channel, sender
     if ANormalizeName(sender) == ANormalizeName(UnitName("player") or "") then return true end
 
     -- Every valid message proves that the sender is currently running the addon.
-    -- PvE SYNC packets also carry a precise version in field four.
-    local detectedVersion = nil
-    if string.sub(message, 1, 3) == "P1^" then
-        local _, _, syncVersion = string.find(message, "^P1%^SYNC%^[^^]*%^([^%^]+)")
-        detectedVersion = syncVersion
+    -- Presence V/Q packets are parsed below and must only touch detectedVersions
+    -- once; older code wrote the same sender twice for every ping/reply.
+    local prefix2 = string.sub(message, 1, 2)
+    local directPresence180 = prefix2 == "V^" or prefix2 == "Q^" or prefix2 == "V|" or prefix2 == "Q|"
+    if not directPresence180 then
+        local detectedVersion = nil
+        if string.sub(message, 1, 3) == "P1^" then
+            local _, _, syncVersion = string.find(message, "^P1%^SYNC%^[^^]*%^([^%^]+)")
+            detectedVersion = syncVersion
+        end
+        self:RememberAddonUser(sender, detectedVersion)
     end
-    self:RememberAddonUser(sender, detectedVersion)
 
     if self.HandleCommunityAddonMessage and string.sub(message, 1, 3) == "C1^" then
         local handled = self:HandleCommunityAddonMessage(message, channel, sender)
@@ -1708,10 +2050,11 @@ function OTLGM:HandlePresenceAddonMessageLegacy(prefix, message, channel, sender
 
     local presenceFields = self:Split(message, "^")
     local presenceKind = presenceFields[1] or ""
-    local version, build
+    local version, build, faction180
     if presenceKind == "V" or presenceKind == "Q" then
         version = presenceFields[2]
         build = presenceFields[3]
+        faction180 = presenceFields[4]
     else
         -- Compatibility with 1.7.1 and older copies. These packets may contain
         -- raw pipes, but 1.7.2 never sends them itself.
@@ -1720,7 +2063,7 @@ function OTLGM:HandlePresenceAddonMessageLegacy(prefix, message, channel, sender
         version = legacyVersion
     end
     if (presenceKind == "V" or presenceKind == "Q") and version and version ~= "" then
-        self:RememberAddonUser(sender, version, build)
+        self:RememberAddonUser(sender, version, build, faction180)
         local uiVisible = self.ui and self.ui.main and self.ui.main:IsVisible()
         if presenceKind == "Q" then
             local now = self:Now()
@@ -1867,37 +2210,266 @@ function OTLGM:RenameCustomMessage(index, newName)
     if self.RefreshRecruitmentPage then self:RefreshRecruitmentPage() end
 end
 
-function OTLGM:SendMessageText(message, target)
-    message = ATrim(message or "")
-    if message == "" then self:Notify("Message Empty", "Enter or select a message before sending.") return false end
-    if target == "GUILD" then
-        local ok, err = pcall(SendChatMessage, message, "GUILD")
-        if not ok then self:Notify("Guild Message Failed", tostring(err)) return false end
-        if self.SetStatus then self:SetStatus("Message sent to guild chat.") end
-        return true
-    end
+local function ANormalizeRecruitmentText180(value)
+    value = tostring(value or "")
+    value = string.gsub(value, "|c%x%x%x%x%x%x%x%x", "")
+    value = string.gsub(value, "|r", "")
+    value = string.gsub(value, "|T.-|t", "")
+    value = string.gsub(value, "|H.-|h(.-)|h", "%1")
+    value = string.gsub(value, "[%c]+", " ")
+    value = string.gsub(value, "%s+", " ")
+    return string.lower(ATrim(value))
+end
 
-    local channel = self:GetWorldChannelNumber()
-    if not channel then self:Notify("Channel Required", "Enter a numeric channel such as 5 or 6.") return false end
-    local channelId = channel
-    if GetChannelName then
-        local resolvedId = GetChannelName(channel)
-        if resolvedId and resolvedId > 0 then channelId = resolvedId end
-    end
-    local ok, err = pcall(SendChatMessage, message, "CHANNEL", nil, channelId)
-    if not ok then
-        if ChatFrameEditBox then
-            ChatFrameEditBox:Show()
-            ChatFrameEditBox:SetText("/" .. tostring(channel) .. " " .. message)
-            ChatFrameEditBox:SetFocus()
-            self:SetStatus("Message placed in chat input. Press Enter to send.")
-        else
-            self:Notify("World Message Failed", tostring(err))
-        end
+local function ANormalizeRecruitmentSender180(value)
+    value = tostring(value or "")
+    value = string.gsub(value, "|c%x%x%x%x%x%x%x%x", "")
+    value = string.gsub(value, "|r", "")
+    value = string.gsub(value, "^%[", "")
+    value = string.gsub(value, "%]$", "")
+    return ANormalizeName(value)
+end
+
+function OTLGM:RecordRecruitmentDiagnostic180(eventName, pending, details, result)
+    self.runtime = self.runtime or {}
+    self.runtime.recruitmentDiagnostics180 = self.runtime.recruitmentDiagnostics180 or {}
+    OTLGM_DB.settings.recruitmentDiagnostics180 = OTLGM_DB.settings.recruitmentDiagnostics180 or {}
+    local row = {
+        ts = self:Now(),
+        event = tostring(eventName or "UNKNOWN"),
+        sender = details and tostring(details.sender or "") or "",
+        channelId = details and tonumber(details.channelId) or nil,
+        channelName = details and tostring(details.channelName or "") or "",
+        textMatched = details and details.textMatched and true or false,
+        senderMatched = details and details.senderMatched and true or false,
+        channelMatched = details and details.channelMatched and true or false,
+        result = tostring(result or "pending"),
+        eventClock = details and tonumber(details.eventClock) or nil,
+        evidenceSlot = details and tostring(details.evidenceSlot or "") or "",
+        awaitingEcho = pending and pending.awaitingEcho and true or false,
+        target = pending and pending.target or nil,
+        label = pending and pending.label or nil,
+    }
+    table.insert(self.runtime.recruitmentDiagnostics180, 1, row)
+    table.insert(OTLGM_DB.settings.recruitmentDiagnostics180, 1, CopySimpleTable(row))
+    while table.getn(self.runtime.recruitmentDiagnostics180) > 30 do table.remove(self.runtime.recruitmentDiagnostics180) end
+    while table.getn(OTLGM_DB.settings.recruitmentDiagnostics180) > 20 do table.remove(OTLGM_DB.settings.recruitmentDiagnostics180) end
+    return row
+end
+
+function OTLGM:BeginRecruitmentDelivery180(message, target, key, label, rotateAfter)
+    message = ATrim(message or "")
+    target = target == "GUILD" and "GUILD" or "WORLD"
+    if message == "" then self:Notify("Message Empty", "Enter or select a message before sending.") return false end
+    if self.recruitmentDeliveryPending180 then
+        self:Notify("Delivery Pending", "Wait for the current recruitment message to be confirmed or time out before sending another one.")
         return false
     end
-    if self.SetStatus then self:SetStatus("Message sent to /" .. tostring(channel) .. ".") end
+
+    local chatType, channelId, channelName
+    if target == "GUILD" then
+        if not GetGuildInfo or not GetGuildInfo("player") then
+            self:Notify("Guild Message Failed", "You are not currently in a guild.")
+            return false
+        end
+        chatType = "GUILD"
+        channelName = "Guild"
+    else
+        local timing = self.GetWorldRecruitmentInfo and self:GetWorldRecruitmentInfo() or nil
+        if timing and timing.state == "WAIT" then
+            self:Notify("World Recruitment Cooldown", timing.detail or "Wait before posting another recruitment message.")
+            if self.SetStatus then self:SetStatus("World recruitment cooldown is still active.") end
+            self:RecordRecruitmentDiagnostic180("SEND_BLOCKED", nil, { channelName = "World" }, "cooldown")
+            return false
+        end
+        local requested = self:GetWorldChannelNumber()
+        if not requested or not GetChannelName then
+            self:Notify("World Channel Not Found", "Join the World channel or enter its real channel number before sending.")
+            if self.SetStatus then self:SetStatus("Channel unavailable. Message was not sent.") end
+            return false
+        end
+        local ok, resolvedId, resolvedName = pcall(GetChannelName, requested)
+        resolvedId = ok and tonumber(resolvedId) or nil
+        if not resolvedId or resolvedId <= 0 then
+            self:Notify("World Channel Not Found", "The selected channel is not joined. The recruitment timer and A/B rotation were not changed.")
+            if self.SetStatus then self:SetStatus("Channel unavailable. Message was not sent.") end
+            self:RecordRecruitmentDiagnostic180("SEND_BLOCKED", nil, { channelId = resolvedId, channelName = resolvedName }, "channel-missing")
+            return false
+        end
+        channelId = math.floor(resolvedId)
+        channelName = tostring(resolvedName or OTLGM_DB.settings.worldChannelName153 or "World")
+        chatType = "CHANNEL"
+        OTLGM_DB.settings.worldChannel = tostring(channelId)
+        if channelName ~= "" then OTLGM_DB.settings.worldChannelName153 = channelName end
+    end
+
+    local pending = {
+        message = message,
+        normalizedMessage = ANormalizeRecruitmentText180(message),
+        target = target,
+        channelId = channelId,
+        channelName = channelName,
+        key = key or "WORKING",
+        label = label or "Recruitment",
+        rotateAfter = rotateAfter and true or false,
+        startedAt = self:Now(),
+        startedClock = GetTime and GetTime() or nil,
+        timeoutAt = self:Now() + 18,
+        awaitingEcho = false,
+    }
+    self.recruitmentDeliveryPending180 = pending
+    if self.WakeScheduler180 then self:WakeScheduler180("recruitment-delivery") end
+    if self.SetStatus then self:SetStatus("Sending…") end
+    if self.RefreshRecruitmentPage then self:RefreshRecruitmentPage() end
+    self:RecordRecruitmentDiagnostic180("SEND_REQUEST", pending, { channelId = channelId, channelName = channelName }, "sending")
+
+    local ok, errorText
+    if chatType == "GUILD" then ok, errorText = pcall(SendChatMessage, message, "GUILD")
+    else ok, errorText = pcall(SendChatMessage, message, "CHANNEL", nil, channelId) end
+    if not ok then
+        self.recruitmentDeliveryPending180 = nil
+        self:Notify("Recruitment Send Failed", tostring(errorText or "The game client rejected the message."))
+        if self.SetStatus then self:SetStatus("Unable to send recruitment message.") end
+        self:RecordRecruitmentDiagnostic180("SEND_ERROR", pending, { channelId = channelId, channelName = channelName }, tostring(errorText or "rejected"))
+        return false
+    end
+    pending.sentAt = self:Now()
+    pending.sentClock = GetTime and GetTime() or pending.startedClock
+    pending.awaitingEcho = true
+    pending.timeoutAt = pending.sentAt + 18
+    if self.SetStatus then self:SetStatus(target == "WORLD" and "Waiting for World echo…" or "Waiting for Guild echo…") end
+    if self.RefreshRecruitmentPage then self:RefreshRecruitmentPage() end
     return true
+end
+
+local function ANormalizeRecruitmentChannel180(value)
+    value = tostring(value or "")
+    value = string.gsub(value, "|c%x%x%x%x%x%x%x%x", "")
+    value = string.gsub(value, "|r", "")
+    value = string.gsub(value, "^%s*%d+%.%s*", "")
+    value = string.gsub(value, "^%[", "")
+    value = string.gsub(value, "%]$", "")
+    value = string.gsub(value, "%s+", " ")
+    return string.lower(ATrim(value))
+end
+
+local function AExtractRecruitmentChannelEvidence180(pending, arg3, arg4, arg5, arg6, arg7, arg8, arg9)
+    local values = {
+        { slot = "arg8", value = arg8, kind = "id" },
+        { slot = "arg9", value = arg9, kind = "name" },
+        { slot = "arg4", value = arg4, kind = "name" },
+        { slot = "arg3", value = arg3, kind = "either" },
+        { slot = "arg5", value = arg5, kind = "either" },
+        { slot = "arg6", value = arg6, kind = "either" },
+        { slot = "arg7", value = arg7, kind = "either" },
+    }
+    local expectedId = tonumber(pending and pending.channelId)
+    local expectedName = ANormalizeRecruitmentChannel180(pending and pending.channelName or "World")
+    local details = { channelMatched = false }
+    local index, evidence, numeric, normalized
+    for index = 1, table.getn(values) do
+        evidence = values[index]
+        numeric = tonumber(evidence.value)
+        if numeric and numeric > 0 and evidence.kind ~= "name" then
+            if expectedId and math.floor(numeric) == math.floor(expectedId) then
+                details.channelMatched = true
+                details.channelId = math.floor(numeric)
+                details.evidenceSlot = evidence.slot
+                return details
+            end
+        elseif type(evidence.value) == "string" and evidence.value ~= "" and evidence.kind ~= "id" then
+            normalized = ANormalizeRecruitmentChannel180(evidence.value)
+            if normalized ~= "" and expectedName ~= ""
+                and (normalized == expectedName
+                    or string.find(normalized, expectedName, 1, true)
+                    or string.find(expectedName, normalized, 1, true)) then
+                details.channelMatched = true
+                details.channelName = tostring(evidence.value)
+                details.evidenceSlot = evidence.slot
+                return details
+            end
+        end
+    end
+    return details
+end
+
+function OTLGM:HandleRecruitmentDeliveryEcho180(channel, message, sender, arg3, arg4, arg5, arg6, arg7, arg8, arg9)
+    local pending = self.recruitmentDeliveryPending180
+    if not pending then return false end
+    channel = channel == "GUILD" and "GUILD" or "WORLD"
+    if pending.target ~= channel or not pending.awaitingEcho then return false end
+
+    local currentClock = GetTime and GetTime() or nil
+    local details = {
+        sender = sender,
+        textMatched = ANormalizeRecruitmentText180(message) == pending.normalizedMessage,
+        senderMatched = ANormalizeRecruitmentSender180(sender) == ANormalizeRecruitmentSender180(UnitName("player") or ""),
+        channelMatched = channel == "GUILD",
+        eventClock = currentClock,
+        evidenceSlot = channel == "GUILD" and "CHAT_MSG_GUILD" or "",
+    }
+    if channel == "WORLD" then
+        local channelDetails = AExtractRecruitmentChannelEvidence180(pending, arg3, arg4, arg5, arg6, arg7, arg8, arg9)
+        details.channelMatched = channelDetails.channelMatched
+        details.channelId = channelDetails.channelId
+        details.channelName = channelDetails.channelName
+        details.evidenceSlot = channelDetails.evidenceSlot
+    end
+
+    -- Only a chat event observed after SendChatMessage returned can confirm
+    -- delivery. This prevents an old history line or a synchronous stale event
+    -- from starting the cooldown or rotating A/B.
+    local fresh = not pending.sentClock or not currentClock or currentClock >= pending.sentClock
+    local matched = fresh and details.textMatched and details.senderMatched and details.channelMatched
+    self:RecordRecruitmentDiagnostic180(channel == "WORLD" and "CHAT_MSG_CHANNEL" or "CHAT_MSG_GUILD", pending, details, matched and "matched" or "ignored")
+    if not matched then return false end
+
+    self.recruitmentDeliveryPending180 = nil
+    self:MarkRecruitmentSent(pending.key, pending.target, pending.label)
+    if pending.rotateAfter then
+        OTLGM_DB.settings.nextRecruitIndex = (OTLGM_DB.settings.nextRecruitIndex or 1) == 1 and 2 or 1
+    end
+    if self.SetStatus then self:SetStatus("Delivered — confirmed by a new chat echo.") end
+    if self.ShowToast then self:ShowToast("Recruitment message delivered.", "success") end
+    if self.RefreshRecruitmentPage then self:RefreshRecruitmentPage() end
+    return true
+end
+
+function OTLGM:ProcessRecruitmentDelivery180()
+    local pending = self.recruitmentDeliveryPending180
+    if not pending then return end
+    if self:Now() < (tonumber(pending.timeoutAt) or ((tonumber(pending.startedAt) or self:Now()) + 18)) then return end
+    self.recruitmentDeliveryPending180 = nil
+    if self.SetStatus then self:SetStatus("Delivery not confirmed.") end
+    self:RecordRecruitmentDiagnostic180("DELIVERY_TIMEOUT", pending, { channelId = pending.channelId, channelName = pending.channelName }, "timeout")
+    self:Notify("Delivery Not Confirmed", "No matching new self-echo arrived from chat. The timer, cooldown and A/B rotation were not changed. Use Open in Chat if the server blocks reliable confirmation.")
+    if self.RefreshRecruitmentPage then self:RefreshRecruitmentPage() end
+end
+
+function OTLGM:OpenRecruitmentInChat180(message, target)
+    message = ATrim(message or "")
+    if message == "" then self:Notify("Message Empty", "Enter or select a message before opening chat.") return false end
+    target = target == "GUILD" and "GUILD" or "WORLD"
+    local prefix
+    if target == "GUILD" then prefix = "/g "
+    else
+        local channelId = self:GetWorldChannelNumber()
+        if not channelId then
+            self:Notify("World Channel Not Found", "Join the World channel before opening this message in chat.")
+            return false
+        end
+        prefix = "/" .. tostring(channelId) .. " "
+    end
+    local text = prefix .. message
+    if ChatFrame_OpenChat then ChatFrame_OpenChat(text)
+    elseif ChatFrameEditBox then ChatFrameEditBox:Show() ChatFrameEditBox:SetText(text) ChatFrameEditBox:SetFocus()
+    else return false end
+    if self.SetStatus then self:SetStatus("Prepared in the standard chat input. Press Enter to send.") end
+    return true
+end
+
+function OTLGM:SendMessageText(message, target)
+    return self:BeginRecruitmentDelivery180(message, target, "WORKING", "Working Copy", false)
 end
 
 OTLGM:RegisterModule("Roster", { layer = "feature", owns = { "RequestScan", "Scan", "GetSortedRoster" } })

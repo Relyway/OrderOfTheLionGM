@@ -311,7 +311,7 @@ function OTLGM:GetAchievementCharacterKey174()
     return NormalizeName174(player) .. "@" .. string.lower(tostring(realm))
 end
 
-function OTLGM:EnsureAchievements174()
+function OTLGM.__impl180.EnsureAchievements174__impl1(self)
     self:EnsureDB()
     OTLGM_DB.settings.achievementPopups174 = OTLGM_DB.settings.achievementPopups174 ~= false
     if OTLGM_DB.settings.achievementGuildChat174 == nil then OTLGM_DB.settings.achievementGuildChat174 = true end
@@ -377,33 +377,7 @@ function OTLGM:EnsureAchievements174()
     return db
 end
 
-function OTLGM:IsAchievementComplete174(id)
-    local db = self:EnsureAchievements174()
-    return db.completed[id] ~= nil
-end
-
-function OTLGM:GetAchievementCompletedAt174(id)
-    local db = self:EnsureAchievements174()
-    local record = db.completed[id]
-    if type(record) == "table" then return tonumber(record.unlockedAt) end
-    return tonumber(record)
-end
-
-function OTLGM:GetAchievementCount174()
-    local db = self:EnsureAchievements174()
-    local count = 0
-    local id
-    for id in pairs(db.completed) do if A174.byId[id] then count = count + 1 end end
-    return count, table.getn(A174.catalog)
-end
-
-function OTLGM:GetAchievementSet174(key)
-    local db = self:EnsureAchievements174()
-    if type(db.sets[key]) ~= "table" then db.sets[key] = {} end
-    return db.sets[key]
-end
-
-function OTLGM:AddAchievementSetValue174(key, value)
+function OTLGM.__impl180.AddAchievementSetValue174__impl1(self, key, value)
     value = NormalizeKey174(value)
     if value == "" then return false end
     local set = self:GetAchievementSet174(key)
@@ -413,20 +387,20 @@ function OTLGM:AddAchievementSetValue174(key, value)
     return true
 end
 
-function OTLGM:AddAchievementCounter174(key, amount)
+function OTLGM.__impl180.AddAchievementCounter174__impl1(self, key, amount)
     local db = self:EnsureAchievements174()
     local value = SafeNumber174(db.counters[key], 0, 1000000000) + SafeNumber174(amount, 0, 1000000000)
     db.counters[key] = math.min(1000000000, value)
     return db.counters[key]
 end
 
-function OTLGM:SetAchievementCounter174(key, value)
+function OTLGM.__impl180.SetAchievementCounter174__impl1(self, key, value)
     local db = self:EnsureAchievements174()
     db.counters[key] = SafeNumber174(value, 0, 1000000000)
     return db.counters[key]
 end
 
-function OTLGM:RefreshAchievementRosterCache174(force)
+function OTLGM.__impl180.RefreshAchievementRosterCache174__impl1(self, force)
     self.runtime = self.runtime or {}
     local cache = self.runtime.achievementRosterCache174
     if cache and not force then return cache end
@@ -458,7 +432,7 @@ function OTLGM:GetGuildMemberSet174()
     return self:RefreshAchievementRosterCache174(false).members
 end
 
-function OTLGM:GetGroupSnapshot174()
+function OTLGM.__impl180.GetGroupSnapshot174__impl1(self)
     local members = self:GetGuildMemberSet174()
     local result = { total=0, guild=0, races={}, classes={}, factions={}, levels={}, guildMembers={}, isRaid=false, isParty=false }
     local units = {}
@@ -588,23 +562,49 @@ function OTLGM:QueueAchievementGuildAnnouncement174(def)
     local queue = self.runtime.achievementGuildQueue174
     local index
     for index=1,table.getn(queue) do if queue[index] == def.id then return true end end
+    local now = self:Now()
     local last = tonumber(db.dates.lastGuildChatAt) or 0
-    if table.getn(queue) == 0 and self:Now() - last >= 2 then return self:SendAchievementGuildAnnouncement174(def) end
+    if table.getn(queue) == 0 and now - last >= 2 then return self:SendAchievementGuildAnnouncement174(def) end
     table.insert(queue, def.id)
     while table.getn(queue) > 12 do table.remove(queue, 1) end
+    -- The old heartbeat eventually drained this queue. The sleeping scheduler
+    -- needs a concrete next-send deadline or an achievement earned during the
+    -- two-second guild-chat cooldown can remain queued until unrelated work.
+    self.runtime.achievementGuildDue174 = math.max(now, last + 2)
+    if self.WakeScheduler180 then self:WakeScheduler180("achievement-guild-queue") end
     return true
 end
 
-function OTLGM:ProcessAchievementGuildAnnouncements174()
+function OTLGM.__impl180.ProcessAchievementGuildAnnouncements174__impl1(self)
     local db = self:EnsureAchievements174()
-    local queue = self.runtime and self.runtime.achievementGuildQueue174
-    if not queue or table.getn(queue) == 0 or not OTLGM_DB.settings.achievementGuildChat174 then return end
-    if self:Now() - (tonumber(db.dates.lastGuildChatAt) or 0) < 2 then return end
+    self.runtime = self.runtime or {}
+    local queue = self.runtime.achievementGuildQueue174
+    if not queue or table.getn(queue) == 0 then
+        self.runtime.achievementGuildDue174 = nil
+        return
+    end
+    if not OTLGM_DB.settings.achievementGuildChat174 then
+        self.runtime.achievementGuildQueue174 = {}
+        self.runtime.achievementGuildDue174 = nil
+        return
+    end
+    local now = self:Now()
+    local nextAt = (tonumber(db.dates.lastGuildChatAt) or 0) + 2
+    if now < nextAt then
+        self.runtime.achievementGuildDue174 = nextAt
+        return
+    end
     local id = table.remove(queue, 1)
     if A174.byId[id] then self:SendAchievementGuildAnnouncement174(A174.byId[id]) end
+    if table.getn(queue) > 0 then
+        self.runtime.achievementGuildDue174 = self:Now() + 2
+        if self.WakeScheduler180 then self:WakeScheduler180("achievement-guild-queue") end
+    else
+        self.runtime.achievementGuildDue174 = nil
+    end
 end
 
-function OTLGM:CompleteAchievement174(id, silent)
+function OTLGM.__impl180.CompleteAchievement174__impl1(self, id, silent)
     local def = A174.byId[id]
     local db = self:EnsureAchievements174()
     if not def or db.completed[id] then return false end
@@ -723,7 +723,7 @@ function OTLGM:FinalizeGroupSession174(now, silent)
     if targetCount > 0 and met then self:CompleteAchievement174("A015", silent) end
 end
 
-function OTLGM:UpdateGroupSession174(silent)
+function OTLGM.__impl180.UpdateGroupSession174__impl1(self, silent)
     self.runtime = self.runtime or {}
     local now = self:Now()
     local group = self:CheckImmediateGroupAchievements174(silent)
@@ -752,7 +752,7 @@ function OTLGM:UpdateGroupSession174(silent)
     return group
 end
 
-function OTLGM:UpdateRaidPresence174(silent)
+function OTLGM.__impl180.UpdateRaidPresence174__impl1(self, silent)
     self.runtime = self.runtime or {}
     local rule = self:GetCurrentInstanceRule174()
     local group = self.runtime.achievementGroup174 or self:GetGroupSnapshot174()
@@ -786,7 +786,7 @@ function OTLGM:RecordQualifyingResponseDay174()
     if db.counters.responseStreak >= 7 then self:CompleteAchievement174("A030", false) end
 end
 
-function OTLGM:RecordGroupApplication174(group, record)
+function OTLGM.__impl180.RecordGroupApplication174__impl1(self, group, record)
     if not group or not record then return end
     local db = self:EnsureAchievements174()
     local dedupe = self:GetAchievementSet174("groupApplicationIds")
@@ -982,13 +982,13 @@ function OTLGM:CheckLegacyAchievements174(silent, loginCheck)
     end
 end
 
-function OTLGM:BeginTradeTracking174()
+function OTLGM.__impl180.BeginTradeTracking174__impl1(self)
     self.runtime = self.runtime or {}
     local name = TradeFrameRecipientNameText and TradeFrameRecipientNameText.GetText and TradeFrameRecipientNameText:GetText() or ""
     self.runtime.trade174 = { target=ShortName174(name), meaningful=false, accepted=false }
 end
 
-function OTLGM:UpdateTradeTracking174()
+function OTLGM.__impl180.UpdateTradeTracking174__impl1(self)
     local trade = self.runtime and self.runtime.trade174
     if not trade then return end
     local meaningful = false
@@ -1002,7 +1002,7 @@ function OTLGM:UpdateTradeTracking174()
     trade.meaningful = meaningful
 end
 
-function OTLGM:FinishTradeTracking174(success)
+function OTLGM.__impl180.FinishTradeTracking174__impl1(self, success)
     local trade = self.runtime and self.runtime.trade174
     self.runtime.trade174 = nil
     if not trade or not success or not trade.meaningful or trade.target == "" then return end
@@ -1011,7 +1011,7 @@ function OTLGM:FinishTradeTracking174(success)
     if self:AddAchievementSetValue174("tradePartners", NormalizeName174(trade.target)) and TableCount174(self:GetAchievementSet174("tradePartners")) >= 25 then self:CompleteAchievement174("A027", false) end
 end
 
-function OTLGM:StartBossEncounter174(bossName)
+function OTLGM.__impl180.StartBossEncounter174__impl1(self, bossName)
     local rule, zoneKey = self:GetCurrentInstanceRule174()
     local bossKey = NormalizeKey174(bossName)
     if not rule or not rule.bosses[bossKey] then return false end
@@ -1028,7 +1028,7 @@ function OTLGM:StartBossEncounter174(bossName)
     return true
 end
 
-function OTLGM:MarkBossEncounterDeath174(name)
+function OTLGM.__impl180.MarkBossEncounterDeath174__impl1(self, name)
     local encounter = self.runtime and self.runtime.bossEncounter174
     if not encounter then return end
     local normalized = NormalizeName174(name)
@@ -1041,7 +1041,7 @@ function OTLGM:MarkBossEncounterDeath174(name)
     end
 end
 
-function OTLGM:HandleBossVictory174(bossName)
+function OTLGM.__impl180.HandleBossVictory174__impl1(self, bossName)
     local rule, zoneKey = self:GetCurrentInstanceRule174()
     local bossKey = NormalizeKey174(bossName)
     if not rule or not rule.bosses[bossKey] then return false end
@@ -1243,7 +1243,7 @@ function OTLGM:HandleAchievementEmote174(message, sender)
     end
 end
 
-function OTLGM:GetAchievementProgress174(def)
+function OTLGM.__impl180.GetAchievementProgress174__impl1(self, def)
     local db = self:EnsureAchievements174()
     if db.completed[def.id] then return def.required or 1, def.required or 1 end
     local key = def.progress
@@ -1275,27 +1275,9 @@ function OTLGM:GetAchievementProgress174(def)
     return math.min(def.required or 1, tonumber(db.counters[key]) or 0), def.required or 1
 end
 
-function OTLGM:GetAchievementPresentation174(def, complete)
+function OTLGM.__impl180.GetAchievementPresentation174__impl1(self, def, complete)
     if def.secret and not complete then return def.name, "The title is your clue.", def.icon or QUESTION_ICON_174, true end
     return def.name, (def.secret and def.revealed or def.description), def.icon or QUESTION_ICON_174, false
-end
-
-function OTLGM:GetAchievementDisplayList174()
-    local category = OTLGM_DB.settings.achievementCategory174 or "OVERVIEW"
-    local filter = OTLGM_DB.settings.achievementFilter174 or "ALL"
-    local search = string.lower(Trim174(OTLGM_DB.settings.achievementSearch174 or ""))
-    local result = {}
-    local index, def, complete, current, required, matches
-    for index=1,table.getn(A174.catalog) do
-        def = A174.catalog[index]
-        complete = self:IsAchievementComplete174(def.id)
-        current, required = self:GetAchievementProgress174(def)
-        matches = search == "" or string.find(string.lower(def.name), search, 1, true) or string.find(string.lower(def.description), search, 1, true)
-        if matches and (category == "OVERVIEW" or def.category == category) then
-            if filter == "ALL" or (filter == "COMPLETE" and complete) or (filter == "PROGRESS" and not complete and current > 0 and not def.secret) or (filter == "LOCKED" and not complete and (def.secret or current <= 0)) then table.insert(result, def) end
-        end
-    end
-    return result
 end
 
 function OTLGM:FocusAchievement174(id)
@@ -1307,212 +1289,45 @@ function OTLGM:FocusAchievement174(id)
     if self.ui.achievementSearch174 then self.ui.achievementSearch174:SetText("") end
     self.ui.achievementFocus174 = id
     local list = self:GetAchievementDisplayList174()
+    local capacity = math.max(1, tonumber(self.ui.achievementCapacity180) or 6)
     local index
-    for index=1,table.getn(list) do if list[index].id == id then self.ui.achievementOffset174 = math.floor((index - 1) / 6) * 6 break end end
+    for index=1,table.getn(list) do
+        if list[index].id == id then
+            self.ui.achievementOffset174 = math.max(0, index - math.max(1, math.floor(capacity / 2)))
+            break
+        end
+    end
     self:RefreshAchievements174()
+    return true
+end
+
+function OTLGM:ApplyPendingAchievementFocus180(reason)
+    local pending = self.runtime and self.runtime.pendingAchievementFocus180
+    if not pending or not A174.byId[pending] then return false end
+    if not self.ui or self.ui.currentPage ~= "achievements" then return false end
+    local page = self.ui.pages and self.ui.pages.achievements
+    if not page or page.otlLazyShell or not page.otlBuilt then return false end
+    if not self.ui.achievementRows174 then return false end
+    if not self:FocusAchievement174(pending) then return false end
+    self.runtime.pendingAchievementFocus180 = nil
+    self.runtime.lastAchievementFocusReason180 = reason or "page-shown"
+    page.otlFocusedAchievement180 = pending
     return true
 end
 
 function OTLGM:OpenAchievement174(id)
     if not A174.byId[id] then return false end
+    self.runtime = self.runtime or {}
+    self.runtime.pendingAchievementFocus180 = id
     if not self.ui or not self.ui.main then self:BuildUI() end
     if not self.ui or not self.ui.main then return false end
     if not self.ui.main:IsVisible() then if self.PrepareMainShow170 then self:PrepareMainShow170() end self.ui.main:Show() end
-    self:ShowPage("achievements")
-    return self:FocusAchievement174(id)
-end
-
-function OTLGM:BuildAchievementsPage174(page)
-    self.ui.achievementTitleIcon174 = page:CreateTexture(nil, "OVERLAY")
-    self.ui.achievementTitleIcon174:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -1)
-    self.ui.achievementTitleIcon174:SetWidth(27) self.ui.achievementTitleIcon174:SetHeight(27)
-    SetTexture174(self.ui.achievementTitleIcon174, "Interface\\Icons\\INV_Misc_Book_09")
-    Text174(page, "GameFontNormalLarge", "Guild Achievements", 36, -2, 420, "LEFT")
-    self.ui.achievementCount174 = Text174(page, "GameFontNormal", "0 / 87", 574, -4, 144, "RIGHT")
-    self.ui.achievementCount174:SetTextColor(1.0, 0.82, 0.35)
-    Text174(page, "GameFontNormalSmall", "Shared adventures, reliable milestones and personal guild history.", 36, -28, 520, "LEFT"):SetTextColor(0.65,0.65,0.62)
-
-    local progressBack = Panel174(page, 36, -49, 510, 12, "background")
-    self.ui.achievementProgressFill174 = progressBack:CreateTexture(nil, "ARTWORK")
-    self.ui.achievementProgressFill174:SetPoint("LEFT", progressBack, "LEFT", 3, 0)
-    self.ui.achievementProgressFill174:SetHeight(6)
-    self.ui.achievementProgressFill174:SetTexture(0.92,0.58,0.12,0.95)
-    self.ui.achievementProgressText174 = Text174(page, "GameFontNormalSmall", "", 556, -50, 162, "RIGHT")
-    self.ui.achievementProgressText174:SetTextColor(0.72,0.67,0.58)
-
-    self.ui.achievementFilterButtons174 = {}
-    local filters = { {"ALL","All"}, {"COMPLETE","Completed"}, {"PROGRESS","In Progress"}, {"LOCKED","Locked"} }
-    local index
-    for index=1,4 do
-        local key = filters[index][1]
-        self.ui.achievementFilterButtons174[key] = Button174(page, filters[index][2], 338 + ((index-1)*96), -70, 90, 25, function()
-            OTLGM_DB.settings.achievementFilter174 = key
-            OTLGM.ui.achievementOffset174 = 0
-            OTLGM.ui.achievementFocus174 = nil
-            OTLGM:RefreshAchievements174()
-        end, "utility")
-    end
-
-    self.ui.achievementSearch174 = CreateFrame("EditBox", "OTLGM_AchievementSearch174", page)
-    if self.PrepareInteractiveControl170 then self:PrepareInteractiveControl170(self.ui.achievementSearch174, "editbox") end
-    self.ui.achievementSearch174:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -70)
-    self.ui.achievementSearch174:SetWidth(326) self.ui.achievementSearch174:SetHeight(25)
-    self.ui.achievementSearch174:SetAutoFocus(false) self.ui.achievementSearch174:SetMaxLetters(60)
-    self.ui.achievementSearch174:SetFontObject("GameFontHighlightSmall")
-    self.ui.achievementSearch174:SetBackdrop({ bgFile="Interface\\Tooltips\\UI-Tooltip-Background", edgeFile="Interface\\Tooltips\\UI-Tooltip-Border", tile=true, tileSize=16, edgeSize=9, insets={left=5,right=5,top=4,bottom=4} })
-    self.ui.achievementSearch174:SetBackdropColor(0.018,0.018,0.018,1) self.ui.achievementSearch174:SetBackdropBorderColor(0.30,0.26,0.20,1)
-    self.ui.achievementSearch174:SetText(OTLGM_DB.settings.achievementSearch174 or "")
-    self.ui.achievementSearch174:SetScript("OnTextChanged", function()
-        OTLGM_DB.settings.achievementSearch174 = this:GetText() or ""
-        OTLGM.ui.achievementOffset174 = 0
-        OTLGM:RefreshAchievements174()
-    end)
-    self.ui.achievementSearch174:SetScript("OnEscapePressed", function() if this:GetText() ~= "" then this:SetText("") else this:ClearFocus() end end)
-
-    local categories = Panel174(page, 0, -105, 170, 413, "background")
-    Text174(categories, "GameFontNormalSmall", "CATEGORIES", 10, -10, 150, "LEFT"):SetTextColor(1,0.78,0.20)
-    self.ui.achievementCategoryButtons174 = {}
-    for index=1,table.getn(A174.categories) do
-        local info = A174.categories[index]
-        local key = info.key
-        local button = Button174(categories, info.label, 8, -30 - ((index-1)*31), 154, 27, function()
-            OTLGM_DB.settings.achievementCategory174 = key
-            OTLGM.ui.achievementOffset174 = 0
-            OTLGM.ui.achievementFocus174 = nil
-            OTLGM:RefreshAchievements174()
-        end, "normal")
-        AddButtonIcon174(button, info.icon, 14)
-        if button.text then button.text:SetWidth(82) end
-        button.countText174 = Text174(button, "GameFontNormalSmall", "", 116, -8, 30, "RIGHT")
-        self.ui.achievementCategoryButtons174[key] = button
-    end
-    Text174(categories, "GameFontNormalSmall", "OPTIONS", 10, -284, 150, "LEFT"):SetTextColor(1,0.78,0.20)
-    self.ui.achievementPopupButton174 = Button174(categories, "Popups: On", 8, -306, 154, 27, function()
-        OTLGM_DB.settings.achievementPopups174 = not OTLGM_DB.settings.achievementPopups174
-        OTLGM:RefreshAchievements174()
-    end, "utility")
-    self.ui.achievementChatButton174 = Button174(categories, "Guild chat: On", 8, -337, 154, 27, function()
-        OTLGM_DB.settings.achievementGuildChat174 = not OTLGM_DB.settings.achievementGuildChat174
-        OTLGM:RefreshAchievements174()
-    end, "utility")
-    Text174(categories, "GameFontNormalSmall", "Shift-click an achievement to link it in the open WoW chat box.", 10, -372, 150, "LEFT"):SetTextColor(0.54,0.54,0.52)
-
-    local list = Panel174(page, 180, -105, 538, 413, "surface")
-    self.ui.achievementRows174 = {}
-    for index=1,6 do
-        local row = CreateFrame("Button", nil, list)
-        if self.PrepareInteractiveControl170 then self:PrepareInteractiveControl170(row, "button") end
-        row:SetPoint("TOPLEFT", list, "TOPLEFT", 8, -8 - ((index-1)*62))
-        row:SetWidth(522) row:SetHeight(58)
-        row:SetBackdrop({ bgFile="Interface\\Tooltips\\UI-Tooltip-Background", edgeFile="Interface\\Tooltips\\UI-Tooltip-Border", tile=true, tileSize=16, edgeSize=9, insets={left=2,right=2,top=2,bottom=2} })
-        row.iconFallback174 = row:CreateTexture(nil, "ARTWORK")
-        row.iconFallback174:SetPoint("LEFT", row, "LEFT", 8, 0) row.iconFallback174:SetWidth(42) row.iconFallback174:SetHeight(42) SetTexture174(row.iconFallback174, QUESTION_ICON_174)
-        row.icon174 = row:CreateTexture(nil, "OVERLAY")
-        row.icon174:SetPoint("LEFT", row, "LEFT", 8, 0) row.icon174:SetWidth(42) row.icon174:SetHeight(42)
-        row.name174 = Text174(row, "GameFontNormal", "", 58, -8, 326, "LEFT")
-        row.description174 = Text174(row, "GameFontNormalSmall", "", 58, -28, 340, "LEFT")
-        row.description174:SetTextColor(0.64,0.64,0.61)
-        row.status174 = Text174(row, "GameFontNormalSmall", "", 402, -10, 108, "RIGHT")
-        row.date174 = Text174(row, "GameFontNormalSmall", "", 402, -32, 108, "RIGHT")
-        row:SetScript("OnClick", function()
-            if not this.achievement174 then return end
-            if IsShiftKeyDown and IsShiftKeyDown() then
-                if OTLGM:InsertAchievementLinkInBlizzardChat174(this.achievement174) then return end
-                if OTLGM.InsertGuildChatLink then OTLGM:InsertGuildChatLink(OTLGM:GetAchievementLink174(this.achievement174), true) return end
-            end
-            OTLGM:FocusAchievement174(this.achievement174.id)
-        end)
-        row:SetScript("OnEnter", function()
-            if not this.achievement174 then return end
-            this:SetBackdropBorderColor(0.34,0.70,1.0,1)
-            local complete = OTLGM:IsAchievementComplete174(this.achievement174.id)
-            local name, description = OTLGM:GetAchievementPresentation174(this.achievement174, complete)
-            GameTooltip:SetOwner(this, "ANCHOR_CURSOR")
-            GameTooltip:AddLine(name, 1,0.82,0.35)
-            GameTooltip:AddLine(description, 1,1,1,true)
-            GameTooltip:AddLine("Shift-click to link", 0.52,0.72,1.0)
-            GameTooltip:Show()
-        end)
-        row:SetScript("OnLeave", function() GameTooltip:Hide() OTLGM:RefreshAchievements174() end)
-        self.ui.achievementRows174[index] = row
-    end
-    self.ui.achievementPrev174 = Button174(list, "Previous", 8, -382, 82, 23, function() OTLGM.ui.achievementOffset174 = math.max(0,(OTLGM.ui.achievementOffset174 or 0)-6) OTLGM:RefreshAchievements174() end, "utility")
-    self.ui.achievementStatus174 = Text174(list, "GameFontNormalSmall", "", 100, -388, 324, "CENTER")
-    self.ui.achievementNext174 = Button174(list, "Next", 432, -382, 82, 23, function() OTLGM.ui.achievementOffset174 = (OTLGM.ui.achievementOffset174 or 0)+6 OTLGM:RefreshAchievements174() end, "utility")
-    self.ui.achievementOffset174 = 0
-end
-
-function OTLGM:RefreshAchievements174()
-    if not self.ui or not self.ui.achievementRows174 then return end
-    local completeCount, total = self:GetAchievementCount174()
-    self.ui.achievementCount174:SetText(tostring(completeCount) .. " / " .. tostring(total))
-    local ratio = total > 0 and completeCount / total or 0
-    self.ui.achievementProgressFill174:SetWidth(math.max(1, math.floor(504 * ratio)))
-    self.ui.achievementProgressText174:SetText(tostring(math.floor(ratio * 100)) .. "% complete")
-    local category = OTLGM_DB.settings.achievementCategory174 or "OVERVIEW"
-    local filter = OTLGM_DB.settings.achievementFilter174 or "ALL"
-    local key, button
-    for key, button in pairs(self.ui.achievementCategoryButtons174 or {}) do
-        Select174(button, key == category)
-        local completed, categoryTotal = 0, 0
-        local index, def
-        for index=1,table.getn(A174.catalog) do
-            def = A174.catalog[index]
-            if key == "OVERVIEW" or def.category == key then categoryTotal = categoryTotal + 1 if self:IsAchievementComplete174(def.id) then completed = completed + 1 end end
-        end
-        if button.countText174 then button.countText174:SetText(tostring(completed) .. "/" .. tostring(categoryTotal)) end
-    end
-    for key, button in pairs(self.ui.achievementFilterButtons174 or {}) do Select174(button, key == filter) end
-    SetText174(self.ui.achievementPopupButton174, "Popups: " .. (OTLGM_DB.settings.achievementPopups174 and "On" or "Off"))
-    SetText174(self.ui.achievementChatButton174, "Guild chat: " .. (OTLGM_DB.settings.achievementGuildChat174 and "On" or "Off"))
-    Select174(self.ui.achievementPopupButton174, OTLGM_DB.settings.achievementPopups174)
-    Select174(self.ui.achievementChatButton174, OTLGM_DB.settings.achievementGuildChat174)
-
-    local list = self:GetAchievementDisplayList174()
-    local maximum = math.max(0, table.getn(list) - 6)
-    local offset = math.max(0, math.min(maximum, self.ui.achievementOffset174 or 0))
-    self.ui.achievementOffset174 = offset
-    local index, row, def, complete, name, description, icon, secret, current, required, completedAt
-    for index=1,6 do
-        row = self.ui.achievementRows174[index]
-        def = list[offset + index]
-        if def then
-            complete = self:IsAchievementComplete174(def.id)
-            name, description, icon, secret = self:GetAchievementPresentation174(def, complete)
-            current, required = self:GetAchievementProgress174(def)
-            completedAt = self:GetAchievementCompletedAt174(def.id)
-            row.achievement174 = def
-            SetTexture174(row.icon174, icon)
-            row.name174:SetText(name)
-            row.description174:SetText(description)
-            if complete then
-                row:SetBackdropColor(0.075,0.052,0.020,0.98) row:SetBackdropBorderColor(0.68,0.44,0.12,1)
-                row.icon174:SetVertexColor(1,1,1) row.name174:SetTextColor(1,0.82,0.35)
-                row.status174:SetText("COMPLETE") row.status174:SetTextColor(0.35,0.95,0.42)
-                row.date174:SetText(completedAt and date("%d %b %Y", completedAt) or "") row.date174:SetTextColor(0.62,0.62,0.60)
-            elseif secret then
-                row:SetBackdropColor(0.035,0.020,0.050,0.98) row:SetBackdropBorderColor(0.38,0.18,0.52,1)
-                row.icon174:SetVertexColor(0.72,0.45,0.94) row.name174:SetTextColor(0.78,0.46,1.0)
-                row.status174:SetText("SECRET") row.status174:SetTextColor(0.78,0.46,1.0) row.date174:SetText("")
-            else
-                row:SetBackdropColor(0.025,0.023,0.020,0.98) row:SetBackdropBorderColor(0.24,0.22,0.19,1)
-                row.icon174:SetVertexColor(0.34,0.34,0.34) row.name174:SetTextColor(0.68,0.68,0.66)
-                row.status174:SetText(required > 1 and (tostring(math.floor(current)) .. " / " .. tostring(math.floor(required))) or "LOCKED")
-                row.status174:SetTextColor(current > 0 and 1.0 or 0.72, current > 0 and 0.78 or 0.72, current > 0 and 0.18 or 0.68)
-                row.date174:SetText("")
-            end
-            if self.ui.achievementFocus174 == def.id then
-                row:SetBackdropBorderColor(0.30,0.72,1.0,1)
-            end
-            row:Show()
-        else row.achievement174 = nil row:Hide() end
-    end
-    self.ui.achievementStatus174:SetText(table.getn(list)==0 and "No achievements match this view." or (tostring(offset+1) .. "-" .. tostring(math.min(offset+6,table.getn(list))) .. " of " .. tostring(table.getn(list))))
-    if self.SetControlEnabled170 then
-        self:SetControlEnabled170(self.ui.achievementPrev174, offset > 0, "This is the first page.")
-        self:SetControlEnabled170(self.ui.achievementNext174, offset < maximum, "There are no more achievements.")
-        if self.ApplyButtonSkin then self:ApplyButtonSkin(self.ui.achievementPrev174) self:ApplyButtonSkin(self.ui.achievementNext174) end
-    end
+    if not self:ShowPage("achievements") then return false end
+    -- UIShell180 calls ApplyPendingAchievementFocus180 after the lazy page has
+    -- completed Build, first Layout and first Refresh. Keep this fallback for
+    -- older direct builders that are already fully constructed.
+    self:ApplyPendingAchievementFocus180("open-fallback")
+    return self.runtime.pendingAchievementFocus180 == nil
 end
 
 local TOAST_ICONS_174 = {
@@ -1523,7 +1338,7 @@ local TOAST_ICONS_174 = {
     background="Interface\\Icons\\INV_Misc_Rune_01",
 }
 
-function OTLGM:BuildAchievementToast174()
+function OTLGM.__impl180.BuildAchievementToast174__impl1(self)
     if self.ui.guildToasts174 or not UIParent then return end
     self.ui.guildToasts174 = {}
     local toastIndex
@@ -1556,13 +1371,15 @@ function OTLGM:BuildAchievementToast174()
             local ok = pcall(function()
                 if data.achievementId then OTLGM:OpenAchievement174(data.achievementId)
                 elseif data.category == "mention" and OTLGM.OpenGuildChatMention174 then OTLGM:OpenGuildChatMention174(data)
-                elseif data.targetPage and OTLGM.ShowPage then
+                elseif data.route and data.route.objectType and OTLGM.OpenGuildObject180 then
+                    OTLGM:OpenGuildObject180(data.route.objectType, data.route.objectId, data.route)
+                elseif data.targetPage and OTLGM.__impl180.ShowPage__impl1 then
                     if OTLGM.ui and OTLGM.ui.main and not OTLGM.ui.main:IsVisible() then OTLGM.ui.main:Show() end
                     OTLGM:ShowPage(data.targetPage)
                 end
             end)
             OTLGM:DismissGuildToast174(this.toastIndex174)
-            if not ok and OTLGM and OTLGM.SetStatus then OTLGM:SetStatus("Could not open this notification. The item remains available in Guild Inbox.") end
+            if not ok and OTLGM and OTLGM.__impl180.SetStatus__impl1 then OTLGM:SetStatus("Could not open this notification. The item remains available in Guild Inbox.") end
         end)
         toast:SetScript("OnEnter", function()
             this.hovered174 = true
@@ -1588,7 +1405,7 @@ function OTLGM:BuildAchievementToast174()
     self.ui.achievementToast174 = self.ui.guildToasts174[1]
 end
 
-function OTLGM:ShowGuildToastNow174(data, preferredIndex)
+function OTLGM.__impl180.ShowGuildToastNow174__impl1(self, data, preferredIndex)
     self:BuildAchievementToast174()
     local toasts = self.ui.guildToasts174 or {}
     local toast, index
@@ -1728,9 +1545,9 @@ function OTLGM:InstallAchievements174()
     self:EnsureAchievements174()
     self:InstallAchievementHyperlinks174()
 
-    local BaseBuildUI = self.BuildUI
+    local PreviousBuildUI = self.BuildUI
     self.BuildUI = function(owner)
-        BaseBuildUI(owner)
+        PreviousBuildUI(owner)
         if owner.ui.pages and not owner.ui.pages.achievements then
             local page = CreateFrame("Frame", nil, owner.ui.content)
             page:SetPoint("TOPLEFT", owner.ui.content, "TOPLEFT", 14, -14)
@@ -1747,21 +1564,21 @@ function OTLGM:InstallAchievements174()
         if OTLGM_DB.settings.lastPage == "achievements" then owner:ShowPage("achievements") end
     end
 
-    local BaseShowPage = self.ShowPage
+    local PreviousShowPage = self.ShowPage
     self.ShowPage = function(owner, pageKey)
-        BaseShowPage(owner, pageKey)
+        PreviousShowPage(owner, pageKey)
         if pageKey == "achievements" then owner:RefreshAchievements174() end
     end
 
-    local BaseRefreshVisible = self.RefreshVisiblePage
+    local PreviousRefreshVisible = self.RefreshVisiblePage
     self.RefreshVisiblePage = function(owner)
-        BaseRefreshVisible(owner)
+        PreviousRefreshVisible(owner)
         if owner.ui and owner.ui.currentPage == "achievements" then owner:RefreshAchievements174() end
     end
 
-    local BaseRefreshChat = self.RefreshGuildChatPage
+    local PreviousRefreshChat = self.RefreshGuildChatPage
     self.RefreshGuildChatPage = function(owner)
-        local result = BaseRefreshChat(owner)
+        local result = PreviousRefreshChat(owner)
         owner:RefreshGuildChatOnline174()
         local target = tonumber(owner.runtime and owner.runtime.highlightChatTimestamp174) or 0
         local now = owner:Now()
@@ -1784,39 +1601,40 @@ function OTLGM:InstallAchievements174()
         return result
     end
 
-    local BaseScanProfession = self.ScanCurrentProfession
-    if BaseScanProfession then
+    local PreviousScanProfession = self.ScanCurrentProfession
+    if PreviousScanProfession then
         self.ScanCurrentProfession = function(owner, mode, attempt)
-            local a,b,c,d = BaseScanProfession(owner, mode, attempt)
+            local a,b,c,d = PreviousScanProfession(owner, mode, attempt)
             owner.runtime = owner.runtime or {}
             owner.runtime.achievementProfessionDue174 = owner:Now() + 1
+            if owner.WakeScheduler180 then owner:WakeScheduler180("achievement-profession") end
             return a,b,c,d
         end
     end
 
-    local BaseReaction = self.SetCommunityReaction
-    if BaseReaction then
+    local PreviousReaction = self.SetCommunityReaction
+    if PreviousReaction then
         self.SetCommunityReaction = function(owner, targetType, targetId, reaction, force)
-            local result = BaseReaction(owner, targetType, targetId, reaction, force)
+            local result = PreviousReaction(owner, targetType, targetId, reaction, force)
             if result and targetType == "ANN" and reaction and reaction ~= "NONE" then owner:CompleteAchievement174("A007", false) end
             return result
         end
     end
 
-    local BaseApplyGroup = self.ApplyToPveGroup
-    if BaseApplyGroup then
+    local PreviousApplyGroup = self.ApplyToPveGroup
+    if PreviousApplyGroup then
         self.ApplyToPveGroup = function(owner, groupId, role, note)
             local group = owner.EnsurePveDB and owner:EnsurePveDB().requests[groupId]
-            local ok, record = BaseApplyGroup(owner, groupId, role, note)
+            local ok, record = PreviousApplyGroup(owner, groupId, role, note)
             if ok then owner:RecordGroupApplication174(group, record) end
             return ok, record
         end
     end
 
-    local BaseRemoteApplication = self.ApplyRemotePveApplication
-    if BaseRemoteApplication then
+    local PreviousRemoteApplication = self.ApplyRemotePveApplication
+    if PreviousRemoteApplication then
         self.ApplyRemotePveApplication = function(owner, fields, sender)
-            local result = BaseRemoteApplication(owner, fields, sender)
+            local result = PreviousRemoteApplication(owner, fields, sender)
             local pve = owner.EnsurePveDB and owner:EnsurePveDB()
             local id = fields and fields[3]
             if result and pve and id and pve.applications[id] then owner:RecordAcceptedApplication174(pve.applications[id]) end
@@ -1824,29 +1642,29 @@ function OTLGM:InstallAchievements174()
         end
     end
 
-    local BaseCraftResponse = self.AddCraftingResponse
-    if BaseCraftResponse then
+    local PreviousCraftResponse = self.AddCraftingResponse
+    if PreviousCraftResponse then
         self.AddCraftingResponse = function(owner, requestId, text, canHelp)
             local craft = owner.EnsureCraftingDB and owner:EnsureCraftingDB()
             local request = craft and craft.requests and craft.requests[requestId]
-            local ok, record = BaseCraftResponse(owner, requestId, text, canHelp)
+            local ok, record = PreviousCraftResponse(owner, requestId, text, canHelp)
             if ok then owner:RecordCraftingResponse174(request, record) end
             return ok, record
         end
     end
 
-    local BaseNotifyEvent = self.NotifyEvent152
-    if BaseNotifyEvent then
-        self.NotifyEvent152 = function(owner, category, eventKey, title, body, priority, remote, targetPage)
+    local PreviousNotifyEvent = self.NotifyEvent152
+    if PreviousNotifyEvent then
+        self.NotifyEvent152 = function(owner, category, eventKey, title, body, priority, remote, targetPage, route)
             local pref = owner.GetNotificationPreference152 and owner:GetNotificationPreference152(category)
             local showVisual = pref and pref.visual
             if pref and showVisual then pref.visual = false end
-            local ok, result = pcall(BaseNotifyEvent, owner, category, eventKey, title, body, priority, remote, targetPage)
+            local ok, result = pcall(PreviousNotifyEvent, owner, category, eventKey, title, body, priority, remote, targetPage, route)
             if pref and showVisual then pref.visual = true end
             if not ok then error(result) end
             if result and showVisual and category ~= "background" then
                 local headers = { raid="Raid Update", announcement="Guild Announcement", group="Group Finder", response="New Response", crafting="Crafting Network", reaction="Guild Reaction", mention="Guild Chat Mention" }
-                local data = { category=category, header=headers[category] or "Guild Update", title=title or "Order of the Lion", body=body or "", priority=priority, targetPage=targetPage, duration=(priority == "CRITICAL" or priority == "ACTION") and 8 or 7 }
+                local data = { category=category, header=headers[category] or "Guild Update", title=title or "Order of the Lion", body=body or "", priority=priority, targetPage=targetPage, route=route, duration=(priority == "CRITICAL" or priority == "ACTION") and 8 or 7 }
                 if category == "mention" and owner.runtime and owner.runtime.pendingMentionTarget174 then
                     data.mentionChannel = owner.runtime.pendingMentionTarget174.channel
                     data.mentionTs = owner.runtime.pendingMentionTarget174.ts
@@ -1859,9 +1677,9 @@ function OTLGM:InstallAchievements174()
         end
     end
 
-    local BaseTimers = self.ProcessQuality156Timers
+    local PreviousTimers = self.ProcessQuality156Timers
     self.ProcessQuality156Timers = function(owner)
-        if BaseTimers then BaseTimers(owner) end
+        if PreviousTimers then PreviousTimers(owner) end
         local now = owner:Now()
         owner:ProcessAchievementGuildAnnouncements174()
         if owner.runtime.achievementGroupTickAt174 and now >= owner.runtime.achievementGroupTickAt174 then owner:UpdateGroupSession174(false) end
@@ -1882,11 +1700,26 @@ function OTLGM:InstallAchievements174()
                 if chatRow.jumpHighlight174 then chatRow.jumpHighlight174:Hide() end
             end
         end
-        if owner.runtime.bossEncounter174 and now - (owner.runtime.bossEncounter174.started or now) > 600 then owner.runtime.bossEncounter174 = nil end
+        if owner.runtime.bossEncounter174 and now - (owner.runtime.bossEncounter174.started or now) >= 600 then owner.runtime.bossEncounter174 = nil end
         local keys = { "roarWindow174", "kneelWindow174", "danceWindow174" }
         local index, state
-        for index=1,table.getn(keys) do state = owner.runtime[keys[index]] if state and now > (state.expires or 0) then owner.runtime[keys[index]] = nil end end
+        for index=1,table.getn(keys) do state = owner.runtime[keys[index]] if state and now >= (state.expires or 0) then owner.runtime[keys[index]] = nil end end
     end
+end
+
+function OTLGM:RunAchievementLoginBaseline180()
+    self:InstallAchievements174()
+    local db = self:EnsureAchievements174()
+    self:UpdateMembershipPeriod174()
+    local silent = not db.baseline174
+    self:CheckStoredReactionAchievement174(silent)
+    self:CheckProfessionAchievements174(silent)
+    self:UpdateGroupSession174(silent)
+    self:UpdateRaidPresence174(silent)
+    self:CheckLegacyAchievements174(silent, true)
+    self:CheckSecretKeeper174(silent)
+    db.baseline174 = true
+    return true
 end
 
 local eventFrame174 = CreateFrame("Frame", "OTLGM_AchievementsEvent174")
@@ -1903,17 +1736,7 @@ eventFrame174:SetScript("OnEvent", function()
     if not OTLGM then return end
     OTLGM.runtime = OTLGM.runtime or {}
     if event == "PLAYER_LOGIN" then
-        OTLGM:InstallAchievements174()
-        local db = OTLGM:EnsureAchievements174()
-        OTLGM:UpdateMembershipPeriod174()
-        local silent = not db.baseline174
-        OTLGM:CheckStoredReactionAchievement174(silent)
-        OTLGM:CheckProfessionAchievements174(silent)
-        OTLGM:UpdateGroupSession174(silent)
-        OTLGM:UpdateRaidPresence174(silent)
-        OTLGM:CheckLegacyAchievements174(silent, true)
-        OTLGM:CheckSecretKeeper174(silent)
-        db.baseline174 = true
+        OTLGM:RunAchievementLoginBaseline180()
     elseif event == "PLAYER_ENTERING_WORLD" then
         OTLGM:UpdateMembershipPeriod174()
         OTLGM:UpdateGroupSession174(false)
@@ -1924,9 +1747,10 @@ eventFrame174:SetScript("OnEvent", function()
         local db = OTLGM:EnsureAchievements174()
         db.dates.lastLoginAt = OTLGM:Now()
     elseif event == "PARTY_MEMBERS_CHANGED" or event == "RAID_ROSTER_UPDATE" or event == "GUILD_ROSTER_UPDATE" or event == "PLAYER_GUILD_UPDATE" then
-        if (event == "GUILD_ROSTER_UPDATE" or event == "PLAYER_GUILD_UPDATE") and OTLGM.RefreshAchievementRosterCache174 then OTLGM:RefreshAchievementRosterCache174(true) end
+        if (event == "GUILD_ROSTER_UPDATE" or event == "PLAYER_GUILD_UPDATE") and OTLGM.__impl180.RefreshAchievementRosterCache174__impl1 then OTLGM:RefreshAchievementRosterCache174(true) end
         if event == "PLAYER_GUILD_UPDATE" then OTLGM:UpdateMembershipPeriod174() end
         OTLGM.runtime.achievementGroupDue174 = OTLGM:Now() + 1
+        if OTLGM.WakeScheduler180 then OTLGM:WakeScheduler180("achievement-group-event") end
     elseif event == "ZONE_CHANGED_NEW_AREA" or event == "MINIMAP_ZONE_CHANGED" then
         OTLGM:UpdateGroupSession174(false)
         OTLGM:UpdateRaidPresence174(false)
@@ -1950,6 +1774,7 @@ eventFrame174:SetScript("OnEvent", function()
         if name then OTLGM:MarkBossEncounterDeath174(name) end
     elseif event == "TRADE_SKILL_SHOW" or event == "CRAFT_SHOW" or event == "TRADE_SKILL_UPDATE" or event == "CRAFT_UPDATE" or event == "SKILL_LINES_CHANGED" then
         OTLGM.runtime.achievementProfessionDue174 = OTLGM:Now() + 1
+        if OTLGM.WakeScheduler180 then OTLGM:WakeScheduler180("achievement-profession-event") end
     elseif event == "TRADE_SHOW" then
         OTLGM:BeginTradeTracking174()
     elseif event == "TRADE_ACCEPT_UPDATE" then
@@ -1961,6 +1786,7 @@ eventFrame174:SetScript("OnEvent", function()
     elseif event == "TRADE_REQUEST_CANCEL" then
         OTLGM:FinishTradeTracking174(false)
     end
+    if OTLGM.UpdateSchedulerState180 then OTLGM:UpdateSchedulerState180("achievement-event:" .. tostring(event or "unknown")) end
 end)
 
 OTLGM:RegisterModule("Achievements174", { layer="feature", catalog=46, schema=14, eventDriven=true })

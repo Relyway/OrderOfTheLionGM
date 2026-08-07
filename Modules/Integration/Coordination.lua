@@ -3,28 +3,28 @@
 
 OTLGM.quality156Loaded = true
 
-local BaseHandleAddonMessage156 = OTLGM.HandleAnnouncementsAddonMessageLegacy
-local BaseEnsureCraftingDB156 = OTLGM._Stage_Crafting_EnsureCraftingDB_1
-local BaseGetCraftingSearchResults156 = OTLGM._Stage_UINext_GetCraftingSearchResults_2
-local BaseBuildNextProfessionsPage156 = OTLGM._Stage_UINext_BuildNextProfessionsPage_1
-local BaseRefreshCraftingRecipesPanel156 = OTLGM._Stage_UINext_RefreshCraftingRecipesPanel_2
-local BaseBuildPvePage156 = OTLGM._Stage_UI_BuildPvePage_1
-local BaseRefreshPvePage156 = OTLGM._Stage_UINext_RefreshPvePage_2
-local BaseRequestCraftingSync156 = OTLGM._Stage_Crafting_RequestCraftingSync_1
-local BaseRequestPveSync156 = OTLGM._Stage_PVE_RequestPveSync_1
-local BaseRequestScan156 = OTLGM._Stage_Advanced_RequestScan_2
-local BaseScan156 = OTLGM._Stage_Advanced_Scan_2
-local BaseGetActivitySummary156 = OTLGM._Stage_Advanced_GetActivitySummary_1
-local BaseGetActivityHeatmap156 = OTLGM._Stage_Advanced_GetActivityHeatmap_1
-local BaseRefreshActivityPage156 = OTLGM._Stage_UI_RefreshActivityPage_1
-local BaseBuildActivityPage156 = OTLGM._Stage_UI_BuildActivityPage_1
-local BaseRefreshGuildChatPage156 = OTLGM._Stage_UI_RefreshGuildChatPage_1
-local BaseSerializePveRaid156 = OTLGM._Stage_PVE_SerializePveRaid_1
-local BaseApplyRemotePveRaid156 = OTLGM._Stage_Systems152_ApplyRemotePveRaid_2
-local BasePurgePveData156 = OTLGM._Stage_PVE_PurgePveData_1
-local BaseApplyRemotePveDelete156 = OTLGM._Stage_PVE_ApplyRemotePveDelete_1
-local BaseQueuePveSyncResponse156 = OTLGM._Stage_PVE_QueuePveSyncResponse_1
-local BaseGetPveRecordRevision156 = OTLGM._Stage_PVE_GetPveRecordRevision_1
+local PreviousHandleAddonMessage156 = OTLGM.HandleAnnouncementsAddonMessageLegacy
+local PreviousEnsureCraftingDB156 = OTLGM.__impl180.Stage_Crafting_EnsureCraftingDB_1__impl1
+local PreviousGetCraftingSearchResults156 = OTLGM.__impl180.Stage_UINext_GetCraftingSearchResults_2__impl1
+local PreviousBuildNextProfessionsPage156 = OTLGM.__impl180.Stage_UINext_BuildNextProfessionsPage_1__impl1
+local PreviousRefreshCraftingRecipesPanel156 = OTLGM.__impl180.Stage_UINext_RefreshCraftingRecipesPanel_2__impl1
+local PreviousBuildPvePage156 = OTLGM.__impl180.Stage_UI_BuildPvePage_1__impl1
+local PreviousRefreshPvePage156 = OTLGM.__impl180.Stage_UINext_RefreshPvePage_2__impl1
+local PreviousRequestCraftingSync156 = OTLGM.__impl180.Stage_Crafting_RequestCraftingSync_1__impl1
+local PreviousRequestPveSync156 = OTLGM.__impl180.Stage_PVE_RequestPveSync_1__impl1
+local PreviousRequestScan156 = OTLGM.__impl180.Stage_Advanced_RequestScan_2__impl1
+local PreviousScan156 = OTLGM.__impl180.Stage_Advanced_Scan_2__impl1
+local PreviousGetActivitySummary156 = OTLGM.__impl180.Stage_Advanced_GetActivitySummary_1__impl1
+local PreviousGetActivityHeatmap156 = OTLGM.__impl180.Stage_Advanced_GetActivityHeatmap_1__impl1
+local PreviousRefreshActivityPage156 = OTLGM.__impl180.Stage_UI_RefreshActivityPage_1__impl1
+local PreviousBuildActivityPage156 = OTLGM.__impl180.Stage_UI_BuildActivityPage_1__impl1
+local PreviousRefreshGuildChatPage156 = OTLGM.__impl180.Stage_UI_RefreshGuildChatPage_1__impl1
+local PreviousSerializePveRaid156 = OTLGM.__impl180.Stage_PVE_SerializePveRaid_1__impl1
+local PreviousApplyRemotePveRaid156 = OTLGM.__impl180.Stage_Systems152_ApplyRemotePveRaid_2__impl1
+local PreviousPurgePveData156 = OTLGM.__impl180.Stage_PVE_PurgePveData_1__impl1
+local PreviousApplyRemotePveDelete156 = OTLGM.__impl180.Stage_PVE_ApplyRemotePveDelete_1__impl1
+local PreviousQueuePveSyncResponse156 = OTLGM.__impl180.Stage_PVE_QueuePveSyncResponse_1__impl1
+local PreviousGetPveRecordRevision156 = OTLGM.__impl180.Stage_PVE_GetPveRecordRevision_1__impl1
 
 local function QTrim(text)
     text = text or ""
@@ -243,9 +243,16 @@ function OTLGM:EnsureOperationState156()
     return self.operationState156
 end
 
-function OTLGM:SetOperationState156(key, state, detail, duration)
+function OTLGM:SetOperationState156(key, state, detail, duration, context)
     local states = self:EnsureOperationState156()
-    states[key] = { state = state or "IDLE", detail = detail or "", ts = self:Now(), untilTs = duration and (self:Now() + duration) or nil }
+    context = type(context) == "table" and context or {}
+    states[key] = { state = state or "IDLE", detail = detail or "", ts = self:Now(), untilTs = duration and (self:Now() + duration) or nil, source = context.source, manual = context.manual and true or false }
+    if state == "ERROR" and self.RecordInternalIssueRC3 then self:RecordInternalIssueRC3(tostring(key or "Operation"), detail or "Operation failed") end
+    if self.WakeScheduler180 and (duration or state == "WORKING") then self:WakeScheduler180("operation-state:" .. tostring(key)) end
+    if key == "CRAFTING" and not context.manual and (not self.ui or self.ui.currentPage ~= "professions") then
+        if self.MarkPageDirty180 then self:MarkPageDirty180("professions") end
+        return
+    end
     if self:IsUIVisible() then self:RefreshOperationButtons156() end
 end
 
@@ -297,17 +304,49 @@ function OTLGM:RefreshOperationButtons156()
     end
 end
 
-function OTLGM:RequestScan(reason)
+function OTLGM.__impl180.RequestScan__impl1(self, reason)
+    local mode = reason
+    if reason == true then mode = "INTERNAL" end
+    if reason == false or reason == nil then mode = "MANUAL" end
+    local manual = mode == "MANUAL" or mode == "CONFIRM"
+    if self.pendingScan or (self.runtime and self.runtime.rosterRead180) then
+        if manual and self.SetStatus then self:SetStatus("Roster update is already in progress. Please wait.") end
+        return false
+    end
     local state = self:GetOperationState156("ROSTER")
-    if state.state == "WORKING" then if self.SetStatus then self:SetStatus("Roster update is already running. Please wait.") end return false end
-    self:SetOperationState156("ROSTER", "WORKING", "Requesting guild roster")
-    local result = BaseRequestScan156(self, reason)
-    if not self.pendingScan then self:SetOperationState156("ROSTER", "ERROR", "Roster request could not start", 4) end
-    return result
+    if state.state == "WORKING" then
+        -- A stale visual operation must not block a new request after the
+        -- underlying pending/read latch has already cleared.
+        self:SetOperationState156("ROSTER", "IDLE", "Ready for roster update")
+    end
+    local before = self.pendingScan
+    PreviousRequestScan156(self, mode)
+    if self.pendingScan and not before then
+        self:SetOperationState156("ROSTER", "WORKING", manual and "Requesting guild roster" or "Refreshing guild roster in background", nil, { source = "roster", manual = manual })
+        return true
+    end
+    -- Throttle/coalescing is a neutral result. A fresh cached roster remains
+    -- valid and the UI should never turn red merely because another request
+    -- was skipped.
+    local db = self:GetGuildDB()
+    if manual and db and tonumber(db.lastScan) and self:Now() - tonumber(db.lastScan) < 30 then
+        self:SetOperationState156("ROSTER", "DONE", "Roster already updated recently: " .. tostring(db.lastTotal or 0), 3, { source = "roster", manual = true })
+    elseif manual then
+        self:SetOperationState156("ROSTER", "IDLE", "Roster request was coalesced; try again in a moment", nil, { source = "roster", manual = true })
+    end
+    return false
 end
 
 function OTLGM:Scan(reason)
-    local ok, a, b, c = pcall(BaseScan156, self, reason)
+    self.runtime = self.runtime or {}
+    self.runtime.rosterMetrics180 = self.runtime.rosterMetrics180 or { fullScans = 0, targetedRefreshes = 0, reasons = {} }
+    local metrics = self.runtime.rosterMetrics180
+    local scanReason = tostring(reason or "INTERNAL")
+    metrics.fullScans = (tonumber(metrics.fullScans) or 0) + 1
+    metrics.reasons[scanReason] = (tonumber(metrics.reasons[scanReason]) or 0) + 1
+    metrics.lastFullScanReason = scanReason
+    metrics.lastFullScanAt = self:Now()
+    local ok, a, b, c = pcall(PreviousScan156, self, reason)
     if not ok then
         self:SetOperationState156("ROSTER", "ERROR", tostring(a), 6)
         error(a)
@@ -318,21 +357,39 @@ function OTLGM:Scan(reason)
     return a, b, c
 end
 
-function OTLGM:_Stage_Quality156_RequestCraftingSync_2(force)
+function OTLGM.__impl180.Stage_Quality156_RequestCraftingSync_2__impl1(self, force, manual)
     local state = self:GetOperationState156("CRAFTING")
-    if state.state == "WORKING" then if self.SetStatus then self:SetStatus("Crafting synchronization is already running.") end return false end
-    local ok = BaseRequestCraftingSync156(self, force)
-    if ok then self:SetOperationState156("CRAFTING", "WORKING", "Waiting for profession snapshots")
-    else self:SetOperationState156("CRAFTING", "ERROR", "No synchronization request was started", 4) end
+    if state.state == "WORKING" then
+        if manual and self.SetStatus and self.ui and self.ui.currentPage == "professions" then self:SetStatus("Crafting synchronization is already running.") end
+        return false
+    end
+    local ok = PreviousRequestCraftingSync156(self, force, manual)
+    if ok then
+        self:SetOperationState156("CRAFTING", "WORKING", "Waiting for profession snapshots", nil, { source = "crafting", manual = manual })
+    elseif manual then
+        if self.HasCompatibleSyncPeerR2 and not self:HasCompatibleSyncPeerR2() then
+            self:SetOperationState156("CRAFTING", "IDLE", "No compatible 1.8 profession peer is online; cached recipes were kept", nil, { source = "crafting", manual = true })
+        else
+            self:SetOperationState156("CRAFTING", "IDLE", "Crafting synchronization was coalesced or throttled", nil, { source = "crafting", manual = true })
+        end
+    end
     return ok
 end
 
 function OTLGM:RequestPveSync(force)
     local state = self:GetOperationState156("PVE")
     if state.state == "WORKING" then if self.SetStatus then self:SetStatus("PvE synchronization is already running.") end return false end
-    local ok = BaseRequestPveSync156(self, force)
-    if ok then self:SetOperationState156("PVE", "WORKING", "Requesting raid, group and application data")
-    else self:SetOperationState156("PVE", "ERROR", "No synchronization request was started", 4) end
+    local ok = PreviousRequestPveSync156(self, force)
+    if ok then
+        self:SetOperationState156("PVE", "WORKING", "Syncing raid, group and application data")
+    else
+        -- A throttled background request or a character outside a guild is a
+        -- neutral state, not a synchronization error and never a red badge.
+        local pve = self:EnsurePveDB()
+        if not pve or (tonumber(pve.lastConfirmedSync180) or 0) <= 0 then
+            self:SetOperationState156("PVE", "IDLE", "Not synchronized yet")
+        end
+    end
     return ok
 end
 
@@ -525,7 +582,7 @@ function OTLGM:GetSharedActivityStats156(days)
 end
 
 function OTLGM:GetActivitySummary(days)
-    local result = BaseGetActivitySummary156(self, days)
+    local result = PreviousGetActivitySummary156(self, days)
     local shared = self:GetSharedActivityStats156(days or 7)
     if shared.samples > 0 then
         result.average = shared.average
@@ -538,18 +595,20 @@ function OTLGM:GetActivitySummary(days)
 end
 
 function OTLGM:GetActivityHeatmap()
-    local matrix, maxValue = BaseGetActivityHeatmap156(self)
+    local matrix, maxValue = PreviousGetActivityHeatmap156(self)
     local shared = self:EnsureSharedActivity156()
     if not shared then return matrix, maxValue end
     local sums, counts = {}, {}
     local d, s
     for d = 0, 6 do sums[d] = {} counts[d] = {} for s = 0, 7 do sums[d][s] = 0 counts[d][s] = 0 end end
     local ts, item, value, weekday, hour, slot
+    local serverOffset180 = self.GetServerOffsetSeconds180 and self:GetServerOffsetSeconds180(self:Now()) or 0
     for ts, item in pairs(shared.buckets or {}) do
         if tonumber(ts) >= self:Now() - (30 * 86400) and item.count and item.count > 0 then
             value = QMedianActivity156(item)
-            weekday = tonumber(date("%w", tonumber(ts))) or 0
-            hour = tonumber(date("%H", tonumber(ts))) or 0
+            local serverTs180 = tonumber(ts) + serverOffset180
+            weekday = tonumber(date("%w", serverTs180)) or 0
+            hour = tonumber(date("%H", serverTs180)) or 0
             slot = math.floor(hour / 3)
             sums[weekday][slot] = sums[weekday][slot] + value
             counts[weekday][slot] = counts[weekday][slot] + 1
@@ -564,8 +623,8 @@ function OTLGM:GetActivityHeatmap()
     return matrix, maxValue
 end
 
-function OTLGM:BuildActivityPage(page)
-    BaseBuildActivityPage156(self, page)
+function OTLGM.__impl180.BuildActivityPage__impl1(self, page)
+    PreviousBuildActivityPage156(self, page)
     self.ui.activitySync156 = QButton(page, "Sync Shared Activity", 348, -502, 172, 28, function()
         if OTLGM:RequestSharedActivitySync156(true) then
             OTLGM:SetOperationState156("ACTIVITY", "WORKING", "Requesting shared online intervals")
@@ -577,8 +636,8 @@ function OTLGM:BuildActivityPage(page)
     self.ui.activityCoverage156 = nil
 end
 
-function OTLGM:RefreshActivityPage()
-    BaseRefreshActivityPage156(self)
+function OTLGM.__impl180.RefreshActivityPage__impl1(self)
+    PreviousRefreshActivityPage156(self)
     local summary = self:GetActivitySummary(7)
     if self.ui and self.ui.activityCards and self.ui.activityCards.average then
         local coverage = tonumber(summary.sharedCoverage156) or 0
@@ -643,20 +702,20 @@ function OTLGM:RepairCraftingProfessionIndex156(craft)
     craft.professionIndexVersion156 = 1
 end
 
-function OTLGM:_Stage_Quality156_EnsureCraftingDB_2()
-    local craft = BaseEnsureCraftingDB156(self)
+function OTLGM.__impl180.Stage_Quality156_EnsureCraftingDB_2__impl1(self)
+    local craft = PreviousEnsureCraftingDB156(self)
     if craft and craft.professionIndexVersion156 ~= 1 then self:RepairCraftingProfessionIndex156(craft) end
     return craft
 end
 
-function OTLGM:_Stage_Quality156_GetCraftingSearchResults_3(query, professionFilter)
+function OTLGM.__impl180.Stage_Quality156_GetCraftingSearchResults_3__impl1(self, query, professionFilter)
     local craft = self:EnsureCraftingDB()
     professionFilter = self:NormalizeProfessionKey156(professionFilter or "ALL")
-    return BaseGetCraftingSearchResults156(self, query, professionFilter)
+    return PreviousGetCraftingSearchResults156(self, query, professionFilter)
 end
 
-function OTLGM:_Stage_Quality156_BuildNextProfessionsPage_2(page)
-    BaseBuildNextProfessionsPage156(self, page)
+function OTLGM.__impl180.Stage_Quality156_BuildNextProfessionsPage_2__impl1(self, page)
+    PreviousBuildNextProfessionsPage156(self, page)
     self:BuildProfessionQOL156(page)
 end
 
@@ -694,7 +753,7 @@ function OTLGM:BuildProfessionQOL156(page)
             if row and row.categoryKey156 then
                 OTLGM_DB.settings.craftingCategory153 = row.categoryKey156
                 OTLGM.ui.craftingRecipeOffset = 0
-                OTLGM.ui.craftingSelectedRecipe = nil
+                OTLGM.ui.craftingSelectedRecipeKey = nil
                 OTLGM.ui.craftingCategoryPanel156:Hide()
                 OTLGM:RefreshProfessionsPage()
             end
@@ -850,8 +909,8 @@ function OTLGM:RefreshProfessionQOL156()
     QSetButton(self.ui.craftingMoreRecipe156, "Link Recipe", recipeLink ~= nil, "The crafter must reopen this profession to share its recipe link.")
 end
 
-function OTLGM:_Stage_Quality156_RefreshCraftingRecipesPanel_3(summary)
-    BaseRefreshCraftingRecipesPanel156(self, summary)
+function OTLGM.__impl180.Stage_Quality156_RefreshCraftingRecipesPanel_3__impl1(self, summary)
+    PreviousRefreshCraftingRecipesPanel156(self, summary)
     self:RefreshProfessionQOL156()
     if self.RefreshProfessionExperience170 then self:RefreshProfessionExperience170() end
     local craft = self:EnsureCraftingDB()
@@ -900,7 +959,7 @@ function OTLGM:RefreshNearestRaid155()
     return nearest
 end
 
-function OTLGM:_Stage_Quality156_SerializePveRaid_2(record)
+function OTLGM.__impl180.Stage_Quality156_SerializePveRaid_2__impl1(self, record)
     -- Compact enough for the Vanilla 250-byte addon-message limit.
     return table.concat({
         self.pveProtocol, "RAID", QSafe(record.id, 30), tostring(record.rev or 1), tostring(record.ts or 0), tostring(record.startTs or 0),
@@ -910,8 +969,8 @@ function OTLGM:_Stage_Quality156_SerializePveRaid_2(record)
     }, "^")
 end
 
-function OTLGM:_Stage_Quality156_ApplyRemotePveRaid_3(fields)
-    local ok = BaseApplyRemotePveRaid156(self, fields)
+function OTLGM.__impl180.Stage_Quality156_ApplyRemotePveRaid_3__impl1(self, fields)
+    local ok = PreviousApplyRemotePveRaid156(self, fields)
     if not ok then return ok end
     local pve = self:EnsureRaid156DB()
     local id = fields[3] or ""
@@ -921,6 +980,15 @@ function OTLGM:_Stage_Quality156_ApplyRemotePveRaid_3(fields)
         record.gatherHour = tonumber(fields[17]) or record.gatherHour
         record.gatherMinute = tonumber(fields[18]) or record.gatherMinute
         record.cancelledAt = tonumber(fields[19]) or record.cancelledAt
+        -- Optional C6 fields are appended to the legacy RAID packet.  They are
+        -- deliberately short and backward-compatible; RMETA1 remains the full
+        -- authoritative metadata record.
+        if fields[20] == "PRIVATE_TEAM" or fields[20] == "GUILD_VISIBLE" or fields[20] == "OPEN_GUILD" then
+            record.visibility180 = fields[20]
+        end
+        if fields[21] == "ASSIGNED" or fields[21] == "ASSIGNED_RESERVES" or fields[21] == "ENTIRE_TEAM" or fields[21] == "ALL_GUILD" then
+            record.notifyAudience180 = fields[21]
+        end
         if record.status == "CANCELLED" then
             if pve.raid and pve.raid.id == id then pve.raid = nil end
             pve.cancelledRaids156[id] = record
@@ -931,7 +999,7 @@ function OTLGM:_Stage_Quality156_ApplyRemotePveRaid_3(fields)
     return true
 end
 
-function OTLGM:_Stage_Quality156_PublishPveRaidEvent156_1(data, existingId)
+function OTLGM.__impl180.Stage_Quality156_PublishPveRaidEvent156_1__impl1(self, data, existingId)
     if not self:IsOfficerMode() then return false, "Only leadership can publish raid events." end
     local pve = self:EnsureRaid156DB()
     if not pve then return false, "Guild data is not ready." end
@@ -1009,7 +1077,7 @@ function OTLGM:DeletePveRaid156(id)
     return true
 end
 
-function OTLGM:PurgePveData(silent)
+function OTLGM.__impl180.PurgePveData__impl1(self, silent)
     local pve = self:EnsureRaid156DB()
     if not pve then return false end
     local now = self:Now()
@@ -1025,13 +1093,13 @@ function OTLGM:PurgePveData(silent)
     end
     for id, record in pairs(pve.cancelledRaids156 or {}) do if (record.cancelledAt or record.ts or 0) < now - (14 * 86400) then pve.cancelledRaids156[id] = nil end end
     for id, record in pairs(pve.pastRaids156 or {}) do if (record.startTs or 0) < now - (30 * 86400) then pve.pastRaids156[id] = nil end end
-    local changed = BasePurgePveData156(self, silent)
+    local changed = PreviousPurgePveData156(self, silent)
     -- Base code may remove old tombstones too early. Keep raid tombstones for 30 days.
     for id, record in pairs(pve.deleted or {}) do if record.kind == "RAID" and record.ts and record.ts >= now - (30 * 86400) then pve.deleted[id] = record end end
     return changed
 end
 
-function OTLGM:_Stage_Quality156_GetRaidList156_1(filter)
+function OTLGM.__impl180.Stage_Quality156_GetRaidList156_1__impl1(self, filter)
     local pve = self:EnsureRaid156DB()
     local list = {}
     local source = filter == "CANCELLED" and pve.cancelledRaids156 or (filter == "PAST" and pve.pastRaids156 or pve.raids)
@@ -1046,7 +1114,7 @@ end
 
 local function QDateLabel156(self, raid)
     if not raid or not raid.startTs then return "Time TBA" end
-    local label = date("%a %d %b", raid.startTs) .. " - " .. string.format("%02d:%02d", tonumber(raid.stHour) or 0, tonumber(raid.stMinute) or 0) .. " ST"
+    local label = (self.FormatServerDate180 and self:FormatServerDate180(raid.startTs, "%a %d %b") or date("%a %d %b", raid.startTs)) .. " - " .. string.format("%02d:%02d", tonumber(raid.stHour) or 0, tonumber(raid.stMinute) or 0) .. " ST"
     if raid.recurring == "WEEKLY" then label = label .. " - Weekly" end
     return label
 end
@@ -1057,11 +1125,11 @@ function OTLGM:GetPveRecordRevision(id)
         if pve.cancelledRaids156[id] then return tonumber(pve.cancelledRaids156[id].rev) or 0 end
         if pve.pastRaids156[id] then return tonumber(pve.pastRaids156[id].rev) or 0 end
     end
-    return BaseGetPveRecordRevision156(self, id)
+    return PreviousGetPveRecordRevision156(self, id)
 end
 
 function OTLGM:ApplyRemotePveDelete(kind, id, rev)
-    local result = BaseApplyRemotePveDelete156(self, kind, id, rev)
+    local result = PreviousApplyRemotePveDelete156(self, kind, id, rev)
     if kind == "RAIDDEL" then
         local pve = self:EnsureRaid156DB()
         if pve then
@@ -1075,8 +1143,8 @@ function OTLGM:ApplyRemotePveDelete(kind, id, rev)
     return result
 end
 
-function OTLGM:_Stage_Quality156_QueuePveSyncResponse_2(target)
-    BaseQueuePveSyncResponse156(self, target)
+function OTLGM.__impl180.Stage_Quality156_QueuePveSyncResponse_2__impl1(self, target)
+    PreviousQueuePveSyncResponse156(self, target)
     local pve = self:EnsureRaid156DB()
     local id, record
     for id, record in pairs(pve and pve.cancelledRaids156 or {}) do self:QueuePvePayload(self:SerializePveRaid(record), "WHISPER", target) end
@@ -1087,8 +1155,8 @@ function OTLGM:_Stage_Quality156_QueuePveSyncResponse_2(target)
     end
 end
 
-function OTLGM:_Stage_Quality156_BuildPvePage_2(page)
-    BaseBuildPvePage156(self, page)
+function OTLGM.__impl180.Stage_Quality156_BuildPvePage_2__impl1(self, page)
+    PreviousBuildPvePage156(self, page)
     self:BuildRaidPlanner156(page)
 end
 
@@ -1120,9 +1188,12 @@ function OTLGM:BuildRaidPlanner156(page)
     self.ui.raidCreate156 = QButton(root, "+ Create Raid", 582, 0, 136, 28, function() OTLGM:OpenRaidEditor156(nil) end, "confirm")
 
     local list = QPanel(root, 0, -38, 276, 386)
+    self.ui.raidListPanel180 = list
     QText(list, "GameFontNormalSmall", "RAID SCHEDULE", 10, -10, 250, "LEFT")
     self.ui.raidRows156 = {}
-    for i = 1, 7 do
+    self.ui.raidVisibleRows180 = 7
+    self.ui.raidRowPool180 = 12
+    for i = 1, self.ui.raidRowPool180 do
         local row = QButton(list, "", 8, -32 - ((i - 1) * 42), 260, 38, function()
             if this.raid156 then OTLGM.ui.raidSelected156 = this.raid156.id OTLGM:RefreshRaidPlanner156() end
         end, "normal")
@@ -1154,6 +1225,7 @@ function OTLGM:BuildRaidPlanner156(page)
     end)
 
     local detail = QPanel(root, 286, -38, 432, 386)
+    self.ui.raidDetailsPanel180 = detail
     self.ui.raidDetailTitle156 = QWrapped(detail, "GameFontNormalLarge", "Select a raid", 16, -16, 396, 42)
     self.ui.raidDetailTime156 = QText(detail, "GameFontNormal", "", 16, -64, 396, "LEFT")
     self.ui.raidDetailGather156 = QText(detail, "GameFontNormalSmall", "", 16, -88, 396, "LEFT")
@@ -1214,7 +1286,7 @@ function OTLGM:GetRaidById156(id)
     return pve.raids[id] or pve.cancelledRaids156[id] or pve.pastRaids156[id]
 end
 
-function OTLGM:BuildRaidEditor156()
+function OTLGM.__impl180.BuildRaidEditor156__impl1(self)
     if self.ui.raidEditor156 then return end
     local dialog = QPanel(self.ui.main, 0, 0, 680, 500)
     dialog:ClearAllPoints()
@@ -1259,7 +1331,7 @@ function OTLGM:BuildRaidEditor156()
     self.ui.raidEditorCancel156 = QButton(dialog, "Cancel", 530, -438, 128, 34, function() dialog:Hide() end, "normal")
 end
 
-function OTLGM:_Stage_Quality156_OpenRaidEditor156_1(raid, duplicate)
+function OTLGM.__impl180.Stage_Quality156_OpenRaidEditor156_1__impl1(self, raid, duplicate)
     if not self.ui.raidEditor156 then return end
     local dialog = self.ui.raidEditor156
     local editing = raid and not duplicate
@@ -1282,13 +1354,14 @@ function OTLGM:_Stage_Quality156_OpenRaidEditor156_1(raid, duplicate)
     self:ShowModal152(dialog)
 end
 
-function OTLGM:_Stage_Quality156_RefreshRaidPlanner156_1()
+function OTLGM.__impl180.Stage_Quality156_RefreshRaidPlanner156_1__impl1(self)
     if not self.ui or not self.ui.raidPlanner156 then return end
     local filter = self.ui.raidFilter156 or "UPCOMING"
     local list = self:GetRaidList156(filter)
-    local rowCount = 7
+    local rowCount = math.max(1, tonumber(self.ui.raidVisibleRows180) or 7)
     local offset = math.max(0, tonumber(self.ui.raidOffset156) or 0)
-    if offset >= table.getn(list) and offset > 0 then offset = math.max(0, math.floor(math.max(0, table.getn(list) - 1) / rowCount) * rowCount) end
+    local maximumOffset = math.max(0, table.getn(list) - rowCount)
+    if offset > maximumOffset then offset = maximumOffset end
     self.ui.raidOffset156 = offset
     local selected
     local i, row, raid
@@ -1299,9 +1372,9 @@ function OTLGM:_Stage_Quality156_RefreshRaidPlanner156_1()
     QSetButton(self.ui.raidTabs156.CANCELLED, "Cancelled", true, nil, filter == "CANCELLED")
     QSetButton(self.ui.raidTabs156.PAST, "Past", true, nil, filter == "PAST")
     QSetButton(self.ui.raidCreate156, "+ Create Raid", self:IsOfficerMode(), "Only leadership can create raid events.")
-    for i = 1, rowCount do
+    for i = 1, table.getn(self.ui.raidRows156 or {}) do
         row = self.ui.raidRows156[i]
-        raid = list[offset + i]
+        raid = i <= rowCount and list[offset + i] or nil
         if raid then
             row.raid156 = raid
             row.label156:SetText((raid.status == "CANCELLED" and "CANCELLED - " or "") .. (raid.name or "Guild Raid"))
@@ -1355,22 +1428,22 @@ function OTLGM:_Stage_Quality156_RefreshRaidPlanner156_1()
     if self:IsRaidNoticeEligible() then self.ui.raidNoRole156:Hide() else self.ui.raidNoRole156:Show() end
 end
 
-function OTLGM:_Stage_Quality156_RefreshPvePage_3()
-    BaseRefreshPvePage156(self)
+function OTLGM.__impl180.Stage_Quality156_RefreshPvePage_3__impl1(self)
+    PreviousRefreshPvePage156(self)
     self:RefreshRaidPlanner156()
-    local pveState = self:GetOperationState156("PVE")
-    if pveState.state == "WORKING" and self.lastPveSyncRequestAt and self:Now() - self.lastPveSyncRequestAt > 8 then self:SetOperationState156("PVE", "DONE", "PvE data synchronized", 4) end
+    -- Success is set only by an actual SYNCACK or a fresh remote PvE payload.
+    -- A timer must never manufacture a synchronized state.
 end
 
 -- ---------------------------------------------------------------------------
 -- Guild chat context menu persistence
 -- ---------------------------------------------------------------------------
 
-function OTLGM:_Stage_Quality156_RefreshGuildChatPage_2()
+function OTLGM.__impl180.Stage_Quality156_RefreshGuildChatPage_2__impl1(self)
     local menu = self.ui and self.ui.chatNameMenu
     local wasVisible = menu and menu:IsVisible()
     local target = menu and menu.targetName
-    local ok = BaseRefreshGuildChatPage156(self)
+    local ok = PreviousRefreshGuildChatPage156(self)
     if wasVisible and menu and target and (OTLGM_DB.settings.guildChatView or "GUILD") ~= "BOARD" then
         menu.targetName = target
         menu:Show()
@@ -1382,21 +1455,23 @@ end
 -- Heartbeat hook called from Events.lua
 -- ---------------------------------------------------------------------------
 
-function OTLGM:_Stage_Quality156_ProcessQuality156Timers_1()
+function OTLGM.__impl180.Stage_Quality156_ProcessQuality156Timers_1__impl1(self)
     if self:IsUIVisible() then self:RefreshOperationButtons156() end
     local rosterState = self:GetOperationState156("ROSTER")
-    if rosterState.state == "WORKING" and rosterState.ts and self:Now() - rosterState.ts > 15 then
+    if rosterState.state == "WORKING" and rosterState.ts and self:Now() - rosterState.ts >= 15 then
+        local reason = tostring(self.pendingScanReason or "")
+        local manual = reason == "MANUAL" or reason == "CONFIRM"
         self.pendingScan = false
         self.pendingScanReason = nil
-        self:SetOperationState156("ROSTER", "ERROR", "Roster update timed out. Try again.", 6)
+        if manual then self:SetOperationState156("ROSTER", "ERROR", "Roster update timed out. Try again.", 6, { source = "roster", manual = true })
+        else self:SetOperationState156("ROSTER", "IDLE", "Background roster refresh timed out; cached roster kept", nil, { source = "roster", manual = false }) end
     end
-    local pveState = self:GetOperationState156("PVE")
-    if pveState.state == "WORKING" and self.lastPveSyncRequestAt and self:Now() - self.lastPveSyncRequestAt > 8 then
-        self:SetOperationState156("PVE", "DONE", "PvE synchronization completed", 4)
-    end
+    -- RC3: PvE synchronization is truthful. A timer may keep the operation
+    -- pending, but only ConfirmPveSyncResponse180 (SYNCACK or fresh remote PvE
+    -- payload) is allowed to publish DONE. ProcessPveSyncState180 owns timeout.
     local activityState = self:GetOperationState156("ACTIVITY")
     local shared = activityState.state == "WORKING" and self:EnsureSharedActivity156() or nil
-    if shared and self:Now() - (shared.lastSync or 0) > 8 then
+    if shared and self:Now() - (shared.lastSync or 0) >= 8 then
         local received = tonumber(shared.syncReceived156) or 0
         local detail = received > 0 and ("Activity sync complete: " .. tostring(received) .. " daily packet(s)") or "Activity sync complete - no new samples received"
         self:SetOperationState156("ACTIVITY", "DONE", detail, 4)
@@ -1406,13 +1481,8 @@ function OTLGM:_Stage_Quality156_ProcessQuality156Timers_1()
     if state.state == "WORKING" and craft and craft.syncState and not craft.syncState.active then
         self:SetOperationState156("CRAFTING", "DONE", "Received " .. tostring(craft.syncState.received or 0) .. " profession snapshots", 4)
     end
-    self.activityTimer156 = (self.activityTimer156 or 0) + 1
-    if self.activityTimer156 >= 60 then
-        self.activityTimer156 = 0
-        local shared = self:EnsureSharedActivity156()
-        local bucket = self:ActivityBucket156(self:Now())
-        if shared and bucket > (shared.lastBroadcast or 0) then self:RecordSharedActivity156(false) end
-    end
+    -- C5-R4 final: shared activity no longer uses a perpetual minute counter.
+    -- Login/manual/event paths already publish meaningful changes; idle must sleep.
 end
 
 OTLGM:RegisterModule("Coordination", { layer = "integration", generation = "1.5.6" })

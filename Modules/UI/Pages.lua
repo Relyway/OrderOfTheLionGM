@@ -4,16 +4,16 @@
 OTLGM.nextUILoaded = true
 OTLGM.nextUIVersion = OTLGM.version
 
-local BaseBuildUI = OTLGM._Stage_UI_BuildUI_1
-local BaseRefreshNavigation = OTLGM._Stage_UI_RefreshNavigation_1
-local BaseShowPage = OTLGM._Stage_UI_ShowPage_1
-local BaseRefreshVisiblePage = OTLGM._Stage_UI_RefreshVisiblePage_1
-local BaseRefreshHomePage = OTLGM._Stage_UI_RefreshHomePage_1
-local BaseRefreshOverviewPage = OTLGM._Stage_UI_RefreshOverviewPage_1
-local BaseRefreshPvePage = OTLGM._Stage_UI_RefreshPvePage_1
-local BaseRefreshSettingsPage = OTLGM._Stage_UI_RefreshSettingsPage_1
-local BaseRefreshAll = OTLGM._Stage_UI_RefreshAll_1
-local BaseRefreshWizard = OTLGM._Stage_UI_RefreshWizard_1
+local PreviousBuildUI = OTLGM.__impl180.Stage_UI_BuildUI_1__impl1
+local PreviousRefreshNavigation = OTLGM.__impl180.Stage_UI_RefreshNavigation_1__impl1
+local PreviousShowPage = OTLGM.__impl180.Stage_UI_ShowPage_1__impl1
+local PreviousRefreshVisiblePage = OTLGM.__impl180.Stage_UI_RefreshVisiblePage_1__impl1
+local PreviousRefreshHomePage = OTLGM.__impl180.Stage_UI_RefreshHomePage_1__impl1
+local PreviousRefreshOverviewPage = OTLGM.__impl180.Stage_UI_RefreshOverviewPage_1__impl1
+local PreviousRefreshPvePage = OTLGM.__impl180.Stage_UI_RefreshPvePage_1__impl1
+local PreviousRefreshSettingsPage = OTLGM.__impl180.Stage_UI_RefreshSettingsPage_1__impl1
+local PreviousRefreshAll = OTLGM.__impl180.Stage_UI_RefreshAll_1__impl1
+local PreviousRefreshWizard = OTLGM.__impl180.Stage_UI_RefreshWizard_1__impl1
 
 local N_PAGE_WIDTH = 756
 local N_PAGE_HEIGHT = 532
@@ -214,7 +214,22 @@ local function NEdit(parent, name, x, y, width, height, multiline)
     edit:SetBackdropColor(0.012, 0.012, 0.012, 0.995)
     edit:SetBackdropBorderColor(0.38, 0.30, 0.18, 1)
     if OTLGM.ApplyEditSkin then OTLGM:ApplyEditSkin(edit) end
-    edit:SetScript("OnEscapePressed", function() this:ClearFocus() end)
+    if OTLGM.UI and OTLGM.UI.ApplyEditBox then
+        OTLGM.UI:ApplyEditBox(edit, {
+            multiline = multiline and true or false,
+            placeholder = "",
+            closeOnEmptyEscape = true,
+        })
+    else
+        edit:SetTextColor(0.95, 0.92, 0.84)
+        edit:SetHighlightColor(0.72, 0.50, 0.16, 0.55)
+        edit:SetScript("OnEscapePressed", function()
+            local text = this:GetText() or ""
+            if text ~= "" then this:SetText("") return end
+            if this:HasFocus() then this:ClearFocus() return end
+            if OTLGM and OTLGM.HandleEscape then OTLGM:HandleEscape() end
+        end)
+    end
     return edit
 end
 
@@ -336,10 +351,11 @@ local function NAttachReactionTooltip(button, targetType, reaction, label, targe
 end
 
 function OTLGM:BuildNextSearchPage(page)
-    NText(page, "GameFontNormalLarge", "Guild Search", 0, -2, 400, "LEFT")
-    NWrapped(page, "GameFontNormalSmall", "Search members, recipes, open groups, crafting requests, Guild Board posts and leadership announcements from one place.", 0, -28, 700, 32)
+    self.ui.globalSearchLegacyTitle = NText(page, "GameFontNormalLarge", "Guild Search", 0, -2, 400, "LEFT")
+    self.ui.globalSearchLegacyHelp = NWrapped(page, "GameFontNormalSmall", "Search members, recipes, open groups, crafting requests, Guild Board posts and leadership announcements from one place.", 0, -28, 700, 32)
 
     local searchBar = NPanel(page, 0, -60, 718, 56, 0.035, 0.030, 0.022)
+    self.ui.globalSearchToolbar180 = searchBar
     self.ui.globalSearchEdit = NEdit(searchBar, "OTLGM_GlobalSearch", 12, -12, 580, 32, false)
     self.ui.globalSearchEdit:SetMaxLetters(64)
     self.ui.globalSearchEdit:SetText(OTLGM_DB.settings.globalSearch or "")
@@ -348,15 +364,17 @@ function OTLGM:BuildNextSearchPage(page)
     self.ui.globalSearchButton = NButton(searchBar, "Search", 602, -12, 104, 32, function() OTLGM:RefreshSearchPage(true) end, "utility")
     self.ui.globalSearchEdit:SetScript("OnEnterPressed", function() this:ClearFocus() OTLGM:RefreshSearchPage(true) end)
     self.ui.globalSearchEdit:SetScript("OnTextChanged", function()
-        OTLGM_DB.settings.globalSearch = this:GetText() or ""
+        OTLGM.ui.globalSearchRuntime180 = this:GetText() or ""
         OTLGM.ui.searchDirty = true
         OTLGM.ui.searchDirtyElapsed = 0
+        if OTLGM.WakeScheduler180 then OTLGM:WakeScheduler180("ui-debounce:search") end
         if OTLGM.ui.globalSearchHint then
             if (this:GetText() or "") == "" then OTLGM.ui.globalSearchHint:Show() else OTLGM.ui.globalSearchHint:Hide() end
         end
     end)
 
     local list = NPanel(page, 0, -126, 718, 376, 0.018, 0.017, 0.015)
+    self.ui.globalSearchList180 = list
     self.ui.globalSearchRows = {}
     local i
     for i = 1, N_SEARCH_ROWS do
@@ -387,49 +405,7 @@ function OTLGM:BuildNextSearchPage(page)
     end)
 end
 
-function OTLGM:OpenGlobalSearchResult(result)
-    if not result then return end
-    if result.type == "MEMBER" then
-        self.ui.selectedMember = result.target
-        if OTLGM_DB and OTLGM_DB.settings then OTLGM_DB.settings.rosterSearch = result.target or "" end
-        if self.ui.rosterSearch then self.ui.rosterSearch:SetText(result.target or "") end
-        self:ShowPage("roster")
-        if self.SelectRosterMember then self:SelectRosterMember(result.target) end
-        return
-    end
-    if result.type == "RECIPE" then
-        OTLGM_DB.settings.craftingSection = "RECIPES"
-        OTLGM_DB.settings.craftingSearch = result.title or ""
-        self.ui.craftingSelectedRecipe = result.target
-        self:ShowPage("professions")
-        return
-    end
-    if result.type == "CRAFT REQUEST" then
-        OTLGM_DB.settings.craftingSection = "REQUESTS"
-        self.ui.craftingSelectedRequest = result.target
-        self:ShowPage("professions")
-        return
-    end
-    if result.type == "GROUP" then
-        OTLGM_DB.settings.pveSection = "GROUPS"
-        self.ui.pveSelectedRequest = result.target
-        self:ShowPage("pve")
-        if self.ShowPveSection then self:ShowPveSection("GROUPS") end
-        return
-    end
-    if result.type == "BOARD" then
-        self:ShowPage("guildchat")
-        self.ui.guildBoardSelected152 = result.target
-        if self.SelectGuildChatView152 then self:SelectGuildChatView152("BOARD") end
-        return
-    end
-    if result.type == "ANNOUNCEMENT" then
-        self:ShowPage("home")
-        if result.target and self.OpenAnnouncementReader152 then self:OpenAnnouncementReader152(result.target) end
-    end
-end
-
-function OTLGM:RefreshSearchPage(force)
+function OTLGM.__impl180.RefreshSearchPage__impl1(self, force)
     if not self.ui or not self.ui.globalSearchRows then return end
     local query = self.ui.globalSearchEdit and (self.ui.globalSearchEdit:GetText() or "") or (OTLGM_DB.settings.globalSearch or "")
     local results = {}
@@ -464,7 +440,7 @@ function OTLGM:RefreshSearchPage(force)
     NSetEnabled(self.ui.globalSearchNext, offset < maximum, "There are no more results.")
 end
 
-function OTLGM:_Stage_UINext_BuildNextProfessionsPage_1(page)
+function OTLGM.__impl180.Stage_UINext_BuildNextProfessionsPage_1__impl1(self, page)
     NText(page, "GameFontNormalLarge", "Professions", 0, -2, 390, "LEFT")
     NWrapped(page, "GameFontNormalSmall", "Find guild crafters, scan known recipes and ask the guild for help without searching manually in chat.", 0, -28, 700, 32)
 
@@ -477,8 +453,8 @@ function OTLGM:_Stage_UINext_BuildNextProfessionsPage_1(page)
     self.ui.craftingNetworkText:SetTextColor(0.58, 0.58, 0.58)
     self.ui.craftingSyncButton = NButton(page, "Sync Now", 614, -58, 104, 30, function()
         OTLGM:RequestAddonUserPing()
-        OTLGM:RequestCraftingSync(true)
-        OTLGM:SetStatus("Requesting current crafting data from online addon users...")
+        OTLGM:RequestCraftingSync(true, true)
+        OTLGM:SetStatus("Requesting current crafting data from online addon users...", nil, { source = "crafting", manual = true })
     end, "utility")
 
     self.ui.craftingPanels = {}
@@ -488,7 +464,7 @@ function OTLGM:_Stage_UINext_BuildNextProfessionsPage_1(page)
     self:ShowCraftingSection(OTLGM_DB.settings.craftingSection or "RECIPES")
 end
 
-function OTLGM:_Stage_UINext_BuildRecipesPanel_1(page)
+function OTLGM.__impl180.Stage_UINext_BuildRecipesPanel_1__impl1(self, page)
     local panel = CreateFrame("Frame", nil, page)
     panel:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -98)
     panel:SetWidth(718)
@@ -506,7 +482,7 @@ function OTLGM:_Stage_UINext_BuildRecipesPanel_1(page)
         local button = NButton(filters, definition.label, 8, -30 - ((i - 1) * 26), 138, 24, function()
             OTLGM_DB.settings.craftingProfession = key
             OTLGM.ui.craftingRecipeOffset = 0
-            OTLGM.ui.craftingSelectedRecipe = nil
+            OTLGM.ui.craftingSelectedRecipeKey = nil
             OTLGM:RefreshProfessionsPage()
         end, "normal")
         NIcon(button, definition.icon or "Interface\\Icons\\INV_Misc_QuestionMark", 14)
@@ -536,10 +512,11 @@ function OTLGM:_Stage_UINext_BuildRecipesPanel_1(page)
         OTLGM:RefreshProfessionsPage()
     end, "utility")
     self.ui.craftingSearchEdit:SetScript("OnTextChanged", function()
-        OTLGM_DB.settings.craftingSearch = this:GetText() or ""
+        OTLGM.ui.craftingSearchRuntime180 = this:GetText() or ""
         if (this:GetText() or "") == "" then OTLGM.ui.craftingSearchHint:Show() else OTLGM.ui.craftingSearchHint:Hide() end
         OTLGM.ui.craftingSearchDirty = true
         OTLGM.ui.craftingSearchElapsed = 0
+        if OTLGM.WakeScheduler180 then OTLGM:WakeScheduler180("ui-debounce:professions") end
     end)
     self.ui.craftingSearchEdit:SetScript("OnEnterPressed", function() this:ClearFocus() OTLGM.ui.craftingRecipeOffset = 0 OTLGM:RefreshProfessionsPage() end)
 
@@ -547,7 +524,7 @@ function OTLGM:_Stage_UINext_BuildRecipesPanel_1(page)
     for i = 1, N_RECIPE_ROWS do
         local row = NButton(recipes, "", 10, -48 - ((i - 1) * 32), 304, 30, function()
             if this.recipeData then
-                OTLGM.ui.craftingSelectedRecipe = this.recipeData.key
+                OTLGM.ui.craftingSelectedRecipeKey = this.recipeData.key
                 OTLGM.ui.craftingSelectedCrafter = this.recipeData.crafters and this.recipeData.crafters[1] and this.recipeData.crafters[1].name or nil
                 OTLGM:RefreshProfessionsPage()
             end
@@ -643,9 +620,9 @@ function OTLGM:_Stage_UINext_BuildRecipesPanel_1(page)
     end, "confirm")
 end
 
--- Search fields share the addon's single heartbeat instead of installing an
+-- Search fields share the addon's shared keyed scheduler instead of installing an
 -- OnUpdate handler on every searchable panel.
-function OTLGM:ProcessUIDebounce(elapsed)
+function OTLGM.__impl180.ProcessUIDebounce__impl1(self, elapsed)
     if self.ProcessExperienceMotion170 then self:ProcessExperienceMotion170(elapsed) end
     if not self:IsUIVisible() then return end
     elapsed = tonumber(elapsed) or 0
@@ -664,8 +641,37 @@ function OTLGM:ProcessUIDebounce(elapsed)
             self.ui.craftingSearchDirty = nil
             self.ui.craftingSearchElapsed = 0
             self.ui.craftingRecipeOffset = 0
-            self.ui.craftingSelectedRecipe = nil
+            self.ui.craftingSelectedRecipeKey = nil
             self:RefreshProfessionsPage()
+        end
+    end
+    if self.ui.currentPage == "achievements" and self.ui.achievementSearchDirty180 then
+        self.ui.achievementSearchElapsed180 = (self.ui.achievementSearchElapsed180 or 0) + elapsed
+        if self.ui.achievementSearchElapsed180 >= 0.25 then
+            self.ui.achievementSearchDirty180 = nil
+            self.ui.achievementSearchElapsed180 = 0
+            self.ui.achievementOffset174 = 0
+            self.ui.achievementFocus174 = nil
+            self.ui.achievementFilteredCache180 = nil
+            self:RefreshAchievements174()
+        end
+    end
+    if self.ui.currentPage == "roster" and self.ui.rosterSearchDirty180 then
+        self.ui.rosterSearchElapsed180 = (self.ui.rosterSearchElapsed180 or 0) + elapsed
+        if self.ui.rosterSearchElapsed180 >= 0.25 then
+            self.ui.rosterSearchDirty180 = nil
+            self.ui.rosterSearchElapsed180 = 0
+            self.ui.rosterOffset = 0
+            self:RefreshRosterPage()
+        end
+    end
+    if self.ui.currentPage == "history" and self.ui.historySearchDirty180 then
+        self.ui.historySearchElapsed180 = (self.ui.historySearchElapsed180 or 0) + elapsed
+        if self.ui.historySearchElapsed180 >= 0.25 then
+            self.ui.historySearchDirty180 = nil
+            self.ui.historySearchElapsed180 = 0
+            self.ui.historyOffset = 0
+            self:RefreshHistoryPage()
         end
     end
 end
@@ -689,7 +695,7 @@ function OTLGM:BuildCraftingRequestsPanel(page)
     local i
     for i = 1, N_REQUEST_ROWS do
         local row = NButton(list, "", 10, -48 - ((i - 1) * 36), 318, 34, function()
-            if this.requestData then OTLGM.ui.craftingSelectedRequest = this.requestData.id OTLGM:RefreshProfessionsPage() end
+            if this.requestData then OTLGM.ui.craftingSelectedRequestShell = this.requestData.id OTLGM:RefreshProfessionsPage() end
         end, "normal")
         row.text:Hide()
         row.itemText = NText(row, "GameFontNormalSmall", "", 8, -7, 196, "LEFT")
@@ -716,9 +722,9 @@ function OTLGM:BuildCraftingRequestsPanel(page)
     self.ui.craftingReactionButtons.HELP = NButton(detail, "Can Help", 12, -106, 104, 26, function() OTLGM:ReactToSelectedCraftingRequest("HELP") end, "confirm")
     self.ui.craftingReactionButtons.NEED = NButton(detail, "Need This Too", 124, -106, 112, 26, function() OTLGM:ReactToSelectedCraftingRequest("NEED") end, "normal")
     self.ui.craftingReactionButtons.SEEN = NButton(detail, "Seen", 244, -106, 112, 26, function() OTLGM:ReactToSelectedCraftingRequest("SEEN") end, "utility")
-    NAttachReactionTooltip(self.ui.craftingReactionButtons.HELP, "CRAFT", "HELP", "Can Help", function() return OTLGM.ui.craftingSelectedRequest end)
-    NAttachReactionTooltip(self.ui.craftingReactionButtons.NEED, "CRAFT", "NEED", "Need This Too", function() return OTLGM.ui.craftingSelectedRequest end)
-    NAttachReactionTooltip(self.ui.craftingReactionButtons.SEEN, "CRAFT", "SEEN", "Seen", function() return OTLGM.ui.craftingSelectedRequest end)
+    NAttachReactionTooltip(self.ui.craftingReactionButtons.HELP, "CRAFT", "HELP", "Can Help", function() return OTLGM.ui.craftingSelectedRequestShell end)
+    NAttachReactionTooltip(self.ui.craftingReactionButtons.NEED, "CRAFT", "NEED", "Need This Too", function() return OTLGM.ui.craftingSelectedRequestShell end)
+    NAttachReactionTooltip(self.ui.craftingReactionButtons.SEEN, "CRAFT", "SEEN", "Seen", function() return OTLGM.ui.craftingSelectedRequestShell end)
     NText(detail, "GameFontNormalSmall", "RESPONSES", 12, -148, 180, "LEFT")
     self.ui.craftingResponseRows = {}
     for i = 1, N_RESPONSE_ROWS do
@@ -736,18 +742,18 @@ function OTLGM:BuildCraftingRequestsPanel(page)
     self.ui.craftingReplyButton = NButton(detail, "Reply", 240, -340, 56, 30, function() OTLGM:ReplyToSelectedCraftingRequest(false) end, "utility")
     self.ui.craftingHelpReplyButton = NButton(detail, "Help", 304, -340, 52, 30, function() OTLGM:ReplyToSelectedCraftingRequest(true) end, "confirm")
     self.ui.craftingWhisperAuthorButton = NButton(detail, "Whisper", 12, -378, 76, 28, function()
-        local request = OTLGM:GetCraftingRequestByID(OTLGM.ui.craftingSelectedRequest)
+        local request = OTLGM:GetCraftingRequestByID(OTLGM.ui.craftingSelectedRequestShell)
         if request then OTLGM:OpenGuildChatWhisper(request.author) end
     end, "utility")
     self.ui.craftingShareButton = NButton(detail, "Share to /g", 96, -378, 92, 28, function()
-        local request = OTLGM:GetCraftingRequestByID(OTLGM.ui.craftingSelectedRequest)
+        local request = OTLGM:GetCraftingRequestByID(OTLGM.ui.craftingSelectedRequestShell)
         if request then OTLGM:ShareCraftingRequestToGuildChat(request) OTLGM:SetStatus("Crafting request shared to guild chat with an OTLGM label.") end
     end, "utility")
     self.ui.craftingCloseButton = NButton(detail, "Close / Reopen", 196, -378, 96, 28, function()
-        if OTLGM.ui.craftingSelectedRequest then OTLGM:CloseCraftingRequest(OTLGM.ui.craftingSelectedRequest) end
+        if OTLGM.ui.craftingSelectedRequestShell then OTLGM:CloseCraftingRequest(OTLGM.ui.craftingSelectedRequestShell) end
     end, "normal")
     self.ui.craftingDeleteButton = NButton(detail, "Delete", 300, -378, 56, 28, function()
-        local request = OTLGM:GetCraftingRequestByID(OTLGM.ui.craftingSelectedRequest)
+        local request = OTLGM:GetCraftingRequestByID(OTLGM.ui.craftingSelectedRequestShell)
         if request then OTLGM:ShowConfirm("Delete Crafting Request", "Remove this request from connected addon users?", "Delete", function() OTLGM:DeleteCraftingRequest(request.id, false) end) end
     end, "danger")
 end
@@ -796,7 +802,7 @@ function OTLGM:BuildCraftingRequestDialog()
         local ok, result = OTLGM:CreateCraftingRequest(OTLGM_DB.settings.craftingRequestTemplate, OTLGM.ui.craftingRequestDialog.itemEdit:GetText(), OTLGM_DB.settings.craftingMaterials, OTLGM.ui.craftingRequestDialog.noteEdit:GetText())
         if ok then
             OTLGM.ui.craftingRequestDialog:Hide()
-            OTLGM.ui.craftingSelectedRequest = result.id
+            OTLGM.ui.craftingSelectedRequestShell = result.id
             OTLGM_DB.settings.craftingSection = "REQUESTS"
             OTLGM:ShowPage("professions")
             OTLGM:SetStatus("Crafting request shared with online guild addon users.")
@@ -846,7 +852,7 @@ function OTLGM:ShowCraftingSection(section)
     self:RefreshProfessionsPage()
 end
 
-function OTLGM:RefreshProfessionsPage()
+function OTLGM.__impl180.RefreshProfessionsPage__impl1(self)
     if not self.ui or not self.ui.craftingPanels then return end
     local section = OTLGM_DB.settings.craftingSection or "RECIPES"
     local key, panel
@@ -868,7 +874,7 @@ function OTLGM:RefreshProfessionsPage()
     if section == "RECIPES" then self:RefreshCraftingRecipesPanel(summary) else self:RefreshCraftingRequestsPanel(summary) end
 end
 
-function OTLGM:_Stage_UINext_RefreshCraftingRecipesPanel_1(summary)
+function OTLGM.__impl180.Stage_UINext_RefreshCraftingRecipesPanel_1__impl1(self, summary)
     local query = self.ui.craftingSearchEdit and (self.ui.craftingSearchEdit:GetText() or "") or ""
     local profession = OTLGM_DB.settings.craftingProfession or "ALL"
     local results = self:GetCraftingSearchResults(query, profession)
@@ -912,7 +918,7 @@ function OTLGM:_Stage_UINext_RefreshCraftingRecipesPanel_1(summary)
             row.recipeIcon:SetTexture(NResolveRecipeTexture155(result.recipe))
             row.nameText:SetText(NQualityText155(NShort(result.recipe.name, 27), result.recipe.quality))
             row.countText:SetText((onlineCount > 0 and self.colors.green or self.colors.grey) .. tostring(table.getn(result.crafters or {})) .. " crafter" .. (table.getn(result.crafters or {}) == 1 and "" or "s") .. self.colors.reset)
-            NSetSelected(row, self.ui.craftingSelectedRecipe == result.key)
+            NSetSelected(row, self.ui.craftingSelectedRecipeKey == result.key)
             row:Show()
         else row.recipeData = nil row:Hide() end
     end
@@ -924,8 +930,8 @@ function OTLGM:_Stage_UINext_RefreshCraftingRecipesPanel_1(summary)
     NSetEnabled(self.ui.craftingRecipePrev, offset > 0, "You are at the first recipe page.")
     NSetEnabled(self.ui.craftingRecipeNext, offset < maximum, "There are no more recipes.")
 
-    local selected = NFindRecipe(results, self.ui.craftingSelectedRecipe)
-    if not selected and results[1] then selected = results[1] self.ui.craftingSelectedRecipe = selected.key end
+    local selected = NFindRecipe(results, self.ui.craftingSelectedRecipeKey)
+    if not selected and results[1] then selected = results[1] self.ui.craftingSelectedRecipeKey = selected.key end
     self.ui.craftingSelectedRecipeData = selected
     local selectedRecipeIcon
     if selected then
@@ -1007,14 +1013,14 @@ function OTLGM:_Stage_UINext_RefreshCraftingRecipesPanel_1(summary)
 end
 
 function OTLGM:ReactToSelectedCraftingRequest(reaction)
-    local id = self.ui and self.ui.craftingSelectedRequest
+    local id = self.ui and self.ui.craftingSelectedRequestShell
     if not id then return end
     self:SetCommunityReaction("CRAFT", id, reaction, false)
     self:RefreshProfessionsPage()
 end
 
 function OTLGM:ReplyToSelectedCraftingRequest(canHelp)
-    local id = self.ui and self.ui.craftingSelectedRequest
+    local id = self.ui and self.ui.craftingSelectedRequestShell
     if not id then return end
     local text = self.ui.craftingResponseEdit and self.ui.craftingResponseEdit:GetText() or ""
     local ok, result = self:AddCraftingResponse(id, text, canHelp)
@@ -1039,7 +1045,7 @@ function OTLGM:RefreshCraftingRequestsPanel(summary)
             row.itemText:SetText((request.status == "CLOSED" and self.colors.grey or self.colors.gold) .. NShort(request.item, 30) .. self.colors.reset)
             row.authorText:SetText(self:GetClassColor(request.class) .. NShort(request.author, 14) .. self.colors.reset)
             row.detailText:SetText((request.materials == "READY" and "Materials ready" or (request.materials == "NEEDED" and "Needs materials" or "Discuss materials")) .. "  |  Help " .. tostring(reactions.HELP or 0) .. "  |  " .. NAge(self, request.ts))
-            NSetSelected(row, self.ui.craftingSelectedRequest == request.id)
+            NSetSelected(row, self.ui.craftingSelectedRequestShell == request.id)
             row:Show()
         else row.requestData = nil row:Hide() end
     end
@@ -1047,8 +1053,8 @@ function OTLGM:RefreshCraftingRequestsPanel(summary)
     else self.ui.craftingRequestStatus:SetText(tostring(offset + 1) .. "-" .. tostring(math.min(offset + N_REQUEST_ROWS, table.getn(requests))) .. " of " .. tostring(table.getn(requests))) end
     NSetEnabled(self.ui.craftingRequestPrev, offset > 0, "You are at the first request page.")
     NSetEnabled(self.ui.craftingRequestNext, offset < maximum, "There are no more requests.")
-    local selected = NFindRequest(requests, self.ui.craftingSelectedRequest)
-    if not selected and requests[1] then selected = requests[1] self.ui.craftingSelectedRequest = selected.id end
+    local selected = NFindRequest(requests, self.ui.craftingSelectedRequestShell)
+    if not selected and requests[1] then selected = requests[1] self.ui.craftingSelectedRequestShell = selected.id end
     if selected then
         self.ui.craftingRequestTitle:SetText(self.colors.gold .. (selected.item or "Crafting Request") .. self.colors.reset)
         self.ui.craftingRequestMeta:SetText(self:GetClassColor(selected.class) .. (selected.author or "Unknown") .. self.colors.reset .. "  -  Level " .. tostring(selected.level or 0) .. "  -  " .. (selected.status or "OPEN") .. "\n" .. (selected.note ~= "" and selected.note or "No additional note.") .. "  Materials: " .. string.lower(selected.materials or "discuss"))
@@ -1369,7 +1375,7 @@ end
 
 -- Compatibility stage retained deliberately: Reliability wraps this modal
 -- stack handler after all UI generations have loaded.
-function OTLGM:_Stage_UINext_CloseTopModal152_2()
+function OTLGM.__impl180.Stage_UINext_CloseTopModal152_2__impl1(self)
     local stack = self.ui and self.ui.modalStack154 or {}
     local i
     for i = table.getn(stack), 1, -1 do
@@ -1394,16 +1400,10 @@ function OTLGM:ApplyEscapeHandler152(editBox, onClear, closeFrame)
     end)
 end
 
-function OTLGM:ApplyGuildChatEscapeBehavior()
-    self:ApplyEscapeHandler152(self.ui and self.ui.guildChatEdit, function()
-        if OTLGM and OTLGM.SaveGuildChatDraft and OTLGM.GetGuildChatChannel then OTLGM:SaveGuildChatDraft(OTLGM:GetGuildChatChannel()) end
-    end)
-end
-
 function OTLGM:ApplyAllEscapeHandlers152()
     self:ApplyGuildChatEscapeBehavior()
-    self:ApplyEscapeHandler152(self.ui.rosterSearch, function() if OTLGM.RefreshRosterPage then OTLGM:RefreshRosterPage() end end)
-    self:ApplyEscapeHandler152(self.ui.historySearch, function() if OTLGM.RefreshHistoryPage then OTLGM:RefreshHistoryPage() end end)
+    self:ApplyEscapeHandler152(self.ui.rosterSearch, function() if OTLGM.__impl180.RefreshRosterPage__impl1 then OTLGM:RefreshRosterPage() end end)
+    self:ApplyEscapeHandler152(self.ui.historySearch, function() if OTLGM.__impl180.RefreshHistoryPage__impl1 then OTLGM:RefreshHistoryPage() end end)
     self:ApplyEscapeHandler152(self.ui.globalSearchEdit, function() OTLGM.ui.globalSearchOffset = 0 OTLGM:RefreshSearchPage(true) end)
     self:ApplyEscapeHandler152(self.ui.craftingSearchEdit, function() OTLGM.ui.craftingRecipeOffset = 0 OTLGM:RefreshProfessionsPage() end)
     self:ApplyEscapeHandler152(self.ui.guildBoardNewEdit152, function() end)
@@ -1418,7 +1418,7 @@ function OTLGM:ApplyAllEscapeHandlers152()
     if self.ui.announcementComposer152 then ModalEscape154(self.ui.announcementComposer152.titleEdit) ModalEscape154(self.ui.announcementComposer152.bodyEdit) end
 end
 
-function OTLGM:_Stage_UINext_BuildNextUI_1()
+function OTLGM.__impl180.Stage_UINext_BuildNextUI_1__impl1(self)
     if self.ui.v15Built then return end
     self.ui.pages.search = NPage(self.ui.content)
     self.ui.pages.professions = NPage(self.ui.content)
@@ -1440,10 +1440,10 @@ function OTLGM:_Stage_UINext_BuildNextUI_1()
     OTLGM.ui152Loaded = true
 end
 
-function OTLGM:BuildUI()
+function OTLGM.__impl180.BuildUI__impl1(self)
     if self.ui and self.ui.main and self.ui.v15Built then return end
     local requestedPage = OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.lastPage or nil
-    BaseBuildUI(self)
+    PreviousBuildUI(self)
     if not self.ui or not self.ui.main then return end
     self:BuildNextUI()
     if self.ApplyWindowTheme then self:ApplyWindowTheme() end
@@ -1470,8 +1470,8 @@ function OTLGM:RefreshUpdateWarning()
     else self.ui.updateWarning:Hide() end
 end
 
-function OTLGM:RefreshNavigation()
-    if not self.ui or not self.ui.v15Built then return BaseRefreshNavigation(self) end
+function OTLGM.__impl180.RefreshNavigation__impl1(self)
+    if not self.ui or not self.ui.v15Built then return PreviousRefreshNavigation(self) end
     local officer = self:IsOfficerMode()
     local guildOpen = OTLGM_DB.settings.guildSectionExpanded ~= false
     local officerOpen = OTLGM_DB.settings.officerSectionExpanded ~= false
@@ -1616,11 +1616,11 @@ function OTLGM:RefreshNavigation()
     if self.RefreshExperienceNavigation170 then self:RefreshExperienceNavigation170() end
 end
 
-function OTLGM:ShowPage(pageKey)
-    if not self.ui or not self.ui.v15Built then return BaseShowPage(self, pageKey) end
+function OTLGM.__impl180.ShowPage__impl1(self, pageKey)
+    if not self.ui or not self.ui.v15Built then return PreviousShowPage(self, pageKey) end
     local previousPage170 = self.ui.currentPage
     if pageKey ~= "search" and pageKey ~= "professions" and pageKey ~= "treasury" then
-        BaseShowPage(self, pageKey)
+        PreviousShowPage(self, pageKey)
         self:RefreshNavigation()
         if self.RepairInteractiveTree170 and self.ui.pages and self.ui.pages[pageKey] then self:RepairInteractiveTree170(self.ui.pages[pageKey]) end
         if previousPage170 ~= pageKey and self.StartExperienceMotion170 and self.ui.pages and self.ui.pages[pageKey] then self:StartExperienceMotion170(self.ui.pages[pageKey], 0.78, 1, 0.11) end
@@ -1647,21 +1647,6 @@ function OTLGM:ShowPage(pageKey)
     if previousPage170 ~= pageKey and self.StartExperienceMotion170 and self.ui.pages and self.ui.pages[pageKey] then self:StartExperienceMotion170(self.ui.pages[pageKey], 0.78, 1, 0.11) end
 end
 
-function OTLGM:RefreshVisiblePage()
-    if not self.ui or not self.ui.v15Built then return BaseRefreshVisiblePage(self) end
-    if self.ui.currentPage == "search" then self:RefreshSearchPage(true) return end
-    if self.ui.currentPage == "professions" then self:RefreshProfessionsPage() return end
-    if self.ui.currentPage == "treasury" then self:RefreshTreasuryPage170() return end
-    BaseRefreshVisiblePage(self)
-end
-
-function OTLGM:RefreshHomePage()
-    BaseRefreshHomePage(self)
-    if not self.ui or not self.ui.v15Built then return end
-    self:RefreshHomeRecent()
-    if self.RefreshHomeExperience170 then self:RefreshHomeExperience170() end
-end
-
 local function NDelta(self, value)
     value = tonumber(value) or 0
     if value > 0 then return self.colors.green .. "+" .. tostring(value) .. self.colors.reset end
@@ -1669,8 +1654,8 @@ local function NDelta(self, value)
     return self.colors.grey .. "0" .. self.colors.reset
 end
 
-function OTLGM:RefreshOverviewPage()
-    BaseRefreshOverviewPage(self)
+function OTLGM.__impl180.RefreshOverviewPage__impl1(self)
+    PreviousRefreshOverviewPage(self)
     if not self.ui or not self.ui.v15Built or not self.ui.overviewGrowth then return end
     local comparison = self:GetWeeklyComparison()
     if comparison.available then
@@ -1684,9 +1669,9 @@ function OTLGM:RefreshOverviewPage()
     end
 end
 
-function OTLGM:_Stage_UINext_RefreshPvePage_2()
+function OTLGM.__impl180.Stage_UINext_RefreshPvePage_2__impl1(self)
     if OTLGM_DB.settings.pveSection == "BOARD" then OTLGM_DB.settings.pveSection = "GROUPS" end
-    BaseRefreshPvePage(self)
+    PreviousRefreshPvePage(self)
     if self.ui and self.ui.v15Built then
         if self.ui.pveTabButtons and self.ui.pveTabButtons.BOARD then self.ui.pveTabButtons.BOARD:Hide() end
         if self.ui.pvePanels and self.ui.pvePanels.BOARD then self.ui.pvePanels.BOARD:Hide() end
@@ -1694,25 +1679,8 @@ function OTLGM:_Stage_UINext_RefreshPvePage_2()
     end
 end
 
-function OTLGM:RefreshSettingsPage()
-    BaseRefreshSettingsPage(self)
-    if not self.ui or not self.ui.v15Built then return end
-    local category, row, pref
-    for category, row in pairs(self.ui.notificationRows152 or {}) do
-        pref = self:GetNotificationPreference152(category)
-        NSetButtonText(row.visual, pref.visual and "Visual: ON" or "Visual: OFF")
-        NSetSelected(row.visual, pref.visual)
-        NSetButtonText(row.sound, pref.sound and "Sound: ON" or "Sound: OFF")
-        NSetSelected(row.sound, pref.sound)
-        NSetButtonText(row.choice, self:GetNotificationSoundLabel152(category))
-        NSetEnabled(row.choice, pref.sound, "Enable sound for this category first.")
-    end
-    self:RefreshUpdateWarning()
-    if self.RefreshExperienceSettings170 then self:RefreshExperienceSettings170() end
-end
-
-function OTLGM:RefreshAll()
-    BaseRefreshAll(self)
+function OTLGM.__impl180.RefreshAll__impl1(self)
+    PreviousRefreshAll(self)
     if not self.ui or not self.ui.v15Built then return end
     self:RefreshSearchPage(true)
     self:RefreshProfessionsPage()
@@ -1792,7 +1760,7 @@ function OTLGM:RefreshWizard()
     NSetButtonText(wizard.next, "Start")
 end
 
-function OTLGM:OpenFirstRunWizard()
+function OTLGM.__impl180.OpenFirstRunWizard__impl1(self)
     if self.ui.main and not self.ui.main:IsVisible() then self.ui.main:Show() end
     self.ui.firstRunWizard.currentStep = 4
     if self.ShowModal152 then self:ShowModal152(self.ui.firstRunWizard) else self.ui.firstRunWizard:Show() end
@@ -1805,10 +1773,10 @@ end
 -- explicit stages are composed before BuildUI is executed.
 -- ---------------------------------------------------------------------------
 
-local BaseBuildRecipesPanel153 = OTLGM._Stage_UINext_BuildRecipesPanel_1
-local BaseBuildNextUI153 = OTLGM._Stage_UINext_BuildNextUI_1
-local BaseGetCraftingSearchResults153 = OTLGM._Stage_Crafting_GetCraftingSearchResults_1
-local BaseRefreshCraftingRecipesPanel153 = OTLGM._Stage_UINext_RefreshCraftingRecipesPanel_1
+local PreviousBuildRecipesPanel153 = OTLGM.__impl180.Stage_UINext_BuildRecipesPanel_1__impl1
+local PreviousBuildNextUI153 = OTLGM.__impl180.Stage_UINext_BuildNextUI_1__impl1
+local PreviousGetCraftingSearchResults153 = OTLGM.__impl180.Stage_Crafting_GetCraftingSearchResults_1__impl1
+local PreviousRefreshCraftingRecipesPanel153 = OTLGM.__impl180.Stage_UINext_RefreshCraftingRecipesPanel_1__impl1
 
 local categoryDefinitions153 = {
     ALL = { {"ALL", "All"} },
@@ -2004,8 +1972,8 @@ local function NMatchesRarity153(quality, filter)
     return true
 end
 
-function OTLGM:_Stage_UINext_GetCraftingSearchResults_2(query, professionFilter)
-    local results = BaseGetCraftingSearchResults153(self, query, professionFilter)
+function OTLGM.__impl180.Stage_UINext_GetCraftingSearchResults_2__impl1(self, query, professionFilter)
+    local results = PreviousGetCraftingSearchResults153(self, query, professionFilter)
     if not self.craftingFilterContext153 then return results end
     local category = OTLGM_DB.settings.craftingCategory153 or "ALL"
     local levelFilter = OTLGM_DB.settings.craftingLevelFilter153 or "ANY"
@@ -2053,7 +2021,7 @@ function OTLGM:_Stage_UINext_GetCraftingSearchResults_2(query, professionFilter)
 end
 
 function OTLGM:BuildRecipesPanel(page)
-    BaseBuildRecipesPanel153(self, page)
+    PreviousBuildRecipesPanel153(self, page)
     local recipes = self.ui.craftingSearchEdit and self.ui.craftingSearchEdit:GetParent()
     local filters = self.ui.craftingProfessionButtons and self.ui.craftingProfessionButtons.ALL and self.ui.craftingProfessionButtons.ALL:GetParent()
     if not recipes or not filters then return end
@@ -2071,7 +2039,7 @@ function OTLGM:BuildRecipesPanel(page)
             if button and button.categoryKey153 then
                 OTLGM_DB.settings.craftingCategory153 = button.categoryKey153
                 OTLGM.ui.craftingRecipeOffset = 0
-                OTLGM.ui.craftingSelectedRecipe = nil
+                OTLGM.ui.craftingSelectedRecipeKey = nil
                 OTLGM:RefreshProfessionsPage()
             end
         end, "normal")
@@ -2161,9 +2129,9 @@ local function NRefreshCategoryControls153(self)
     NSetSelected(self.ui.craftingOnlineFilter153, OTLGM_DB.settings.craftingOnlineOnly153 and true or false)
 end
 
-function OTLGM:_Stage_UINext_RefreshCraftingRecipesPanel_2(summary)
+function OTLGM.__impl180.Stage_UINext_RefreshCraftingRecipesPanel_2__impl1(self, summary)
     self.craftingFilterContext153 = true
-    BaseRefreshCraftingRecipesPanel153(self, summary)
+    PreviousRefreshCraftingRecipesPanel153(self, summary)
     self.craftingFilterContext153 = nil
     if self.ui.craftingCategoryButtons153 then NRefreshCategoryControls153(self) end
     local craft = self:EnsureCraftingDB()
@@ -2218,7 +2186,7 @@ local function NActivityMatches153(entry, filter)
     return kind == filter
 end
 
-function OTLGM:_Stage_UINext_GetActivityEntries153_1(mode, filter)
+function OTLGM.__impl180.Stage_UINext_GetActivityEntries153_1__impl1(self, mode, filter)
     local result = {}
     local i, entry
     if mode == "CRAFTING" then
@@ -2239,7 +2207,7 @@ function OTLGM:_Stage_UINext_GetActivityEntries153_1(mode, filter)
     return result
 end
 
-function OTLGM:_Stage_UINext_BuildActivityDialogs153_1()
+function OTLGM.__impl180.Stage_UINext_BuildActivityDialogs153_1__impl1(self)
     if self.ui.activityDialog153 then return end
     local dialog = CreateFrame("Frame", "OTLGM_ActivityDialog153", self.ui.main)
     dialog:SetWidth(700)
@@ -2311,7 +2279,7 @@ function OTLGM:OpenActivityDialog153(mode, filter)
     dialog:SetFrameStrata("FULLSCREEN_DIALOG")
 end
 
-function OTLGM:_Stage_UINext_RefreshActivityDialog153_1()
+function OTLGM.__impl180.Stage_UINext_RefreshActivityDialog153_1__impl1(self)
     local dialog = self.ui and self.ui.activityDialog153
     if not dialog then return end
     local mode = dialog.mode153 or "GUILD"
@@ -2351,8 +2319,8 @@ function OTLGM:_Stage_UINext_RefreshActivityDialog153_1()
     NSetEnabled(dialog.nextButton, offset < maximum, "There are no more activity entries.")
 end
 
-function OTLGM:_Stage_UINext_BuildNextUI_2()
-    BaseBuildNextUI153(self)
+function OTLGM.__impl180.Stage_UINext_BuildNextUI_2__impl1(self)
+    PreviousBuildNextUI153(self)
     self:BuildActivityDialogs153()
     if self.RegisterModal152 then self:RegisterModal152(self.ui.activityDialog153) end
     OTLGM.ui153Loaded = true

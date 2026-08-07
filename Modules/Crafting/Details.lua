@@ -22,14 +22,27 @@ local function DetailHash(lines)
 end
 
 local function EffectSummary(self, recipe, lines)
-    if (tonumber(recipe and recipe.itemId) or 0) > 0 or (recipe and recipe.itemLink and recipe.itemLink ~= "") then return "" end
+    if (tonumber(recipe and recipe.itemId) or 0) > 0 then return "" end
     local parts = {}
     local recipeName = self:NormalizeText(recipe and recipe.name or "")
-    local index, line, text
+    local index, line, text, normalized, skip
     for index = 1, table.getn(lines or {}) do
         line = lines[index]
         text = self:SafeText(((line and line.left) or "") .. ((line and line.right and line.right ~= "") and (" " .. line.right) or ""), 180, false, false)
-        if text ~= "" and self:NormalizeText(text) ~= recipeName then table.insert(parts, text) end
+        normalized = self:NormalizeText(text)
+        skip = text == "" or normalized == recipeName
+        -- Enchant recipes have no item result, so their native tooltip is the
+        -- only reliable source of the actual effect. Keep descriptive prose but
+        -- strip recipe/skill/cast/tool metadata that previously polluted the
+        -- ENCHANT EFFECT field (for example "Requires Enchanting (265)").
+        if not skip and (string.find(normalized, "requires enchanting", 1, true)
+            or string.find(normalized, "requires level", 1, true)
+            or string.find(normalized, "sec cast", 1, true)
+            or string.find(normalized, "second cast", 1, true)
+            or string.find(normalized, "reagents:", 1, true)
+            or string.find(normalized, "tools:", 1, true)
+            or normalized == "enchanting") then skip = true end
+        if not skip then table.insert(parts, text) end
     end
     return self:Utf8Truncate(table.concat(parts, " / "), 110)
 end
@@ -250,8 +263,13 @@ function OTLGM:QueueOpenProfessionDetails(mode, profession)
             end
         end
     end
-    self.runtime.craftingDetailQueue = queue
-    return table.getn(queue.items) > 0
+    local pending = table.getn(queue.items) > 0
+    -- Never retain an empty detail queue.  The shared scheduler treats a live
+    -- queue as work; leaving { items = {}, head = 1 } behind would keep the
+    -- addon awake forever even though there is nothing to capture.
+    self.runtime.craftingDetailQueue = pending and queue or nil
+    if pending and self.WakeScheduler180 then self:WakeScheduler180("crafting-detail-capture") end
+    return pending
 end
 
 function OTLGM:ProcessCraftingDetailQueue(maximum)
@@ -309,9 +327,12 @@ function OTLGM:ShowCraftingObjectTooltip(anchor, object, professionKey)
     if anchor.GetCenter and UIParent and UIParent.GetCenter then
         local ax = anchor:GetCenter()
         local ux = UIParent:GetCenter()
-        if ax and ux and ax < ux then tooltipAnchor = "ANCHOR_LEFT" end
+        -- Put the tooltip away from the Details column: anchors on the right
+        -- half open to the left, anchors on the left half open to the right.
+        if ax and ux and ax > ux then tooltipAnchor = "ANCHOR_LEFT" end
     end
     GameTooltip:SetOwner(anchor, tooltipAnchor)
+    if GameTooltip.SetClampedToScreen then GameTooltip:SetClampedToScreen(true) end
     pcall(GameTooltip.ClearLines, GameTooltip)
     local shown = false
     local link = object.itemLink

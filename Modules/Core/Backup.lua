@@ -3,6 +3,24 @@
 
 local LegacyImportBackup160 = OTLGM._Legacy_ImportBackupV1
 
+-- Runtime event ownership is intentionally dynamic in 1.8.0. A backup can
+-- restore achievements from complete -> incomplete without reloading the UI, so
+-- refresh those listeners immediately after any successful restore/undo (and
+-- after a rollback) rather than leaving the restored tracker dormant until the
+-- next login. This helper is resolved at call time because Performance176 loads
+-- later in the TOC.
+local function RefreshPostRestoreRuntime180(self)
+    if self and self.UpdateFinalAchievementOwnership180 then
+        pcall(self.UpdateFinalAchievementOwnership180, self)
+    end
+    if self and self.RefreshObservedGuildFactions180 then
+        pcall(self.RefreshObservedGuildFactions180, self, "backup-restore")
+    end
+    if self and self.UpdateSchedulerState180 then
+        pcall(self.UpdateSchedulerState180, self, "backup-restore")
+    end
+end
+
 local BACKUP_HEADER = "OTLGM_BACKUP_V2"
 local MAX_BACKUP_BYTES = 2000000
 local MAX_BACKUP_ENTRIES = 160000
@@ -114,12 +132,28 @@ local function BuildDurableSnapshot(self, db)
     guild.pendingInvites = {}
     guild.pendingActions = {}
     guild.pendingAnnouncements = {}
+    -- Presence and raw roster-scan snapshots are reconstructible.  Keeping them
+    -- in every portable backup made mature guild backups approach the 2 MB
+    -- in-game copy ceiling without improving disaster recovery.
+    guild.detectedVersions = {}
+    guild.snapshots = {}
+    guild.scans = {}
     if type(guild.crafting) == "table" then
         guild.crafting.pendingRecipes = {}
         guild.crafting.cacheQueue = nil
         guild.crafting.syncState = { active = false, started = 0, completed = 0, received = 0 }
+        guild.crafting.iconCache157 = nil
+        guild.crafting.requestMatchSeen180 = {}
+        guild.crafting.pendingRequestMeta180 = nil
     end
-    if type(guild.pve) == "table" then guild.pve.applicationRetries = {} end
+    if type(guild.pve) == "table" then
+        guild.pve.applicationRetries = {}
+        guild.pve.lastMaintenance = nil
+    end
+    if type(guild.treasury170) == "table" then
+        guild.treasury170.contributionSeen176 = {}
+        guild.treasury170.activitySeenR5 = {}
+    end
     guild.schemaVersion = self.schemaVersion
     return { settings = settings, guild = guild }
 end
@@ -267,6 +301,7 @@ function OTLGM:ImportBackup(text)
             if db then self:MigrateGuildDB(db) end
             self:EnsureDB()
             self:ResetSessionData()
+            RefreshPostRestoreRuntime180(self)
             if self.RefreshVisiblePage then self:RefreshVisiblePage() elseif self.RefreshAll then self:RefreshAll() end
         end
         return ok, message
@@ -345,13 +380,54 @@ function OTLGM:ImportBackup(text)
         OTLGM_DB.version = previousVersion
         OTLGM_DB.schemaVersion = previousSchema
         pcall(function() self:EnsureDB() self:ResetSessionData() end)
+        RefreshPostRestoreRuntime180(self)
         return false, "The backup could not be committed safely; the previous data was restored. " .. tostring(commitProblem)
     end
     self.runtime.preImportBackup160 = { guildKey = guildKey, guild = previousGuild, settings = previousSettings }
+    RefreshPostRestoreRuntime180(self)
     pcall(function()
         if self.RefreshVisiblePage then self:RefreshVisiblePage() elseif self.RefreshAll then self:RefreshAll() end
     end)
     return true, "Full backup restored: " .. tostring(calculatedCount) .. " validated data entries."
+end
+
+function OTLGM:ExportBackupCheckedRC4()
+    local text = self:ExportBackup()
+    local _, _, problem = string.find(tostring(text or ""), "^OTLGM_BACKUP_V2\nERROR|(.+)$")
+    if problem then return false, problem, text end
+    return true, text, text
+end
+
+function OTLGM:CanUndoLastImportRC4()
+    local state = self.runtime and self.runtime.preImportBackup160
+    return type(state) == "table" and type(state.guild) == "table" and type(state.settings) == "table" and state.guildKey ~= nil
+end
+
+function OTLGM:UndoLastImportRC4()
+    if not self:CanUndoLastImportRC4() then return false, "There is no import to undo in this session." end
+    local state = self.runtime.preImportBackup160
+    if not OTLGM_DB or not OTLGM_DB.guilds then return false, "The local database is unavailable." end
+    local currentGuild = self:Copy(OTLGM_DB.guilds[state.guildKey], MAX_BACKUP_DEPTH)
+    local currentSettings = self:Copy(OTLGM_DB.settings, MAX_BACKUP_DEPTH)
+    if type(currentGuild) ~= "table" or type(currentSettings) ~= "table" then return false, "The current state could not be copied safely." end
+    local ok, problem = pcall(function()
+        OTLGM_DB.guilds[state.guildKey] = self:Copy(state.guild, MAX_BACKUP_DEPTH)
+        OTLGM_DB.settings = self:Copy(state.settings, MAX_BACKUP_DEPTH)
+        self:MigrateGuildDB(OTLGM_DB.guilds[state.guildKey])
+        self:EnsureDB()
+        self:ResetSessionData()
+    end)
+    if not ok then
+        OTLGM_DB.guilds[state.guildKey] = currentGuild
+        OTLGM_DB.settings = currentSettings
+        pcall(function() self:EnsureDB() self:ResetSessionData() end)
+        RefreshPostRestoreRuntime180(self)
+        return false, "Undo could not be applied safely. " .. tostring(problem)
+    end
+    self.runtime.preImportBackup160 = nil
+    RefreshPostRestoreRuntime180(self)
+    pcall(function() if self.RefreshVisiblePage then self:RefreshVisiblePage() end end)
+    return true, "The previous local data from before the last import was restored."
 end
 
 OTLGM:RegisterModule("Backup", {

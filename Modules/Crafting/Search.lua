@@ -2,9 +2,9 @@
 -- larger local operations, so repeated redraws reuse the same immutable result
 -- set until crafting data, roster freshness or a filter changes.
 
-local BaseGetCraftingSearchResults160 = OTLGM._Stage_Quality156_GetCraftingSearchResults_3
-local BaseGetCraftingProfessionCounts160 = OTLGM._Stage_Crafting_GetCraftingProfessionCounts_1
-local BaseOnCraftingDataChanged160 = OTLGM._Stage_Systems152_OnCraftingDataChanged_2
+local PreviousGetCraftingSearchResults160 = OTLGM.__impl180.Stage_Quality156_GetCraftingSearchResults_3__impl1
+local PreviousGetCraftingProfessionCounts160 = OTLGM.__impl180.Stage_Crafting_GetCraftingProfessionCounts_1__impl1
+local PreviousOnCraftingDataChanged160 = OTLGM.__impl180.Stage_Systems152_OnCraftingDataChanged_2__impl1
 
 local CACHE_LIMIT = 12
 local CACHE_AGE = 10
@@ -55,7 +55,7 @@ function OTLGM:GetCraftingSearchResults(query, professionFilter)
         cache.hits = cache.hits + 1
         return entry.value
     end
-    local results = BaseGetCraftingSearchResults160(self, query, professionFilter)
+    local results = PreviousGetCraftingSearchResults160(self, query, professionFilter)
     cache.builds = cache.builds + 1
     Put(cache, key, results, now)
     return results
@@ -70,15 +70,18 @@ function OTLGM:GetCraftingProfessionCounts(query)
         cache.hits = cache.hits + 1
         return entry.value
     end
-    local counts = BaseGetCraftingProfessionCounts160(self, query)
+    local counts = PreviousGetCraftingProfessionCounts160(self, query)
     cache.builds = cache.builds + 1
     Put(cache, key, counts, now)
     return counts
 end
 
 function OTLGM:OnCraftingDataChanged(section, remote)
+    self.runtime = self.runtime or {}
+    self.runtime.craftingDataRevisionRC3 = (tonumber(self.runtime.craftingDataRevisionRC3) or 0) + 1
+    self.runtime.craftingLastChangeAtRC3 = self:Now()
     self:InvalidateCraftingSearchCache()
-    return BaseOnCraftingDataChanged160(self, section, remote)
+    return PreviousOnCraftingDataChanged160(self, section, remote)
 end
 
 OTLGM:RegisterModule("CraftingSearch", {

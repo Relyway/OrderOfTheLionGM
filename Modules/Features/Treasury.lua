@@ -111,7 +111,7 @@ local function TDefaultGoals(now)
     }
 end
 
-function OTLGM:EnsureTreasury170()
+function OTLGM.__impl180.EnsureTreasury170__impl1(self)
     local db = self:GetGuildDB()
     if not db then return nil end
     if type(db.treasury170) ~= "table" then db.treasury170 = {} end
@@ -265,13 +265,14 @@ local function TQueueDelete(self, id, record, target)
     return self:QueueNetworkPayload(payload, target and "WHISPER" or "GUILD", target, target and 2 or 3, "treasury", "treasury:" .. tostring(target or "guild") .. ":deleted:" .. tostring(id))
 end
 
-function OTLGM:SetTreasuryGoal170(id, name, current, target, category)
+function OTLGM.__impl180.SetTreasuryGoal170__impl1(self, id, name, current, target, category)
     if not self:CanEditTreasury170() then return false, "Only guild leadership can edit treasury goals." end
     id = string.upper(TTrim(id))
     if not self:IsValidID(id, 32) then return false, "The goal ID is invalid." end
     name = self:SafeText(name, 42, false, false)
     if name == "" then return false, "A goal name is required." end
     local treasury = self:EnsureTreasury170()
+    if not treasury then return false, "Guild data is not ready yet. Try again after the guild roster loads." end
     if not treasury.goals[id] and TGoalCount(treasury.goals) >= TREASURY_MAX_GOALS then return false, "The treasury supports up to eight active goals." end
     local old = treasury.goals[id]
     local now = self:Now()
@@ -293,7 +294,7 @@ function OTLGM:SetTreasuryGoal170(id, name, current, target, category)
     return true, goal
 end
 
-function OTLGM:DeleteTreasuryGoal170(id)
+function OTLGM.__impl180.DeleteTreasuryGoal170__impl1(self, id)
     if not self:CanEditTreasury170() then return false, "Only guild leadership can delete treasury goals." end
     local treasury = self:EnsureTreasury170()
     local old = treasury and treasury.goals and treasury.goals[id]
@@ -310,10 +311,11 @@ function OTLGM:DeleteTreasuryGoal170(id)
     return true
 end
 
-function OTLGM:QueueTreasuryState170(target)
+function OTLGM.__impl180.QueueTreasuryState170__impl1(self, target)
     if not target or target == "" or not self:CanEditTreasury170() then return false end
-    local goals = self:GetTreasuryGoals170()
+    local goals = self:GetTreasuryGoals170() or {}
     local treasury = self:EnsureTreasury170()
+    if not treasury then return false end
     local deletedCount = TGoalCount(treasury.deleted)
     if self.CanQueueNetworkPayloads and not self:CanQueueNetworkPayloads(table.getn(goals) + deletedCount + 1, 16) then return false end
     local deletedRows = {}
@@ -326,18 +328,48 @@ function OTLGM:QueueTreasuryState170(target)
     for index = 1, math.min(TREASURY_MAX_GOALS, table.getn(goals)) do
         if not TQueueGoal(self, goals[index], target) then return false end
     end
+    -- RC5-R2 contribution-history layer appends the final END after historical
+    -- contribution packets.  Without this guard the receiver could mark the
+    -- ledger synchronized before the ledger rows themselves arrived.
+    if self.runtime and self.runtime.deferTreasuryEndR2 then return true end
     local ended = self:QueueNetworkPayload(table.concat({ self.treasuryProtocol170, "END", tostring(treasury.revision or 0), tostring(table.getn(goals)) }, "^"), "WHISPER", target, 2, "treasury")
     return ended and true or false
 end
 
+function OTLGM:GetCompatibleTreasuryPeersR2(maxAge)
+    local peers = self.GetCompatibleSyncPeersR2 and self:GetCompatibleSyncPeersR2(maxAge or 600) or {}
+    local result = {}
+    local index, name
+    for index = 1, table.getn(peers) do
+        name = peers[index]
+        if not self.IsPveLeadershipName or self:IsPveLeadershipName(name) then table.insert(result, name) end
+    end
+    return result
+end
+
 function OTLGM:RequestTreasurySync170(force)
     local now = self:Now()
-    if not force and self.lastTreasurySync170 and now - self.lastTreasurySync170 < 60 then return false end
-    local queued = self:QueueNetworkPayload(table.concat({ self.treasuryProtocol170, "SYNC", self.version, tostring(now) }, "^"), "GUILD", nil, 2, "treasury", "treasury:sync")
-    if not queued then return false end
-    self.lastTreasurySync170 = now
     self.runtime = self.runtime or {}
-    self.runtime.treasurySync170 = { active = true, started = now, received = 0 }
+    if self.runtime.treasurySync170 and self.runtime.treasurySync170.active then return false end
+    if not force and self.lastTreasurySync170 and now - self.lastTreasurySync170 < 180 then return false end
+    local peers = self:GetCompatibleTreasuryPeersR2(600)
+    if table.getn(peers) == 0 then
+        self.runtime.treasurySync170 = { active = false, started = now, received = 0, noPeerR2 = true }
+        if force and self.SetStatus then self:SetStatus("No compatible 1.8 leadership peer is online. The local Treasury ledger was kept.", nil, { source = "treasury", manual = true }) end
+        if self.RefreshTreasuryPage170 and self.ui and self.ui.currentPage == "treasury" then self:RefreshTreasuryPage170() end
+        return false
+    end
+    local queued = 0
+    local index, target
+    for index = 1, math.min(3, table.getn(peers)) do
+        target = peers[index]
+        if self:QueueNetworkPayload(table.concat({ self.treasuryProtocol170, "SYNC", self.version, tostring(now) }, "^"), "WHISPER", target, 2, "treasury", "treasury:sync:" .. self:NormalizeName(target)) then queued = queued + 1 end
+    end
+    if queued == 0 then return false end
+    self.lastTreasurySync170 = now
+    self.runtime.treasurySync170 = { active = true, started = now, received = 0, requestedPeersR2 = queued, manualR2 = force and true or false }
+    if force and self.SetStatus then self:SetStatus("Requesting Treasury ledger from compatible online leadership...", nil, { source = "treasury", manual = true }) end
+    if self.RefreshTreasuryPage170 and self.ui and self.ui.currentPage == "treasury" then self:RefreshTreasuryPage170() end
     return true
 end
 
@@ -352,10 +384,11 @@ function OTLGM:ScheduleTreasuryState170(target)
     local due = self:Now() + 1 + math.mod(score, 5)
     local old = self.treasuryShareTargets170[key]
     if not old or due < (old.due or due) then self.treasuryShareTargets170[key] = { name = target, due = due } end
+    if self.WakeScheduler180 then self:WakeScheduler180("treasury-state") end
     return true
 end
 
-function OTLGM:ProcessTreasuryTimers170()
+function OTLGM.__impl180.ProcessTreasuryTimers170__impl1(self)
     local key, pending
     for key, pending in pairs(self.treasuryShareTargets170 or {}) do
         if pending and self:Now() >= (pending.due or 0) then
@@ -365,13 +398,13 @@ function OTLGM:ProcessTreasuryTimers170()
         end
     end
     local sync = self.runtime and self.runtime.treasurySync170
-    if sync and sync.active and self:Now() - (tonumber(sync.started) or self:Now()) > 15 then
+    if sync and sync.active and self:Now() - (tonumber(sync.started) or self:Now()) >= 15 then
         sync.active = false
         sync.completed = self:Now()
     end
 end
 
-function OTLGM:HandleTreasuryMessage170(message, channel, sender)
+function OTLGM.__impl180.HandleTreasuryMessage170__impl1(self, message, channel, sender)
     local fields = self:Split(message, "^")
     local kind = fields[2] or ""
     if kind == "SYNC" then
@@ -379,6 +412,7 @@ function OTLGM:HandleTreasuryMessage170(message, channel, sender)
         return true
     end
     local treasury = self:EnsureTreasury170()
+    if not treasury then return false end
     if kind == "GOAL" then
         local id = fields[3] or ""
         local revision = tonumber(fields[4]) or 0
@@ -428,6 +462,9 @@ function OTLGM:HandleTreasuryMessage170(message, channel, sender)
         self.runtime.treasurySync170 = self.runtime.treasurySync170 or {}
         self.runtime.treasurySync170.active = false
         self.runtime.treasurySync170.completed = self:Now()
+        self.runtime.treasurySync170.lastPeerR2 = sender
+        self.runtime.treasurySync170.remoteLedgerRowsR2 = math.max(0, tonumber(fields[5]) or 0)
+        self.runtime.treasurySync170.noPeerR2 = nil
         if self.RefreshTreasuryPage170 and self.ui and self.ui.currentPage == "treasury" then self:RefreshTreasuryPage170() end
         return true
     end

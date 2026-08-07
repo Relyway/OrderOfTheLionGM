@@ -242,7 +242,7 @@ function OTLGM:GetEffectiveUIScale(requested)
     return math.max(0.62, math.min(requested, fitWidth, fitHeight))
 end
 
-function OTLGM:ApplyUIScale(requested)
+function OTLGM.__impl180.ApplyUIScale__impl1(self, requested)
     if not self.ui or not self.ui.main then return tonumber(requested) or 1 end
     local effective = self:GetEffectiveUIScale(requested)
     self.ui.main:SetScale(effective)

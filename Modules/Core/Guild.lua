@@ -83,6 +83,45 @@ local function NormalizeName(name)
     return string.lower(normalized)
 end
 
+-- Canonical guild-leader identity for guild-specific presentation and
+-- achievements.  Server permission checks intentionally remain separate: they
+-- still use the live guild APIs/rank flags below and are never granted merely
+-- because a character name matches this list.
+local CANONICAL_GUILD_LEADERS180 = {
+    morrow = true,
+    lucks = true,
+}
+
+function OTLGM:IsCanonicalGuildLeaderName180(name)
+    return CANONICAL_GUILD_LEADERS180[NormalizeName(name)] and true or false
+end
+
+function OTLGM:GetCanonicalGuildLeaderName180()
+    -- Prefer whichever canonical character is currently represented by the
+    -- committed roster as rank 0.  If rank data is stale/missing, prefer an
+    -- online canonical character, then any present canonical character.
+    local db = self.GetGuildDB and self:GetGuildDB() or nil
+    local roster = db and db.roster or nil
+    local onlineName, storedName
+    local key, member
+    for key, member in pairs(roster or {}) do
+        local name = member and member.name or key
+        if self:IsCanonicalGuildLeaderName180(name) then
+            if tonumber(member and (member.rankIndex or member.guildRankIndex)) == 0 then return name end
+            if member and member.online and not onlineName then onlineName = name end
+            if not storedName then storedName = name end
+        end
+    end
+    if onlineName then return onlineName end
+    if storedName then return storedName end
+    local player = UnitName and UnitName("player") or ""
+    if self:IsCanonicalGuildLeaderName180(player) then return player end
+    -- Even before the first committed roster arrives, a user-facing leader
+    -- target must stay inside the canonical pair rather than falling back to an
+    -- unrelated rank-0 cache row. Morrow is the stable default contact.
+    return "Morrow"
+end
+
 local function SafeBooleanFunction(fn)
     if not fn then return false end
     local ok, result = pcall(fn)
@@ -129,6 +168,21 @@ function OTLGM:ApplyCoreDefaults()
     if settings.historyFilter == nil then settings.historyFilter = "ALL" end
     if settings.windowX == nil then settings.windowX = 0 end
     if settings.windowY == nil then settings.windowY = 10 end
+    if settings.windowWidth180 == nil then settings.windowWidth180 = 1160 end
+    if settings.windowHeight180 == nil then settings.windowHeight180 = 740 end
+    if settings.windowSizePreset180 == nil then
+        -- Existing 1.8 test installs may already contain a manually resized
+        -- window but no preset marker. Preserve that geometry as Custom rather
+        -- than falsely labelling a 1000x700 window as Normal.
+        local savedWidth = tonumber(settings.windowWidth180) or 1160
+        local savedHeight = tonumber(settings.windowHeight180) or 740
+        if math.abs(savedWidth - 1160) <= 2 and math.abs(savedHeight - 740) <= 2 then
+            settings.windowSizePreset180 = "NORMAL"
+        else
+            settings.windowSizePreset180 = "CUSTOM"
+        end
+    end
+    if settings.keepWindowInsideScreen180 == nil then settings.keepWindowInsideScreen180 = false end
     if settings.customMessageNames == nil then settings.customMessageNames = { "Custom 1", "Custom 2", "Custom 3" } end
     if settings.recruitmentLastSent == nil then settings.recruitmentLastSent = {} end
     if settings.recruitmentReminderSeconds == nil then settings.recruitmentReminderSeconds = 300 end
@@ -211,7 +265,7 @@ function OTLGM:EnsureRecruitmentRotation170()
     return settings.recruitmentRotation170
 end
 
-function OTLGM:GetRecruitmentPreset170(key)
+function OTLGM.__impl180.GetRecruitmentPreset170__impl1(self, key)
     if key == "BASE1" or key == "BASE2" then
         local rotation = self:EnsureRecruitmentRotation170()
         return rotation[key == "BASE1" and 1 or 2]
@@ -634,38 +688,296 @@ function OTLGM:BuildOfflineInfo(index, isOnline)
     return totalHours, text
 end
 
+-- OctoWoW itself does not document a faction field in the stock 1.12 guild
+-- tuple. Some compatible clients/extensions append useful strings, while the
+-- popular Improved Guild Window convention stores a short race code at the
+-- start of the officer note (for example Hu-, NE-, Ta-, Go-). Accept both
+-- sources when they are explicit, but never infer faction from a character
+-- name, zone or a non-exclusive class.
+local ROSTER_RACE_FACTION_180 = {
+    HUMAN = "Alliance", DWARF = "Alliance", NIGHTELF = "Alliance", GNOME = "Alliance", HIGHELF = "Alliance",
+    ORC = "Horde", UNDEAD = "Horde", SCOURGE = "Horde", TAUREN = "Horde", TROLL = "Horde", GOBLIN = "Horde",
+}
+
+local ROSTER_RACE_DISPLAY_180 = {
+    HUMAN = "Human", DWARF = "Dwarf", NIGHTELF = "Night Elf", GNOME = "Gnome", HIGHELF = "High Elf",
+    ORC = "Orc", UNDEAD = "Undead", SCOURGE = "Undead", TAUREN = "Tauren", TROLL = "Troll", GOBLIN = "Goblin",
+}
+
+local OFFICER_RACE_CODES_180 = {
+    HU = "HUMAN", DW = "DWARF", NE = "NIGHTELF", GN = "GNOME", HE = "HIGHELF",
+    OR = "ORC", UN = "UNDEAD", TA = "TAUREN", TR = "TROLL", GO = "GOBLIN",
+}
+
+local function NormalizeRaceCandidate180(value)
+    local text = string.upper(tostring(value or ""))
+    text = string.gsub(text, "[%s_%-]", "")
+    if text == "NIGHTELF" or text == "HIGHELF" or text == "HUMAN" or text == "DWARF" or text == "GNOME"
+        or text == "ORC" or text == "UNDEAD" or text == "SCOURGE" or text == "TAUREN" or text == "TROLL" or text == "GOBLIN" then
+        return text
+    end
+    return nil
+end
+
+local OFFICER_RACE_CODES_SHORT_180 = {
+    H = "HUMAN", D = "DWARF", N = "NIGHTELF", G = "GNOME",
+    O = "ORC", U = "UNDEAD", T = "TROLL",
+}
+
+local function FactionFromOfficerNote180(note)
+    note = tostring(note or "")
+    -- Current convention: two-letter race code, e.g. Hu-, NE-, Ta-, Go-.
+    if string.len(note) >= 3 and string.sub(note, 3, 3) == "-" then
+        local code = string.upper(string.sub(note, 1, 2))
+        local race = OFFICER_RACE_CODES_180[code]
+        if race then return ROSTER_RACE_FACTION_180[race], race end
+    end
+    -- Backward-compatible convention used by older guild notes: H-, N-, O-,
+    -- etc. T- historically means Troll; Tauren requires Ta- so it is never
+    -- guessed ambiguously.
+    if string.len(note) >= 2 and string.sub(note, 2, 2) == "-" then
+        local code = string.upper(string.sub(note, 1, 1))
+        local race = OFFICER_RACE_CODES_SHORT_180[code]
+        if race then return ROSTER_RACE_FACTION_180[race], race end
+    end
+    return nil, nil
+end
+
+local function FactionFromRosterExtraValue180(value)
+    if type(value) ~= "string" then return nil, nil end
+    local upper = string.upper(value)
+    if upper == "ALLIANCE" then return "Alliance", nil end
+    if upper == "HORDE" then return "Horde", nil end
+    local race = NormalizeRaceCandidate180(value)
+    if race and ROSTER_RACE_FACTION_180[race] then
+        return ROSTER_RACE_FACTION_180[race], race
+    end
+    return nil, nil
+end
+
+local function FactionFromRosterExtras180(officerNote, extra1, extra2, extra3, extra4, extra5, extra6, extra7)
+    local faction, race
+    faction, race = FactionFromRosterExtraValue180(extra1) if faction then return faction, race, race and "roster-race" or "roster-api" end
+    faction, race = FactionFromRosterExtraValue180(extra2) if faction then return faction, race, race and "roster-race" or "roster-api" end
+    faction, race = FactionFromRosterExtraValue180(extra3) if faction then return faction, race, race and "roster-race" or "roster-api" end
+    faction, race = FactionFromRosterExtraValue180(extra4) if faction then return faction, race, race and "roster-race" or "roster-api" end
+    faction, race = FactionFromRosterExtraValue180(extra5) if faction then return faction, race, race and "roster-race" or "roster-api" end
+    faction, race = FactionFromRosterExtraValue180(extra6) if faction then return faction, race, race and "roster-race" or "roster-api" end
+    faction, race = FactionFromRosterExtraValue180(extra7) if faction then return faction, race, race and "roster-race" or "roster-api" end
+    faction, race = FactionFromOfficerNote180(officerNote)
+    if faction then return faction, race, "officer-race-code" end
+    return nil, nil, nil
+end
+
+local function ReadRosterMember180(owner, index, now)
+    local name, rank, rankIndex, level, class, zone, note, officerNote, isOnline, extra1, extra2, extra3, extra4, extra5, extra6, extra7 = GetGuildRosterInfo(index)
+    if not name then return nil, false end
+    local offlineHours, lastOnlineText = owner:BuildOfflineInfo(index, isOnline)
+    local faction180, raceToken180, factionSource180 = FactionFromRosterExtras180(officerNote, extra1, extra2, extra3, extra4, extra5, extra6, extra7)
+    return {
+        name = name,
+        rank = rank or "",
+        rankIndex = rankIndex or 99,
+        level = level or 0,
+        class = class or "",
+        zone = zone or "",
+        note = note or "",
+        officerNote = officerNote or "",
+        online = isOnline and true or false,
+        offlineHours = offlineHours or 0,
+        offlineDays = math.floor((offlineHours or 0) / 24),
+        lastOnlineText = lastOnlineText or "Offline",
+        rosterIndex = index,
+        seen = now,
+        faction180 = faction180,
+        factionSeenAt180 = faction180 and now or nil,
+        factionSource180 = factionSource180,
+        race180 = raceToken180 and ROSTER_RACE_DISPLAY_180[raceToken180] or nil,
+    }, isOnline and true or false
+end
+
 function OTLGM:ReadRoster()
+    local override = self.runtime and self.runtime.rosterReadOverride180
+    if override then return override.snapshot or {}, tonumber(override.total) or 0, tonumber(override.online) or 0 end
+
     local snapshot = {}
     local total = GetNumGuildMembers(true) or 0
     local online = 0
     local now = self:Now()
     local i
-
     for i = 1, total do
-        local name, rank, rankIndex, level, class, zone, note, officerNote, isOnline = GetGuildRosterInfo(i)
-        if name then
+        local member, isOnline = ReadRosterMember180(self, i, now)
+        if member then
+            snapshot[member.name] = member
             if isOnline then online = online + 1 end
-            local offlineHours, lastOnlineText = self:BuildOfflineInfo(i, isOnline)
-            snapshot[name] = {
-                name = name,
-                rank = rank or "",
-                rankIndex = rankIndex or 99,
-                level = level or 0,
-                class = class or "",
-                zone = zone or "",
-                note = note or "",
-                officerNote = officerNote or "",
-                online = isOnline and true or false,
-                offlineHours = offlineHours or 0,
-                offlineDays = math.floor((offlineHours or 0) / 24),
-                lastOnlineText = lastOnlineText or "Offline",
-                rosterIndex = i,
-                seen = now,
-            }
+        end
+    end
+    return snapshot, total, online
+end
+
+-- Full guild rosters on OctoWoW can exceed 780 characters. Reading every
+-- roster API row and its last-online tuple in one event callback is a visible
+-- freeze risk, so the canonical full-scan path reads bounded slices and only
+-- commits after the snapshot is complete. Domain data is never partially
+-- replaced.
+local function ScheduleRosterScanSliceSafe180(owner, delay)
+    if not owner or not owner.ScheduleAfter180 then return false end
+    return owner:ScheduleAfter180("roster-scan-slice", math.max(0, tonumber(delay) or 0), function(current)
+        local ok, problem = pcall(current.ProcessRosterScanSlice180, current)
+        current.runtime = current.runtime or {}
+        if ok then
+            current.runtime.rosterSliceDispatchFailures180 = 0
+            return
+        end
+        local failures = math.min(3, (tonumber(current.runtime.rosterSliceDispatchFailures180) or 0) + 1)
+        current.runtime.rosterSliceDispatchFailures180 = failures
+        if current.RecordInternalIssueRC3 then pcall(current.RecordInternalIssueRC3, current, "Roster/SLICE_DISPATCH", problem) end
+        if current.runtime.rosterRead180 and failures < 3 and current.ScheduleAfter180 then
+            ScheduleRosterScanSliceSafe180(current, 0.5)
+            return
+        end
+        -- An unexpected outer failure must not leave the bounded-reader lock
+        -- set forever. Preserve the last committed roster and fail closed.
+        current.runtime.rosterRead180 = nil
+        current.runtime.rosterReadOverride180 = nil
+        if current.SetOperationState156 then pcall(current.SetOperationState156, current, "ROSTER", "ERROR", "Roster scan stopped after an internal error", 6) end
+        if current.SetStatus then pcall(current.SetStatus, current, "Roster scan stopped safely: " .. tostring(problem or "unknown error")) end
+    end, 70)
+end
+function OTLGM:BeginRosterScan180(reason)
+    self.runtime = self.runtime or {}
+    if self.runtime.rosterRead180 then return false end
+    local total = GetNumGuildMembers and (tonumber(GetNumGuildMembers(true)) or 0) or 0
+    self.runtime.rosterRead180 = {
+        reason = tostring(reason or "INTERNAL"), total = total, index = 1,
+        online = 0, snapshot = {}, startedAt = self:Now(), restarts = 0,
+    }
+    self.runtime.rosterMetrics180 = self.runtime.rosterMetrics180 or { fullScans = 0, targetedRefreshes = 0, reasons = {} }
+    if self.ScheduleAfter180 then
+        ScheduleRosterScanSliceSafe180(self, 0)
+        return true
+    end
+    -- Never fall back to a synchronous 780+ member scan. Without the shared
+    -- scheduler the safe behavior is an explicit error and no partial commit.
+    self.runtime.rosterRead180 = nil
+    if self.SetOperationState156 then self:SetOperationState156("ROSTER", "ERROR", "Bounded roster scheduler is unavailable", 6) end
+    return false
+end
+
+function OTLGM:ProcessRosterScanSlice180(forceAll)
+    local state = self.runtime and self.runtime.rosterRead180
+    if not state then return false end
+    if self.InCombat and self:InCombat() and state.reason ~= "MANUAL" then
+        if self.ScheduleAfter180 then ScheduleRosterScanSliceSafe180(self, 1) end
+        return false
+    end
+
+    local liveTotal = 0
+    if GetNumGuildMembers then
+        local countOk, countValue = pcall(GetNumGuildMembers, true)
+        if countOk then
+            liveTotal = tonumber(countValue) or 0
+        else
+            state.failures180 = (tonumber(state.failures180) or 0) + 1
+            if self.RecordInternalIssueRC3 then pcall(self.RecordInternalIssueRC3, self, "Roster/SLICE_COUNT", countValue) end
+            if state.failures180 <= 2 and self.ScheduleAfter180 then
+                ScheduleRosterScanSliceSafe180(self, 0.5)
+                return false
+            end
+            self.runtime.rosterRead180 = nil
+            self.runtime.rosterReadOverride180 = nil
+            if self.SetOperationState156 then self:SetOperationState156("ROSTER", "ERROR", "Roster API could not be read safely", 6) end
+            return false
+        end
+    end
+    state.failures180 = 0
+    if liveTotal ~= state.total and state.index > 1 and (tonumber(state.restarts) or 0) < 2 then
+        state.total = liveTotal
+        state.index = 1
+        state.online = 0
+        state.snapshot = {}
+        state.restarts = (tonumber(state.restarts) or 0) + 1
+    else
+        state.total = liveTotal
+    end
+
+    local startedProfile
+    if debugprofilestop then
+        local ok, value = pcall(debugprofilestop)
+        if ok then startedProfile = tonumber(value) end
+    end
+    local processed = 0
+    -- A 788+ member OctoWoW guild must never monopolize one rendered frame.
+    -- Spread the scan over smaller slices; total scan latency grows slightly,
+    -- but foreground frame-time spikes are materially lower.
+    local maximum = forceAll and math.max(1, state.total) or 50
+    state.snapshot = type(state.snapshot) == "table" and state.snapshot or {}
+    state.online = tonumber(state.online) or 0
+    state.index = math.max(1, tonumber(state.index) or 1)
+    while state.index <= state.total and processed < maximum do
+        local rowOk, member, isOnline = pcall(ReadRosterMember180, self, state.index, self:Now())
+        if not rowOk then
+            state.rowFailures180 = (tonumber(state.rowFailures180) or 0) + 1
+            if self.RecordInternalIssueRC3 then pcall(self.RecordInternalIssueRC3, self, "Roster/SLICE_ROW", member) end
+            if state.rowFailures180 <= 2 and self.ScheduleAfter180 then
+                ScheduleRosterScanSliceSafe180(self, 0.5)
+                return false
+            end
+            -- Do not leave rosterRead180 set after a persistent API/helper
+            -- failure: that state gates future scans, confirmation work and
+            -- several transition paths. Fail closed with the last committed
+            -- roster still intact rather than making the addon look inactive.
+            self.runtime.rosterRead180 = nil
+            self.runtime.rosterReadOverride180 = nil
+            if self.SetOperationState156 then self:SetOperationState156("ROSTER", "ERROR", "Roster row could not be read safely", 6) end
+            return false
+        end
+        state.rowFailures180 = 0
+        if member then
+            state.snapshot[member.name] = member
+            if isOnline then state.online = state.online + 1 end
+        end
+        state.index = state.index + 1
+        processed = processed + 1
+        if not forceAll and startedProfile and debugprofilestop and processed >= 16 then
+            local ok, current = pcall(debugprofilestop)
+            if ok and tonumber(current) and (tonumber(current) - startedProfile) >= 4 then break end
         end
     end
 
-    return snapshot, total, online
+    local metrics = self.runtime.rosterMetrics180
+    if type(metrics) ~= "table" then
+        metrics = { fullScans = 0, targetedRefreshes = 0, reasons = {} }
+        self.runtime.rosterMetrics180 = metrics
+    end
+    metrics.readSlices = (tonumber(metrics.readSlices) or 0) + 1
+    metrics.rowsRead = (tonumber(metrics.rowsRead) or 0) + processed
+    metrics.lastSliceRows = processed
+    if startedProfile and debugprofilestop then
+        local ok, current = pcall(debugprofilestop)
+        if ok and tonumber(current) then metrics.lastSliceMs = math.max(0, tonumber(current) - startedProfile) end
+    end
+
+    if state.index <= state.total then
+        if self.ScheduleAfter180 then ScheduleRosterScanSliceSafe180(self, 0.02) end
+        return false
+    end
+
+    self.runtime.rosterRead180 = nil
+    self.runtime.rosterDataDirty180 = nil
+    self.runtime.rosterReadOverride180 = { snapshot = state.snapshot, total = state.total, online = state.online }
+    local ok, problem = pcall(function() self:Scan(state.reason) end)
+    self.runtime.rosterReadOverride180 = nil
+    if self.RefreshSenderRosterCache then self:RefreshSenderRosterCache(true) end
+    if not ok then
+        if self.SetOperationState156 then self:SetOperationState156("ROSTER", "ERROR", tostring(problem or "Roster commit failed"), 6) end
+        if self.SetStatus then self:SetStatus("Roster snapshot could not be committed: " .. tostring(problem or "unknown error")) end
+        return false
+    end
+    -- RC5: privileged packets deferred while authority was stale are replayed
+    -- only after a successful committed roster snapshot refreshed the allow-list.
+    if self.ReplayAuthorityPacketsRC5 then self:ReplayAuthorityPacketsRC5() end
+    return true
 end
 
 function OTLGM:IsLeadership(member)
@@ -724,12 +1036,20 @@ function OTLGM:GetMember(name)
     local db = self:GetGuildDB()
     if not db or not name then return nil end
     if db.roster[name] then return db.roster[name] end
-    local target = NormalizeName(name)
-    local storedName, member
-    for storedName, member in pairs(db.roster) do
-        if NormalizeName(storedName) == target or NormalizeName(member and member.name) == target then return member end
+    self.runtime = self.runtime or {}
+    local lookup = self.runtime.rosterMemberLookup180
+    if not lookup or lookup.roster ~= db.roster or lookup.lastScan ~= db.lastScan then
+        lookup = { roster = db.roster, lastScan = db.lastScan, byKey = {} }
+        local storedName, member, key
+        for storedName, member in pairs(db.roster or {}) do
+            key = NormalizeName(storedName)
+            if key ~= "" then lookup.byKey[key] = member end
+            key = NormalizeName(member and member.name)
+            if key ~= "" then lookup.byKey[key] = member end
+        end
+        self.runtime.rosterMemberLookup180 = lookup
     end
-    return nil
+    return lookup.byKey[NormalizeName(name)]
 end
 
 function OTLGM:FindRosterIndex(name)
@@ -755,8 +1075,14 @@ function OTLGM:GetPlayerGuildRankIndex170()
 end
 
 function OTLGM:IsGuildLeader170()
+    -- Guild-leader identity is guild-specific and must never be inferred for an
+    -- unrelated character merely because a stale/custom-server API reports
+    -- rank index 0.  Morrow/Lucks still have to pass the live server leader
+    -- signal before this *permission* helper grants leader-level capabilities.
+    -- Other officers continue through the normal live rank-flag checks below.
+    local playerName = UnitName and UnitName("player") or ""
+    if self.IsCanonicalGuildLeaderName180 and not self:IsCanonicalGuildLeaderName180(playerName) then return false end
     if IsGuildLeader then
-        local playerName = UnitName and UnitName("player")
         local ok, result = pcall(IsGuildLeader, playerName)
         if ok and result then return true end
         ok, result = pcall(IsGuildLeader)
@@ -849,7 +1175,7 @@ function OTLGM:ResetGuildData()
     if key and OTLGM_DB and OTLGM_DB.guilds then
         OTLGM_DB.guilds[key] = nil
         self:Chat("Local history for the current guild has been reset. The next scan will create a new baseline.")
-        self:RequestScan(true)
+        self:RequestScan("MANUAL")
         if self.RefreshAll then self:RefreshAll() end
     end
 end
@@ -1076,6 +1402,8 @@ function OTLGM:IsGuildChatChannelBeingRead(channel)
 end
 
 function OTLGM:SetGuildChatChannel(channel)
+    local previousChannel180 = self.GetGuildChatChannel and self:GetGuildChatChannel() or "GUILD"
+    if self.SaveGuildChatDraft and previousChannel180 then self:SaveGuildChatDraft(previousChannel180) end
     channel = channel == "OFFICER" and "OFFICER" or "GUILD"
     if channel == "OFFICER" and (not self.IsOfficerMode or not self:IsOfficerMode()) then
         if self.Notify then self:Notify("Officer Chat Unavailable", "Your current guild rank does not expose officer tools to the addon.") end
@@ -1090,7 +1418,7 @@ function OTLGM:SetGuildChatChannel(channel)
     if self.RefreshGuildChatNavigationBadge then self:RefreshGuildChatNavigationBadge() elseif self.RefreshNavigation then self:RefreshNavigation() end
 end
 
-function OTLGM:CaptureGuildChatMessage(channel, message, sender)
+function OTLGM.__impl180.CaptureGuildChatMessage__impl1(self, channel, message, sender)
     channel = channel == "OFFICER" and "OFFICER" or "GUILD"
     message = Trim(message or "")
     sender = Trim(sender or "Unknown")
@@ -1133,7 +1461,11 @@ function OTLGM:CaptureGuildChatMessage(channel, message, sender)
         self.runtime.pendingMentionTarget174 = { channel = channel, ts = messageTime, sender = shortSender, text = message }
         self:NotifyEvent152("mention", "MENTION:" .. channel .. ":" .. tostring(messageTime) .. ":" .. fingerprint,
             shortSender .. (channel == "OFFICER" and " mentioned you in officer chat" or " mentioned you in guild chat"),
-            preview, "ACTION", true, "guildchat")
+            preview, "ACTION", true, "guildchat", {
+                objectType = "CHAT_MESSAGE", objectId = channel .. ":" .. tostring(messageTime) .. ":" .. fingerprint,
+                section = channel, actionKey = "MENTION", messageChannel = channel, messageTs = messageTime,
+                messageSender = shortSender, messageText = message,
+            })
         self.runtime.pendingMentionTarget174 = nil
     end
 
@@ -1141,6 +1473,7 @@ function OTLGM:CaptureGuildChatMessage(channel, message, sender)
         self:RefreshGuildChatPage()
     end
     if self.RefreshGuildChatNavigationBadge then self:RefreshGuildChatNavigationBadge() elseif self.RefreshNavigation then self:RefreshNavigation() end
+    return true
 end
 
 function OTLGM:ClearGuildChatHistory(channel)
