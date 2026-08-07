@@ -1,183 +1,45 @@
 # Changelog
 
-## 1.7.6 performance-r5-hotfix1 (2026-07-26)
+## 1.8.0 — 2026-08-08
 
-- Scoped Treasury and Recent Whispers modal shading to the addon window or dialog bounds instead of dimming the entire game world.
-- Recursively raised modal controls above the shade and made new dialog surfaces fully opaque, restoring clickable buttons and edit boxes.
-- Added direct Ledger and + Gold actions to every Treasury funding-goal row.
-- Added live cached-roster class, guild-rank, level and class-color metadata to contributor summaries and individual contribution entries.
-- Added a cumulative Treasury donor achievement series at 5g, 25g, 50g and 100g. Credit belongs only to the named donor, not the leadership member recording the contribution.
-- Added bounded donor-total migration and explicit-event synchronization without a new OnUpdate handler, polling loop or background roster scan.
-- Updated the release gates for 30 TOC Lua files, 29 registered modules and build `performance-r5-hotfix1-20260726`.
+### Final audit 2
+- Fixed a subtle **foreground clock lifecycle** gap: the shared ST header now updates on every visible page, resumes after close/reopen and Park/unpark, and remains fully cancelled while the main addon window is hidden.
+- Reduced quiet-page foreground work: pages that only need the `HH:MM` ST header now pulse every 30 seconds instead of every 5 seconds. Recruitment/Guild Chat and the bounded Professions/Treasury recovery checks keep their shorter dedicated cadence.
+- Corrected legacy Activity conversion to **server-time calendar buckets** while preserving real absolute timestamps for retention and period math.
+- Fixed Activity boundary handling: 90-day retention now uses the newest sample, period averages use the newest sample to decide overlap, and weekly/period peaks use the exact `peakAt` timestamp. A boundary day can no longer disappear almost a day early.
+- Fixed raid displays that could pair a server-time clock with a local-OS date; raid date and clock now share the same ST formatter.
+- Added one-pass cached total + online guild composition. Activity can show Alliance/Horde/Unknown, known coverage, A:H ratio, online population, online level-60 population, class distribution and level distribution without a new scan loop.
+- Presence `V/Q` packets accept an optional validated Alliance/Horde field without a protocol bump; old clients remain compatible. Duplicate detected-version writes on those packets were removed.
+- Backup import/undo/rollback now immediately recalculates dynamic achievement-event ownership after SavedVariables replacement.
+- Achievement ownership now releases listeners at the exact completion point and can re-enable them after restoring incomplete progress.
+- Restored ten published achievements that an older anti-stutter layer had effectively paused, while keeping mailbox work bounded to four headers per scheduler slice and money tracking self-disabling when finished.
+- Rabbit combat/death parsing remains dormant unless the rabbit tracker is actually active; its target listener disappears after B085.
+- Ambient text-emote parsing disappears after the coordinated roar/dance/kneel secrets are complete.
+- Both duplicate tabard equipment listeners disappear after `UNDER_BANNER` is complete.
+- Local trade UI listeners disappear after A027 is complete; release-layer craft confirmation listeners disappear after B079 is complete.
+- The original boss-achievement frame no longer parses high-frequency target/combat-death traffic in the open world. Boss-victory traffic is enabled only inside a known supported instance while a relevant achievement remains incomplete; encounter bookkeeping is narrower still and stays on only for achievements that need death history. A one-shot post-world-entry recheck covers clients whose zone text settles late.
+- Corrected achievement catalogue metadata to **146 unique definitions** and removed confusing final-facing old 1.7.6/C5 identity from module diagnostics.
 
-## 1.7.6 performance-r5-stability (2026-07-26)
+### Earlier final fixes retained
+- Roster pooled-row overflow after Normal/Compact/Fit transitions fixed with hard visible capacity plus optional child clipping as defence-in-depth.
+- Park/window positioning corrected for real visible bounds and UI scale; screen dimensions are no longer divided by effective scale twice.
+- Recruitment Compact/Fit layout and live elapsed-time label paths corrected.
+- User-facing Guild Leader identity restricted to **Morrow / Lucks** while actual guild actions still depend on live server permissions.
+- Same-base prerelease version ordering treats final `1.8.0` as newer than `1.8.0-rc*`, beta and alpha builds.
 
-- Added a full stability-first R5 layer without adding another OnUpdate handler.
-- Suppressed mailbox/AH-result achievement scanning, capped network packets per heartbeat, throttled incremental bag slices outside combat, and prevented hidden-page rebuilds.
-- Preserved the R4 login, zone-transition, Thunder Bluff subzone, group-snapshot, achievement-cache, and risky-tracker protections.
-- Added an exclusive modal manager so Treasury and Recent Whispers windows cannot overlap.
-- Added Treasury Activity and a pageable per-goal ledger with contributor totals and individual contribution history.
-- Completed Recent Whispers guild invitations with correct row binding, permission checks, member checks, and Sent/Member states.
-- Reduced and lowered the OTL edge tab, reflowed Recruitment controls, quieted Guild Chat row actions, and removed visible actor-unavailable diagnostics.
-- Preserved SavedVariables schema 14 and network protocol 3.
-- Updated the full release validation gates for 29 TOC Lua files and build `performance-r5-stability-20260726`.
+### Release identity
+- Version: `1.8.0`
+- Build: `final-public-20260808`
+- Interface: `11200`
+- Schema: `15`
+- Protocol: `3`
+- No destructive SavedVariables migration and no protocol bump.
 
-## 1.7.5 stable-r7 (2026-07-23)
+### Final public polish
+- Added a native **Invite to Guild** action to the Roster toolbar with a simple name-entry modal, Enter-to-submit, permission checks and the standard guild invitation API.
+- Reworked Activity faction balance: Alliance/Horde are now presented as a two-sided balance; unidentified members no longer appear as a fake third faction in the main UI.
+- Added extra reliable faction discovery from compatible extended roster fields plus current and backward-compatible officer-note race codes (Hu-/H-, NE-/N-, Ta-, Go-, etc.), while retaining direct unit/addon evidence.
+- Faction percentages are explicitly based on identified members. The main card now shows a quality label (`Roster coverage`, `Partial coverage`, or `Learning factions`) instead of pretending incomplete data is complete.
+- Corrected the responsive Activity layout for the new Alliance/Horde icons so Fit/Compact reflow cannot place text on top of the faction emblems.
+- Kept the faction card visually neutral rather than tinting the whole panel toward either faction.
 
-- Fixed Guild Chat page-level keyboard capture that blocked movement, jumping and normal gameplay keys while the page was merely open.
-- Guild Chat now captures keyboard input only while its EditBox is actually focused.
-- Opening Guild Chat or switching channels no longer forces typing mode.
-- After sending a message, the input remains focused for rapid follow-up messages.
-- Pressing Escape while typing now saves the draft, releases input focus and immediately restores character controls without closing the addon.
-- No new OnUpdate handlers, schema changes or protocol changes.
-
-## 1.7.5 stable-r6 (2026-07-23)
-- Fixed the Overview card nil-field error and separated the Activity insight panel from the heatmap.
-- Added 21 previously missing approved achievements, bringing the catalog to 142.
-- Grouped related achievement tiers through shared series metadata while preserving published names.
-- Added event-driven money, bag, mail, level, loot-roll, trade, world-boss and fall-death trackers.
-- Filtered implausible bulk roster deltas from summaries and the default History view.
-- Moved Activity to the bottom of the Guild navigation section.
-
-
-All notable changes to OrderOfTheLionGM are documented here.
-
-## 1.7.5 hotfix r5 — 2026-07-23
-
-- Fixed remaining achievement category-counter wrapping and made general tabard achievements use neutral lion artwork instead of Horde or Alliance banners.
-- Kept the Guild Chat input focused after send and made Enter focus the addon chat while the Guild Chat page is active, without stealing focus from modals or other edit boxes.
-- Tightened wrapped-message measurement and continuation grouping, and resized the separate Guild, Officer, and Board badges so they do not cover the navigation label.
-- Reflowed Guild Activity, Overview, Home, raid details, and the Guild Board composer to prevent text, counters, and actions from escaping their panels.
-- Preserved the proven Treasury geometry while improving unsupported-server wording and readable goal-history entries.
-- Corrected roster empty-state control handling, crafting synchronization state reporting, Guild Board delete confirmation, and Group Finder create/update wording.
-- Preserved version 1.7.5, the 121-achievement catalog, SavedVariables schema 14, network protocol 3, and the single shared heartbeat.
-
-## 1.7.5 hotfix r4 — 2026-07-23
-
-- Rebuilt raid editing and raid details into non-overlapping Basic Information, Raid Team, Notifications, and action sections.
-- Replaced approximate Guild Chat row sizing with measured text height and restored compact grouping for consecutive messages from one sender.
-- Added separate Guild, Officer, and Guild Board unread badges, with mention highlighting that does not erase channel counts.
-- Moved Guild Activity guidance into a dedicated strip above its action buttons.
-- Removed achievement-page rebuilds from hover handlers, preventing flicker, disappearing cards, and cursor-triggered stalls.
-- Added robust custom-tabard detection for **Under the Banner** while preserving its permanent achievement ID.
-- Added 34 lightweight threshold achievements that reuse existing counters and bounded sets, bringing the catalog to 121.
-- Added an officer-confirmed Darkmoon Faire status on Home without pretending the Vanilla client exposes a reliable world-wide location API.
-- Added editable Guild Info and Share Addon recruitment presets with reset-to-default controls.
-- Preserved public version 1.7.5, schema 14, protocol 3, and backward-compatible SavedVariables.
-
-## 1.7.5 hotfix r3 — 2026-07-22
-
-- Restored Vanilla/Lua 5.0 compatibility by removing the Lua 5.1 vararg expression from the emote hook.
-- Moved the 1.7.5 extension back into its own module and loaded the stable core Events module first, so slash commands and the minimap button remain available even if an optional release extension fails.
-- Preserved the full 1.7.5 achievement catalog and SavedVariables compatibility.
-
-## 1.7.5 hotfix r2 — 2026-07-22
-
-### Fixed
-
-- Removed all `string.match` and `string.gmatch` calls that are unavailable in the live Vanilla-style runtime and caused repeated `Security.lua` failures.
-- Embedded the 1.7.5 runtime in the already-existing Events module so the update still loads when a folder merge accidentally retains the older 1.7.4 TOC.
-- Restored **Under the Banner** with its original permanent ID and migration of earlier completion data.
-- Updated the catalog total to 87 achievements and added login/equipment checks for the guild tabard.
-- Bumped the internal build identifier to `stable-r2-20260722`; public version remains 1.7.5.
-
-## 1.7.5 — 2026-07-22
-
-### Added
-
-- Added 40 approved achievements to the existing 46 and restored Under the Banner, for a total catalog of 87 permanent achievements.
-- Added social composition, long-session, reunion, duel, Guild Leader, dungeon, survival, resurrection, raid-class, fishing, epic-loot, meta, crafting, riding, and secret achievement conditions.
-- Added Raid Leader, Invite Contact, and Invite Helpers fields to raid creation and editing.
-- Added Start Invites / Announce Again workflow with authenticated metadata, a five-minute repeat guard, Inbox persistence, compact popup, and direct Whisper action.
-- Added a full 1.7.5 achievement catalog, release notes, test report, and live verification checklist.
-
-### Changed
-
-- Reworked achievement Overview ordering to show completed entries first, then in-progress entries, then locked entries.
-- Reworked achievement pagination so every page contains only its own rows.
-- Reworked raid cards and raid details into distinct status, date, time, countdown, meeting, briefing, leader, contact, and helper sections.
-- Improved Enchanting result presentation and recipe detail behavior.
-- Increased safe Guild Chat wrapping capacity and retained author/time context for consecutive messages.
-- Moved Guild Activity guidance away from bottom action buttons.
-- Updated diagnostics to report 23/23 modules.
-
-### Fixed
-
-- Fixed recycled achievement rows inheriting incorrect or question-mark icons.
-- Fixed duplicate reaction notifications across Inbox, popups, and Recent Activity.
-- Fixed duplicate Guild Chat capture and wrapped messages overlapping following rows.
-- Fixed stale raid metadata being able to close or rewind a newer invite state.
-- Fixed unknown profession-level cells displaying a permanent `U?` marker.
-- Fixed profession tooltips opening over the detail card when there is room on the opposite side.
-- Fixed hostile-capital achievement checks so noisy health events are constant-time outside relevant zones.
-- Preserved version 1.7.4 achievement progress, schema 14, protocol 3, and compatible SavedVariables without requiring a reset.
-
-## 1.7.4 — 2026-07-22
-
-### Added
-
-- Added 46 permanent Guild Achievements across Social, Group Finder, Professions, Dungeons, Raids, Legacy, and Secrets.
-- Added a separate Raids achievement category, search, All / Completed / In Progress / Locked filters, category counters, completion dates, and visible secret titles.
-- Added clickable achievement links, Shift-click insertion into the active Blizzard chat box, compact closable toasts, and guild-chat announcements enabled by default.
-- Added Guild Chat mention notifications with Inbox persistence and message targeting.
-- Added Treasury contribution guidance for mailing gold or items to Morrow with the intended goal stated.
-- Added visible plus/minus recipe favorite controls.
-
-### Changed
-
-- Rebuilt the sidebar as fixed primary navigation, a scrollable guild/officer section, and a fixed utility footer.
-- Reworked Home to give more space to announcements and the important or next raid, including date, server time, countdown, leader, location, and note.
-- Moved Guild Inbox into a centered modal overlay instead of covering Home content.
-- Changed achievement chat output to `[Guild Achievement] Player earned [Achievement].` with only the achievement title linked.
-- Simplified Addon Users display to public versions only; exact builds remain in diagnostics.
-- Updated the protected recruitment addon preset with the full download URL and concise functional benefits.
-- Kept only Side by Side and Five as One as ordinary group-composition achievements; dungeon boss credit requires at least three guild members.
-
-### Fixed
-
-- Prevented left-navigation section labels, Treasury, officer tools, and utility controls from overlapping as pages are added.
-- Fixed achievement icons being reused by recycled rows.
-- Fixed profession achievement reevaluation after scans and migrations.
-- Fixed secret cards to hide conditions while retaining their clue titles.
-- Added bounded progress sets, event deduplication, membership-period handling, and safer same-zone group presence checks.
-- Preserved schema 14, protocol 3, and backward-compatible SavedVariables migration.
-
-## 1.7.3 — 2026-07-21
-
-### Launcher compatibility
-
-- Moved the live addon TOC, Assets and Modules to the repository root.
-- Added direct OctoLauncher Git installation support.
-- Enabled future one-click updates through Update and Update All.
-- Updated validation and release packaging for the new repository layout.
-- SavedVariables schema 14 and network protocol 3 remain unchanged.
-
-
-
-## [1.7.2] - 2026-07-20
-
-### Added
-- Revision-specific announcement read receipts for leadership.
-- Exact build identifiers in version discovery and diagnostics.
-- Shared Vanilla interaction audit for buttons and edit boxes.
-
-### Changed
-- Rebuilt the addon around the modular 1.7.x foundation.
-- Restored the compact Guild Chat layout.
-- Improved Roster, Professions, Group Finder, Raid Alerts, Treasury, Recruitment, Home, and officer workflows.
-- Preserved schema 14 and protocol 3 for compatible upgrades.
-
-### Fixed
-- Non-interactive controls caused by missing mouse registration or stale native disabled state.
-- Roster promotion, demotion, removal, and note editing.
-- Treasury goal editing and deletion.
-- Group Finder create, share, join, cancel, whisper, accept, invite, decline, and close actions.
-- TurtleRP ChatThrottleLib invalid escape errors caused by unsafe transport payloads.
-- Profession cache, favorites, filtering, counters, item details, and migration edge cases.
-- Old and malformed SavedVariables recovery without requiring a reset.
-
-Full details: [`docs/RELEASE_NOTES_1.7.2.md`](docs/RELEASE_NOTES_1.7.2.md)
-
-## [1.5.7] - 2026-07
-
-Last legacy release before the modular 1.7.x rebuild.

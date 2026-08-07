@@ -2,8 +2,8 @@
 ## Title: |cffffcc66Order of the Lion|r |cffffffffGuild Manager|r |cff75d66bOctoWoW|r
 ## Notes: |cffffffffGuild chat, Guild Achievements, roster, Crafting Network, PvE coordination, activity and officer tools.|r
 ## Author: |cffffcc66Hikol|r |cffaaaaaa(mrhikol / Lucks)|r, |cffffffffOrder of the Lion|r
-## Version: 1.7.6
-## X-Build: performance-r5-hotfix1-20260726
+## Version: 1.8.0
+## X-Build: final-public-20260808
 ## X-License: MIT
 ## X-Website: https://github.com/Relyway/OrderOfTheLionGM
 ## SavedVariables: OTLGM_DB
@@ -29,11 +29,18 @@ Modules\Crafting\Search.lua
 Modules\UI\Minimap.lua
 Modules\Features\Achievements174.lua
 Modules\Core\Events.lua
-Modules\Features\Release175.lua
-Modules\Features\Release175R4.lua
-Modules\Features\Release175R5.lua
-Modules\Features\Release175R6.lua
-Modules\Features\Release175R7.lua
+Modules\Features\AchievementRaidRuntime.lua
+Modules\Features\CommunityEnhancements.lua
+Modules\Features\FeaturePresentation.lua
+Modules\Features\ActivityTracking.lua
+Modules\Features\ChatPresentation.lua
 Modules\Core\Performance176.lua
-Modules\Core\Release176R5.lua
-Modules\Core\Release176R5Hotfix.lua
+Modules\Core\RuntimeCoordination.lua
+Modules\Features\TreasuryExtended.lua
+Modules\UI\Components.lua
+Modules\UI\Shell.lua
+Modules\Pages\Home.lua
+Modules\Pages\Roster.lua
+Modules\Pages\Professions.lua
+Modules\Pages\Settings.lua
+Modules\UI\NativePages.lua
