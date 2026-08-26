@@ -119,8 +119,11 @@ function OTLGM:SafeRefreshPage180(pageKey, revision, callback)
         suppressed = same and (tonumber(state.suppressed) or 0) or 0, at = self:Now(),
     }
     self.runtime.lastPageRefreshError180 = { page = key, revision = rev, error = message, at = self:Now() }
+    if self.RaiseSupportIncidentR59 then
+        pcall(self.RaiseSupportIncidentR59, self, "ERROR", "Page/" .. key, message)
+    end
     if not same and DEFAULT_CHAT_FRAME then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffffaa33[Lion GM]|r " .. key .. " page refresh stopped after an error. Open Diagnostics for details.")
+        DEFAULT_CHAT_FRAME:AddMessage("|cffffaa33[Lion GM]|r " .. key .. " page refresh stopped after an error. Open Support & Report for details.")
     end
     return false, message
 end
@@ -134,6 +137,20 @@ local eventFrame = CreateFrame("Frame", "OTLGM_EventFrame")
 local SchedulerOnUpdate180
 local SCHEDULER_TASK_LIMIT_180 = 8
 local SCHEDULER_MIN_CHECK_180 = 0.02
+
+-- A distant deadline does not need four GetTime()/time() probes every second.
+-- ScheduleTask180 and WakeScheduler180 both pull the scheduler forward
+-- immediately when new work appears, so the idle side may use a graduated
+-- cadence without delaying short UI/network deadlines. This matters most while
+-- the visible page clock or Quick Dock minute clock is the only pending task.
+local function SchedulerPollInterval180(remaining)
+    remaining = math.max(0, tonumber(remaining) or 0)
+    if remaining <= SCHEDULER_MIN_CHECK_180 then return SCHEDULER_MIN_CHECK_180 end
+    if remaining <= 0.25 then return remaining end
+    if remaining <= 1 then return 0.25 end
+    if remaining <= 5 then return 0.50 end
+    return 1.00
+end
 
 -- Scheduler deadlines are stored as epoch seconds, but short slices need a
 -- monotonic fractional clock.  The former implementation combined the current
@@ -294,6 +311,21 @@ local function NetworkDue180(owner, now)
         -- merely to discover that combat still blocks the same packets.
         return nil
     end
+    if (tonumber(critical) or 0) <= 0 and (tonumber(normal) or 0) <= 0 and (tonumber(bulk) or 0) > 0 then
+        local guardActive = owner.IsPerformanceGuardActive181 and owner:IsPerformanceGuardActive181() or false
+        if guardActive then
+            local guard = owner.GetPerformanceGuardState181 and owner:GetPerformanceGuardState181() or {}
+            return now + math.max(0.5, tonumber(guard.remaining) or 0.5)
+        end
+        local pressure = owner.GetClientPressure181 and owner:GetClientPressure181() or nil
+        if pressure and tonumber(pressure.level) >= 3 then
+            -- Transport deliberately preserves bulk packets during severe
+            -- renderer/weather pressure. Advertise a real coarse retry instead
+            -- of `now`: otherwise the sleeping scheduler would wake every 20 ms
+            -- only to discover that the same bulk queue is still paused.
+            return now + 2
+        end
+    end
     local transport = owner.runtime and owner.runtime.transport
     return MinDue180(nil, transport and transport.nextAttemptAt or now, now)
 end
@@ -330,7 +362,7 @@ local function CraftingDue180(owner, now)
                 end
             end
         end
-        if owner.runtime and owner.runtime.deferredProfessionScanPack3_180 then due = MinDue180(due, now, now) end
+        if owner.runtime and owner.runtime.deferredProfessionScanPack3_180 then due = MinDue180(due, owner.runtime.deferredProfessionScanPack3_180.nextAt or now, now) end
     end
     -- Manifests and active-sync deadlines are compact metadata and may remain
     -- responsive in combat.
@@ -344,7 +376,11 @@ local function CraftingDue180(owner, now)
         -- no longer corresponds to actionable work would otherwise be clamped
         -- to `now` forever and turn the sleeping scheduler into a busy loop.
         if manifests <= 0 then
-            due = MinDue180(due, started + 15, now)
+            local lastAttempt = tonumber(sync.lastPeerAttemptAtR26) or started
+            local tried = tonumber(sync.peerIndexR26) or 0
+            local limit = math.min(tonumber(sync.peerLimitR26) or 1, table.getn(sync.peerCandidatesR26 or {}))
+            if tried < limit then due = MinDue180(due, lastAttempt + 8, now)
+            else due = MinDue180(due, lastAttempt + 10, now) end
         end
         local wantedCount, deferredCount = 0, 0
         local wantedKey, wanted
@@ -534,9 +570,25 @@ local function QualityDue180(owner, now)
 end
 
 local function UIDue180(owner, now)
+    owner.runtime = owner.runtime or {}
+    local motions = owner.runtime.motion170
+    local motionActive = motions and table.getn(motions) > 0
     local ui = owner.ui
+    -- Motion can belong to UIParent-level surfaces (guild achievement toasts),
+    -- not only to the main addon shell.  The old early return stopped the motion
+    -- scheduler whenever the main window was hidden, leaving a login toast stuck
+    -- at its starting alpha indefinitely.
     if not ui or not ui.main or not ui.main:IsVisible() then
-        if owner.runtime then owner.runtime.uiDebounceDue180 = nil end
+        owner.runtime.uiDebounceDue180 = nil
+        if motionActive then
+            local motionDue = tonumber(owner.runtime.motionDue170)
+            if not motionDue then
+                motionDue = now + 0.05
+                owner.runtime.motionDue170 = motionDue
+            end
+            return motionDue
+        end
+        owner.runtime.motionDue170 = nil
         return nil
     end
     local page = tostring(ui.currentPage or "")
@@ -545,10 +597,18 @@ local function UIDue180(owner, now)
         or (page == "achievements" and ui.achievementSearchDirty180)
         or (page == "roster" and ui.rosterSearchDirty180)
         or (page == "history" and ui.historySearchDirty180)
-    owner.runtime = owner.runtime or {}
-    if not dirty then
+    if not dirty and not motionActive then
         owner.runtime.uiDebounceDue180 = nil
+        owner.runtime.motionDue170 = nil
         return nil
+    end
+    if motionActive then
+        local motionDue = tonumber(owner.runtime.motionDue170)
+        if not motionDue then
+            motionDue = now + 0.05
+            owner.runtime.motionDue170 = motionDue
+        end
+        if not dirty then return motionDue end
     end
     -- Latch one real deadline instead of returning now+delay on every scheduler
     -- recomputation. Otherwise unrelated network/roster wakes can perpetually
@@ -559,6 +619,8 @@ local function UIDue180(owner, now)
         due = now + 0.25
         owner.runtime.uiDebounceDue180 = due
     end
+    local motionDue = motionActive and tonumber(owner.runtime.motionDue170) or nil
+    if motionDue and motionDue < due then return motionDue end
     return due
 end
 
@@ -733,6 +795,34 @@ end
 function OTLGM:ProcessScheduledCompatibilityWork180()
     local now = self:Now()
     local preciseNow = self.GetPreciseTime180 and self:GetPreciseTime180() or now
+    -- One compatibility callback owns several independent domains. A scheduler
+    -- budget alone cannot help if network + crafting + PvE + UI all become due
+    -- inside this single callback, so add cooperative yield points between
+    -- domains. Unprocessed deadlines remain due and are picked up by the next
+    -- scheduler slice; no work is discarded.
+    local compatibilityStarted
+    if debugprofilestop then local ok, value = pcall(debugprofilestop) if ok then compatibilityStarted = tonumber(value) end end
+    local profile = OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.performanceProfile181 or "AUTO"
+    local compatibilityBudgetMs = profile == "SMOOTH" and 2.25 or profile == "FRESH" and 5.0 or 4.0
+    local pressureState = self.GetClientPressure181 and self:GetClientPressure181() or nil
+    local fps = pressureState and tonumber(pressureState.fps) or nil
+    if not fps and GetFramerate then local ok, value = pcall(GetFramerate) if ok then fps = tonumber(value) end end
+    if fps and fps < 30 then compatibilityBudgetMs = math.min(compatibilityBudgetMs, 2.0)
+    elseif fps and fps < 45 then compatibilityBudgetMs = math.min(compatibilityBudgetMs, 3.0) end
+    local guardActive = pressureState and pressureState.guard and true or (self.IsPerformanceGuardActive181 and self:IsPerformanceGuardActive181() or false)
+    if guardActive then compatibilityBudgetMs = math.min(compatibilityBudgetMs, 1.5) end
+    if pressureState and tonumber(pressureState.level) >= 2 then compatibilityBudgetMs = math.min(compatibilityBudgetMs, 2.0) end
+    local function YieldCompatibility181()
+        if not compatibilityStarted or not debugprofilestop then return false end
+        local ok, current = pcall(debugprofilestop)
+        if ok and tonumber(current) and tonumber(current) - compatibilityStarted >= compatibilityBudgetMs then
+            self.runtime = self.runtime or {}
+            self.runtime.compatibilityBudgetYields181 = (tonumber(self.runtime.compatibilityBudgetYields181) or 0) + 1
+            return true
+        end
+        return false
+    end
+
     local operationStateChanged = PruneOperationStates180(self, now)
     if operationStateChanged and self.IsUIVisible and self:IsUIVisible() and self.RefreshOperationButtons156 then
         local refreshOk, refreshProblem = pcall(self.RefreshOperationButtons156, self)
@@ -772,22 +862,42 @@ function OTLGM:ProcessScheduledCompatibilityWork180()
         self.confirmScanAt = nil
         if self.RequestScan then self:RequestScan("CONFIRM") end
     end
-    if self.craftingInitialSyncAt and now >= self.craftingInitialSyncAt then
-        self.craftingInitialSyncAt = nil
-        if self.RequestCraftingSync then self:RequestCraftingSync(false, false) end
+    local initialSyncPressure = self.GetClientPressure181 and self:GetClientPressure181() or nil
+    local pauseInitialSync = initialSyncPressure and tonumber(initialSyncPressure.level) >= 2
+    if not pauseInitialSync and OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.pauseBulkSyncInCombat ~= false and self.InCombat and self:InCombat() then pauseInitialSync = true end
+    local function RunOrDeferInitial181(field, callback, delay)
+        local due = tonumber(self[field])
+        if not due or now < due then return end
+        self.runtime = self.runtime or {}
+        self.runtime.initialSyncPressureStarted181 = self.runtime.initialSyncPressureStarted181 or {}
+        local pressureStarted = tonumber(self.runtime.initialSyncPressureStarted181[field])
+        if pauseInitialSync then
+            pressureStarted = pressureStarted or now
+            self.runtime.initialSyncPressureStarted181[field] = pressureStarted
+            self.runtime.initialSyncPressureDeferrals181 = (tonumber(self.runtime.initialSyncPressureDeferrals181) or 0) + 1
+            if now - pressureStarted >= 45 then
+                -- Login fan-out is recoverable metadata synchronization. On a
+                -- client that stays in combat or below the pressure threshold,
+                -- release this login's request instead of keeping four short
+                -- retry deadlines alive indefinitely. Guild changes and manual
+                -- Sync All remain able to request fresh state later.
+                self[field] = nil
+                self.runtime.initialSyncPressureStarted181[field] = nil
+                self.runtime.initialSyncPressureSkipped181 = (tonumber(self.runtime.initialSyncPressureSkipped181) or 0) + 1
+            else
+                self[field] = now + (tonumber(delay) or 3)
+            end
+            return
+        end
+        self.runtime.initialSyncPressureStarted181[field] = nil
+        self[field] = nil
+        if type(callback) == "function" then callback() end
     end
-    if self.announcementInitialSyncAt and now >= self.announcementInitialSyncAt then
-        self.announcementInitialSyncAt = nil
-        if self.RequestAnnouncementSync152 then self:RequestAnnouncementSync152(false) end
-    end
-    if self.sharedActivityInitialSync156 and now >= self.sharedActivityInitialSync156 then
-        self.sharedActivityInitialSync156 = nil
-        if self.RequestSharedActivitySync156 then self:RequestSharedActivitySync156(false) end
-    end
-    if self.pveSyncAt and now >= self.pveSyncAt then
-        self.pveSyncAt = nil
-        if self.RequestPveSync then self:RequestPveSync(false) end
-    end
+    RunOrDeferInitial181("craftingInitialSyncAt", function() if self.RequestCraftingSync then self:RequestCraftingSync(false, false) end end, 4)
+    RunOrDeferInitial181("announcementInitialSyncAt", function() if self.RequestAnnouncementSync152 then self:RequestAnnouncementSync152(false) end end, 3)
+    RunOrDeferInitial181("sharedActivityInitialSync156", function() if self.RequestSharedActivitySync156 then self:RequestSharedActivitySync156(false) end end, 4)
+    RunOrDeferInitial181("pveSyncAt", function() if self.RequestPveSync then self:RequestPveSync(false) end end, 3)
+    if YieldCompatibility181() then return true end
 
     local networkDue = NetworkDue180(self, preciseNow)
     if self.ProcessNetworkQueue and DueNow180(networkDue, preciseNow) then
@@ -795,9 +905,9 @@ function OTLGM:ProcessScheduledCompatibilityWork180()
         self:ProcessNetworkQueue()
         EndPerformanceSampleSafe180(self, "network queue", started)
     end
+    if YieldCompatibility181() then return true end
 
     if HasCraftingWork180(self, preciseNow) then
-        local started = BeginPerformanceSampleSafe180(self)
         local transferDue = nil
         local transferKey, transfer
         local transferStates = self.runtime and self.runtime.craftingOutboundTransferStates180
@@ -810,30 +920,62 @@ function OTLGM:ProcessScheduledCompatibilityWork180()
                 end
             end
         end
+        local pressureStateCraft = self.GetClientPressure181 and self:GetClientPressure181() or nil
+        local pressureGuard = (self.IsPerformanceGuardActive181 and self:IsPerformanceGuardActive181() or false) or (pressureStateCraft and tonumber(pressureStateCraft.level) >= 2)
+
         if self.ProcessCraftingOutboundTransfers180 and DueNow180(transferDue, preciseNow) then
-            self:ProcessCraftingOutboundTransfers180(10)
+            local started = BeginPerformanceSampleSafe180(self)
+            self:ProcessCraftingOutboundTransfers180(1)
+            EndPerformanceSampleSafe180(self, "crafting outbound", started)
         end
+        if YieldCompatibility181() then return true end
+
         local hydrationDue = MapDue180(self.runtime and self.runtime.craftingIconHydration180, preciseNow)
         if self.ProcessCraftingIconHydration180 and DueNow180(hydrationDue, preciseNow) then
-            self:ProcessCraftingIconHydration180(20)
+            local started = BeginPerformanceSampleSafe180(self)
+            self:ProcessCraftingIconHydration180(pressureGuard and 3 or 6)
+            EndPerformanceSampleSafe180(self, "crafting icon hydration", started)
         end
+        if YieldCompatibility181() then return true end
+
         -- Pack3 originally consumed this job from the old quality heartbeat.
-        -- CraftingDue180 is now its scheduler owner, so process it here as well;
-        -- otherwise the job advertises due-now forever while no quality deadline
-        -- exists to clear it. The processor clears the job before the actual scan,
-        -- making a scan exception non-repeating.
+        -- Keep it independently measurable/preemptible instead of hiding it
+        -- inside one 20+ ms "crafting sync" sample.
         if self.runtime and self.runtime.deferredProfessionScanPack3_180 and self.ProcessDeferredProfessionScanPack3_180 then
+            local started = BeginPerformanceSampleSafe180(self)
             local deferredOk, deferredProblem = pcall(self.ProcessDeferredProfessionScanPack3_180, self)
+            EndPerformanceSampleSafe180(self, "crafting deferred scan", started)
             if not deferredOk and self.RecordInternalIssueRC3 then pcall(self.RecordInternalIssueRC3, self, "Crafting/DEFERRED_PROFESSION", deferredProblem) end
         end
-        if self.ProcessCraftingTimers then self:ProcessCraftingTimers() end
-        EndPerformanceSampleSafe180(self, "crafting sync", started)
+        if YieldCompatibility181() then return true end
+
+        if self.ProcessCraftingTimers then
+            local started = BeginPerformanceSampleSafe180(self)
+            self:ProcessCraftingTimers("SYNC")
+            EndPerformanceSampleSafe180(self, "crafting sync control", started)
+        end
+        if YieldCompatibility181() then return true end
+
+        if self.ProcessCraftingTimers then
+            local started = BeginPerformanceSampleSafe180(self)
+            self:ProcessCraftingTimers("BASE")
+            EndPerformanceSampleSafe180(self, "crafting base timers", started)
+        end
+        if YieldCompatibility181() then return true end
+
+        if self.ProcessCraftingTimers then
+            local started = BeginPerformanceSampleSafe180(self)
+            self:ProcessCraftingTimers("DETAIL")
+            EndPerformanceSampleSafe180(self, "crafting detail", started)
+        end
     end
+    if YieldCompatibility181() then return true end
 
     local announcementDue = AnnouncementDue180(self, preciseNow)
     if self.ProcessAnnouncementTimers155 and DueNow180(announcementDue, preciseNow) then self:ProcessAnnouncementTimers155() end
     local treasuryDue = TreasuryDue180(self, preciseNow)
     if self.ProcessTreasuryTimers170 and DueNow180(treasuryDue, preciseNow) then self:ProcessTreasuryTimers170() end
+    if YieldCompatibility181() then return true end
 
     if HasPveWork180(self, preciseNow) then
         local started = BeginPerformanceSampleSafe180(self)
@@ -851,6 +993,7 @@ function OTLGM:ProcessScheduledCompatibilityWork180()
         if self.ProcessPveSyncState180 and DueNow180(syncDue, preciseNow) then self:ProcessPveSyncState180() end
         EndPerformanceSampleSafe180(self, "PvE matching/live state", started)
     end
+    if YieldCompatibility181() then return true end
 
     local statusDue = StatusDue180(self, preciseNow)
     if self.ProcessStatus170 and DueNow180(statusDue, preciseNow) then self:ProcessStatus170() end
@@ -862,6 +1005,7 @@ function OTLGM:ProcessScheduledCompatibilityWork180()
         if self.runtime then self.runtime.uiDebounceDue180 = nil end
         self:ProcessUIDebounce(0.25)
     end
+    if YieldCompatibility181() then return true end
     if self.ProcessQuality156Timers and HasQualityWork180(self, preciseNow) then
         local started = BeginPerformanceSampleSafe180(self)
         self:ProcessQuality156Timers()
@@ -907,7 +1051,7 @@ function OTLGM:UpdateSchedulerState180(reason)
     state.nextCheckAt = nearestDue or 0
     if nearestDue then
         local remaining = math.max(0, nearestDue - now)
-        state.pollInterval180 = math.max(SCHEDULER_MIN_CHECK_180, math.min(0.25, remaining))
+        state.pollInterval180 = SchedulerPollInterval180(remaining)
         if not state.active then
             state.active = true
             state.pollElapsed180 = 0
@@ -934,8 +1078,17 @@ function OTLGM:GetSchedulerDiagnostics180()
     return {
         active = state.active and true or false, taskCount = count,
         nearestKey = state.nearestKey, nearestDue = state.nearestDue,
+        pollInterval = state.pollInterval180,
         wakeCount = state.wakeCount or 0, sleepCount = state.sleepCount or 0,
         executed = state.executed or 0, errors = state.errors or 0,
+        budgetYields181 = state.budgetYields181 or 0,
+        lowFpsSlices181 = state.lowFpsSlices181 or 0,
+        guardSlices181 = state.guardSlices181 or 0,
+        pressureSlices181 = state.pressureSlices181 or 0,
+        lastSliceMs181 = state.lastSliceMs181 or 0,
+        maxSliceMs181 = state.maxSliceMs181 or 0,
+        lastFps181 = state.lastFps181,
+        lastTaskKey181 = state.lastTaskKey181,
         compatibilityFailures = state.compatibilityFailures180 or 0,
         compatibilityBackoffUntil = state.compatibilityBackoffUntil180,
         lastReason = state.lastReason, lastError = state.lastError, lastErrorKey = state.lastErrorKey,
@@ -956,7 +1109,7 @@ local function ScheduleVisibleRosterEventScan180(owner)
     local metrics = owner.runtime.rosterMetrics180 or { fullScans = 0, targetedRefreshes = 0, reasons = {} }
     owner.runtime.rosterMetrics180 = metrics
     metrics.guildEventsDirty = (tonumber(metrics.guildEventsDirty) or 0) + 1
-    if not IsRosterConsumerVisible180(owner) then return false end
+    if not IsRosterConsumerVisible180(owner) then owner.runtime.rosterVisiblePressureStarted181 = nil return false end
     if OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.autoScan == false then return false end
     if (tonumber(owner.runtime.rosterAutoRetryAfterRC3) or 0) > owner:Now() then return false end
     if not owner.ScheduleAfter180 then return false end
@@ -965,45 +1118,83 @@ local function ScheduleVisibleRosterEventScan180(owner)
     end
     owner:ScheduleAfter180("guild-roster-visible-scan", 1, function(current)
         if not current.runtime or not current.runtime.rosterDataDirty180 then return end
-        if not IsRosterConsumerVisible180(current) then return end
-        if current.pendingScan or current.runtime.rosterRead180 then return end
-        if (tonumber(current.runtime.rosterAutoRetryAfterRC3) or 0) > current:Now() then return end
+        if not IsRosterConsumerVisible180(current) then current.runtime.rosterVisiblePressureStarted181 = nil return end
+        if current.pendingScan or current.runtime.rosterRead180 then current.runtime.rosterVisiblePressureStarted181 = nil return end
+        if (tonumber(current.runtime.rosterAutoRetryAfterRC3) or 0) > current:Now() then current.runtime.rosterVisiblePressureStarted181 = nil return end
+        -- Zone/city loading can itself emit roster events. Do not answer that
+        -- event storm with GuildRoster() while the renderer is still settling.
+        local now = current:Now()
+        local lastTransition = tonumber(current.runtime.lastTransitionCompleted181) or 0
+        if current.runtime.transitionActive176 or (lastTransition > 0 and now - lastTransition < 4) then
+            metrics.transitionDeferrals181 = (tonumber(metrics.transitionDeferrals181) or 0) + 1
+            local delay = current.runtime.transitionActive176 and 2 or math.max(0.5, 4 - (now - lastTransition))
+            current:ScheduleAfter180("guild-roster-visible-scan", delay, function(nextOwner) ScheduleVisibleRosterEventScan180(nextOwner) end, 35)
+            return
+        end
+        local pressure = current.GetClientPressure181 and current:GetClientPressure181() or nil
+        if pressure and tonumber(pressure.level) >= 2 then
+            metrics.pressureDeferrals181 = (tonumber(metrics.pressureDeferrals181) or 0) + 1
+            current.runtime.rosterVisiblePressureStarted181 = tonumber(current.runtime.rosterVisiblePressureStarted181) or now
+            if now - current.runtime.rosterVisiblePressureStarted181 < 30 then
+                current:ScheduleAfter180("guild-roster-visible-scan", 3, function(nextOwner) ScheduleVisibleRosterEventScan180(nextOwner) end, 35)
+                return
+            end
+            -- The dirty bit remains set. Stop retrying on a client that stays
+            -- slow; the next guild event or explicit page action will retry.
+            current.runtime.rosterVisiblePressureStarted181 = nil
+            return
+        end
+        current.runtime.rosterVisiblePressureStarted181 = nil
         current:RequestScan("GUILD_EVENT")
     end, 35)
     return true
 end
 
-local function RunStableLoginBaseline180(owner)
+local function RunLoginBaselineStage181(owner, key, callback, method, source, waitField, retryField, skippedField)
     if not owner then return end
-    if (owner.InCombat and owner:InCombat()) or (owner.runtime and (owner.runtime.transitionActive176 or owner.runtime.rosterRead180)) or owner.pendingScan then
-        owner:ScheduleAfter180("achievement-login-baseline", 5, RunStableLoginBaseline180, 10)
+    owner.runtime = owner.runtime or {}
+    local now = owner:Now()
+    local pressure = owner.GetClientPressure181 and owner:GetClientPressure181() or nil
+    if (pressure and tonumber(pressure.level) >= 2) or (owner.InCombat and owner:InCombat())
+        or owner.runtime.transitionActive176 or owner.runtime.rosterRead180 or owner.pendingScan then
+        owner.runtime[waitField] = tonumber(owner.runtime[waitField]) or now
+        if now - owner.runtime[waitField] < 60 and owner.ScheduleAfter180 then
+            owner:ScheduleAfter180(key, 5, callback, 10)
+        else
+            -- These are retrospective achievements, not live authority state.
+            -- Leave them for normal events/the next login instead of keeping a
+            -- retry task alive through an unusually long combat or load state.
+            owner.runtime.loginBaselineSkipped181 = (tonumber(owner.runtime.loginBaselineSkipped181) or 0) + 1
+            owner.runtime[skippedField] = (tonumber(owner.runtime[skippedField]) or 0) + 1
+            owner.runtime[waitField] = nil
+        end
         return
     end
-    owner.runtime = owner.runtime or {}
-    local failed = false
-    if owner.RunAchievementLoginBaseline180 then
-        local ok, problem = pcall(owner.RunAchievementLoginBaseline180, owner)
-        if not ok then
-            failed = true
-            if owner.RecordInternalIssueRC3 then pcall(owner.RecordInternalIssueRC3, owner, "Login/ACHIEVEMENT_BASELINE", problem) end
-        end
+    owner.runtime[waitField] = nil
+    local runner = owner[method]
+    if type(runner) ~= "function" then owner.runtime[retryField] = 0 return end
+    local ok, problem = pcall(runner, owner)
+    if ok then
+        owner.runtime[retryField] = 0
+        return
     end
-    if owner.RunRelease175LoginBaseline180 then
-        local ok, problem = pcall(owner.RunRelease175LoginBaseline180, owner)
-        if not ok then
-            failed = true
-            if owner.RecordInternalIssueRC3 then pcall(owner.RecordInternalIssueRC3, owner, "Login/RELEASE_BASELINE", problem) end
-        end
-    end
-    if failed then
-        local retries = math.min(2, (tonumber(owner.runtime.loginBaselineRetries180) or 0) + 1)
-        owner.runtime.loginBaselineRetries180 = retries
-        if retries < 2 and owner.ScheduleAfter180 then
-            owner:ScheduleAfter180("achievement-login-baseline", 10, RunStableLoginBaseline180, 10)
-        end
-    else
-        owner.runtime.loginBaselineRetries180 = 0
-    end
+    if owner.RecordInternalIssueRC3 then pcall(owner.RecordInternalIssueRC3, owner, source, problem) end
+    local retries = math.min(2, (tonumber(owner.runtime[retryField]) or 0) + 1)
+    owner.runtime[retryField] = retries
+    if retries < 2 and owner.ScheduleAfter180 then owner:ScheduleAfter180(key, 10, callback, 10) end
+end
+
+local RunStableAchievementLoginBaseline180
+local RunStableReleaseLoginBaseline180
+RunStableAchievementLoginBaseline180 = function(owner)
+    RunLoginBaselineStage181(owner, "achievement-login-baseline", RunStableAchievementLoginBaseline180,
+        "RunAchievementLoginBaseline180", "Login/ACHIEVEMENT_BASELINE",
+        "loginAchievementBaselineWaitStarted181", "loginAchievementBaselineRetries181", "loginAchievementBaselineSkipped181")
+end
+RunStableReleaseLoginBaseline180 = function(owner)
+    RunLoginBaselineStage181(owner, "release-login-baseline", RunStableReleaseLoginBaseline180,
+        "RunRelease175LoginBaseline180", "Login/RELEASE_BASELINE",
+        "loginReleaseBaselineWaitStarted181", "loginReleaseBaselineRetries181", "loginReleaseBaselineSkipped181")
 end
 
 SchedulerOnUpdate180 = function()
@@ -1019,9 +1210,10 @@ SchedulerOnUpdate180 = function()
     local now = SchedulerNow180(OTLGM)
     if (tonumber(state.nextCheckAt) or 0) > now then
         local remaining = (tonumber(state.nextCheckAt) or now) - now
-        state.pollInterval180 = math.max(SCHEDULER_MIN_CHECK_180, math.min(0.25, remaining))
+        state.pollInterval180 = SchedulerPollInterval180(remaining)
         return
     end
+
     local ready = {}
     local key, task
     for key, task in pairs(state.tasks or {}) do
@@ -1034,13 +1226,69 @@ SchedulerOnUpdate180 = function()
         if ld ~= rd then return ld < rd end
         return tostring(left.key) < tostring(right.key)
     end)
-    local limit = math.min(SCHEDULER_TASK_LIMIT_180, table.getn(ready))
-    local index
+
+    -- 1.8.1: count-only limits can still stack several medium Lua callbacks in
+    -- one rendered frame. Add a tiny cooperative time budget and reduce the
+    -- count automatically when the client is already under graphical pressure.
+    local pressureState = OTLGM.GetClientPressure181 and OTLGM:GetClientPressure181() or nil
+    local fps = pressureState and tonumber(pressureState.fps) or nil
+    if not fps and GetFramerate then
+        local fpsOk, fpsValue = pcall(GetFramerate)
+        if fpsOk then fps = tonumber(fpsValue) end
+    end
+    local profile = OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.performanceProfile181 or "AUTO"
+    if fps and fps < 28 and OTLGM.ActivatePerformanceGuard181 then pcall(OTLGM.ActivatePerformanceGuard181, OTLGM, "client below 28 FPS", 8, nil, fps) end
+    local guardActive = pressureState and pressureState.guard and true or (OTLGM.IsPerformanceGuardActive181 and OTLGM:IsPerformanceGuardActive181() or false)
+    local taskLimit, budgetMs = 6, 4.0
+    if profile == "SMOOTH" then
+        taskLimit, budgetMs = 3, 2.25
+    elseif profile == "FRESH" then
+        taskLimit, budgetMs = 8, 5.0
+    end
+    -- Emergency protection remains active even in Fresh mode. A user asking for
+    -- quicker updates should never be able to make an already struggling client
+    -- spend a large Lua slice while it is below 30 FPS.
+    if fps and fps < 30 then
+        taskLimit, budgetMs = math.min(taskLimit, 3), math.min(budgetMs, 2.25)
+        state.lowFpsSlices181 = (tonumber(state.lowFpsSlices181) or 0) + 1
+    elseif fps and fps < 45 then
+        taskLimit, budgetMs = math.min(taskLimit, 4), math.min(budgetMs, 3.0)
+        state.lowFpsSlices181 = (tonumber(state.lowFpsSlices181) or 0) + 1
+    end
+    if OTLGM.runtime and OTLGM.runtime.transitionActive176 then
+        taskLimit = math.min(taskLimit, profile == "SMOOTH" and 2 or 3)
+        budgetMs = math.min(budgetMs, profile == "SMOOTH" and 1.75 or 2.5)
+    end
+    if pressureState and tonumber(pressureState.level) >= 2 and not (OTLGM.runtime and OTLGM.runtime.transitionActive176) and not guardActive then
+        taskLimit = math.min(taskLimit, 3)
+        budgetMs = math.min(budgetMs, 2.25)
+        state.pressureSlices181 = (tonumber(state.pressureSlices181) or 0) + 1
+    end
+    if guardActive then
+        taskLimit = math.min(taskLimit, 2)
+        budgetMs = math.min(budgetMs, 1.5)
+        state.guardSlices181 = (tonumber(state.guardSlices181) or 0) + 1
+    end
+    local limit = math.min(taskLimit, table.getn(ready))
+    local sliceStarted
+    if debugprofilestop then
+        local startedOk, startedValue = pcall(debugprofilestop)
+        if startedOk then sliceStarted = tonumber(startedValue) end
+    end
+
+    local index, processed = 0, 0
     for index = 1, limit do
         task = ready[index]
         state.tasks[task.key] = nil
+        state.lastTaskKey181 = task.key
+        local perfStarted = BeginPerformanceSampleSafe180(OTLGM)
         local ok, problem = pcall(task.callback, OTLGM, task.key)
+        local stableKey = tostring(task.key or "task")
+        local separator = string.find(stableKey, ":", 1, true)
+        if separator then stableKey = string.sub(stableKey, 1, separator - 1) end
+        EndPerformanceSampleSafe180(OTLGM, "scheduler " .. stableKey, perfStarted)
         state.executed = (tonumber(state.executed) or 0) + 1
+        processed = processed + 1
         if task.key == "__compatibility180" then
             if ok then
                 state.compatibilityFailures180 = 0
@@ -1058,7 +1306,26 @@ SchedulerOnUpdate180 = function()
             if OTLGM.RecordInternalIssueRC3 then pcall(OTLGM.RecordInternalIssueRC3, OTLGM, "Scheduler/" .. tostring(task.key), state.lastError) end
             if OTLGM.RecordPerformanceSpike180 then pcall(OTLGM.RecordPerformanceSpike180, OTLGM, "scheduler:" .. tostring(task.key), 0) end
         end
+
+        if sliceStarted and debugprofilestop and processed >= 1 and index < limit then
+            local clockOk, current = pcall(debugprofilestop)
+            if clockOk and tonumber(current) and (tonumber(current) - sliceStarted) >= budgetMs then
+                state.budgetYields181 = (tonumber(state.budgetYields181) or 0) + 1
+                break
+            end
+        end
     end
+
+    if sliceStarted and debugprofilestop then
+        local clockOk, current = pcall(debugprofilestop)
+        if clockOk and tonumber(current) then
+            local duration = math.max(0, tonumber(current) - sliceStarted)
+            state.lastSliceMs181 = duration
+            state.maxSliceMs181 = math.max(tonumber(state.maxSliceMs181) or 0, duration)
+            state.lastFps181 = fps
+        end
+    end
+
     local updateOk, updateProblem = pcall(OTLGM.UpdateSchedulerState180, OTLGM, "slice")
     if not updateOk then
         state.active = false
@@ -1070,10 +1337,14 @@ SchedulerOnUpdate180 = function()
         if OTLGM.RecordInternalIssueRC3 then pcall(OTLGM.RecordInternalIssueRC3, OTLGM, "Scheduler/STATE_UPDATE", state.lastError) end
     end
 end
+
 eventFrame:RegisterEvent("VARIABLES_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-eventFrame:RegisterEvent("CHANNEL_NOTICE")
+eventFrame:RegisterEvent("CHAT_MSG_CHANNEL_NOTICE")
+-- Some custom 1.12 derivatives exposed CHANNEL_NOTICE as a private alias.
+-- Keep it optional, but never let an unknown alias abort addon loading.
+pcall(eventFrame.RegisterEvent, eventFrame, "CHANNEL_NOTICE")
 eventFrame:RegisterEvent("PLAYER_GUILD_UPDATE")
 eventFrame:RegisterEvent("GUILD_ROSTER_UPDATE")
 eventFrame:RegisterEvent("CHAT_MSG_SYSTEM")
@@ -1146,6 +1417,139 @@ local function CaptureGuildChatEventRC5(channel, message, sender)
     return false
 end
 
+local function GuildContextFingerprint181()
+    if not GetGuildInfo then return "none" end
+    local ok, guildName = pcall(GetGuildInfo, "player")
+    if not ok or not guildName or tostring(guildName) == "" then return "none" end
+    -- Only actual guild identity changes need a full shared-data resync. Rank
+    -- changes still refresh permissions/navigation but do not justify rebuilding
+    -- PvE, announcement and profession sync queues.
+    return tostring(guildName)
+end
+
+local function ScheduleGuildContextSync181(owner, forceShared)
+    if not owner or not owner.ScheduleAfter180 then return false end
+    owner.runtime = owner.runtime or {}
+    owner.runtime.guildContextSyncGeneration181 = (tonumber(owner.runtime.guildContextSyncGeneration181) or 0) + 1
+    local generation = owner.runtime.guildContextSyncGeneration181
+    local startedAt = owner:Now()
+    local function Current(current) return current and current.runtime and (tonumber(current.runtime.guildContextSyncGeneration181) or 0) == generation end
+    local RunWhenCalm181
+    RunWhenCalm181 = function(current, key, priority, callback)
+        if not Current(current) then return end
+        local pressure = current.GetClientPressure181 and current:GetClientPressure181() or nil
+        local pause = pressure and tonumber(pressure.level) >= 2
+        if not pause and OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.pauseBulkSyncInCombat ~= false and current.InCombat and current:InCombat() then pause = true end
+        if pause and current.ScheduleAfter180 then
+            current.runtime.guildContextPressureDeferrals181 = (tonumber(current.runtime.guildContextPressureDeferrals181) or 0) + 1
+            if current:Now() - startedAt < 30 then
+                current:ScheduleAfter180(key, 3, function(nextOwner) RunWhenCalm181(nextOwner, key, priority, callback) end, priority)
+            else
+                -- These full-domain requests are recoverable background sync.
+                -- A later guild event/login/manual Sync All can request them;
+                -- never force queue construction into permanently low FPS.
+                current.runtime.guildContextSyncSkipped181 = (tonumber(current.runtime.guildContextSyncSkipped181) or 0) + 1
+            end
+            return
+        end
+        if type(callback) == "function" then callback(current) end
+    end
+    owner:ScheduleAfter180("guild-context-cache", 0.4, function(current)
+        if not Current(current) then return end
+        if current.__impl180.RefreshSenderRosterCache__impl1 then current:RefreshSenderRosterCache(true) end
+    end, 70)
+    owner:ScheduleAfter180("guild-context-version", 1.0, function(current)
+        if not Current(current) then return end
+        if current.__impl180.BroadcastVersion__impl1 then current:BroadcastVersion() end
+    end, 45)
+    if forceShared then
+        owner:ScheduleAfter180("guild-context-pve", 2.5, function(current) RunWhenCalm181(current, "guild-context-pve", 25, function(target) if target.RequestPveSync then target:RequestPveSync(true, false) end end) end, 25)
+        owner:ScheduleAfter180("guild-context-announcements", 4.0, function(current) RunWhenCalm181(current, "guild-context-announcements", 20, function(target) if target.RequestAnnouncementSync152 then target:RequestAnnouncementSync152(true) end end) end, 20)
+        owner:ScheduleAfter180("guild-context-crafting", 6.0, function(current) RunWhenCalm181(current, "guild-context-crafting", 15, function(target) if type(target.RequestCraftingSync) == "function" then target:RequestCraftingSync(true) end end) end, 15)
+    end
+    return true
+end
+
+local function ScheduleRosterSecondaryRefresh181(owner)
+    if not owner or not owner.ScheduleAfter180 then return false end
+    owner.runtime = owner.runtime or {}
+    owner.runtime.rosterSecondaryGeneration181 = (tonumber(owner.runtime.rosterSecondaryGeneration181) or 0) + 1
+    local generation = owner.runtime.rosterSecondaryGeneration181
+    local startedAt = owner:Now()
+    local function Run(current)
+        if not current.runtime or (tonumber(current.runtime.rosterSecondaryGeneration181) or 0) ~= generation then return end
+        local pressure = current.GetClientPressure181 and current:GetClientPressure181() or nil
+        if pressure and tonumber(pressure.level) >= 2 then
+            current.runtime.rosterSecondaryPressureDeferrals181 = (tonumber(current.runtime.rosterSecondaryPressureDeferrals181) or 0) + 1
+            if current:Now() - startedAt < 20 then
+                current:ScheduleAfter180("roster-secondary-refresh", 2, Run, 20)
+            else
+                current.runtime.rosterSecondarySkipped181 = (tonumber(current.runtime.rosterSecondarySkipped181) or 0) + 1
+            end
+            return
+        end
+        local started = BeginPerformanceSampleSafe180(current)
+        if current.RefreshActiveRaidInviteSessions180 then pcall(current.RefreshActiveRaidInviteSessions180, current, true) end
+        if current.RefreshObservedGuildFactions180 then pcall(current.RefreshObservedGuildFactions180, current, "guild-roster") end
+        if current.OnGuildRosterUpdatedRecruitmentC5R4 then pcall(current.OnGuildRosterUpdatedRecruitmentC5R4, current) end
+        EndPerformanceSampleSafe180(current, "roster secondary refresh", started)
+    end
+    owner:ScheduleAfter180("roster-secondary-refresh", 0.75, function(current)
+        Run(current)
+    end, 20)
+    return true
+end
+
+local function ScheduleMemoryBaseline181(owner, delay)
+    if not owner or not owner.ScheduleAfter180 then return false end
+    owner:ScheduleAfter180("memory-baseline-181", tonumber(delay) or 45, function(current)
+        local pressure = current.GetClientPressure181 and current:GetClientPressure181() or nil
+        if (pressure and tonumber(pressure.level) >= 2) or (current.InCombat and current:InCombat()) then
+            -- Baseline evidence is optional diagnostics. Skipping it under
+            -- pressure is preferable to keeping a retry task alive forever.
+            current.runtime = current.runtime or {}
+            current.runtime.memoryBaselineSkipped181 = (tonumber(current.runtime.memoryBaselineSkipped181) or 0) + 1
+            return
+        end
+        if current.CaptureMemoryBaseline181 then current:CaptureMemoryBaseline181() end
+    end, 5)
+    return true
+end
+
+local function ScheduleWeeklyMaintenance181(owner, delay)
+    if not owner or not owner.ScheduleAfter180 then return false end
+    owner:ScheduleAfter180("weekly-local-maintenance", tonumber(delay) or 90, function(current)
+        if not OTLGM_DB or not OTLGM_DB.settings or OTLGM_DB.settings.autoMaintenance181 == false then return end
+        local now = current:Now()
+        local last = tonumber(OTLGM_DB.settings.lastAutoMaintenance181) or 0
+        if last > 0 and now - last < (7 * 86400) then return end
+        local pressure = current.GetClientPressure181 and current:GetClientPressure181() or nil
+        local party = GetNumPartyMembers and GetNumPartyMembers() or 0
+        local raid = GetNumRaidMembers and GetNumRaidMembers() or 0
+        local uiOpen = current.ui and current.ui.main and current.ui.main.IsVisible and current.ui.main:IsVisible()
+        if (pressure and tonumber(pressure.level) > 0) or (current.InCombat and current:InCombat()) or uiOpen or (tonumber(party) or 0) > 0 or (tonumber(raid) or 0) > 0 then
+            -- Weekly cleanup is background housekeeping, not a deadline. Skip
+            -- this login's attempt when the player is busy; the next login or a
+            -- manual maintenance action is safer than a recurring raid task.
+            current.runtime = current.runtime or {}
+            current.runtime.weeklyMaintenanceSkippedBusy181 = (tonumber(current.runtime.weeklyMaintenanceSkippedBusy181) or 0) + 1
+            return
+        end
+        if current.RunLocalMaintenanceRC3 then
+            local ok, result = pcall(current.RunLocalMaintenanceRC3, current)
+            if ok then
+                OTLGM_DB.settings.lastAutoMaintenance181 = now
+                current.runtime = current.runtime or {}
+                current.runtime.lastAutoMaintenanceRemoved181 = type(result) == "table" and tonumber(result.removed) or 0
+                current.runtime.lastAutoMaintenanceAt181 = now
+            elseif current.RecordInternalIssueRC3 then
+                pcall(current.RecordInternalIssueRC3, current, "Maintenance/AUTO_WEEKLY", result)
+            end
+        end
+    end, 5)
+    return true
+end
+
 eventFrame:SetScript("OnEvent", function()
     if event == "VARIABLES_LOADED" then
         if OTLGM and OTLGM.EnsureDB then SafeEventCallRC4("VARIABLES_DB", function() OTLGM:EnsureDB() end) end
@@ -1159,9 +1563,41 @@ eventFrame:SetScript("OnEvent", function()
         if OTLGM.InstallTooltipCompatibility160 then SafeEventCallRC4("LOGIN_TOOLTIP", function() OTLGM:InstallTooltipCompatibility160() end) end
         if OTLGM.InstallInviteHook then SafeEventCallRC4("LOGIN_INVITE_HOOK", function() OTLGM:InstallInviteHook() end) end
         if OTLGM.InstallGuildActionHooks then SafeEventCallRC4("LOGIN_GUILD_HOOKS", function() OTLGM:InstallGuildActionHooks() end) end
+        -- Lightweight integration with the normal Social > Guild tab.  The hook
+        -- is installed at login so the shortcut works even before the addon
+        -- window has ever been opened; the click itself lazily builds the UI.
+        if OTLGM.InstallSocialGuildHook183 then SafeEventCallRC4("LOGIN_SOCIAL_GUILD_HOOK", function() OTLGM:InstallSocialGuildHook183() end) end
         if OTLGM.BuildMinimapButton then
             local ok, err = pcall(function() OTLGM:BuildMinimapButton() end)
             if not ok then PrintLine("Minimap runtime error: " .. tostring(err), true) end
+        end
+        -- r25: Quick Dock is a login-level utility, not a by-product of opening
+        -- the main window. Build/show only the tiny dock when enabled; the full
+        -- shell remains lazy until the Lion is clicked. No new event frame or
+        -- polling loop is introduced.
+        local quickDockLoginAllowedR25 = OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.closeToQuickDock183 ~= false
+        if quickDockLoginAllowedR25 and OTLGM.BuildQuickDock182 and OTLGM.IsQuickDockEnabled182 and OTLGM:IsQuickDockEnabled182() then
+            local function ShowLoginQuickDockR25(owner)
+                owner = owner or OTLGM
+                if not owner or not owner.BuildQuickDock182 then return false end
+                local dock = owner:BuildQuickDock182()
+                if not dock then return false end
+                if owner.LayoutQuickDock182 then owner:LayoutQuickDock182("login") end
+                if owner.RestoreParkPosition180 then owner:RestoreParkPosition180("world") end
+                dock:Show()
+                return true
+            end
+            local shown = false
+            local ok = SafeEventCallRC4("LOGIN_QUICK_DOCK", function() shown = ShowLoginQuickDockR25(OTLGM) end)
+            -- UIParent can still be settling on some 1.12 derivatives. One keyed
+            -- retry is enough; never turn a login utility into a polling loop.
+            if (not ok or not shown) and OTLGM.ScheduleAfter180 then
+                OTLGM:ScheduleAfter180("quick-dock-login", 1.0, function(owner)
+                    if owner.IsQuickDockEnabled182 and owner:IsQuickDockEnabled182() then
+                        ShowLoginQuickDockR25(owner)
+                    end
+                end, 80)
+            end
         end
         if OTLGM.__impl180.BroadcastVersion__impl1 then SafeEventCallRC4("LOGIN_VERSION", function() OTLGM:BroadcastVersion() end) end
         -- Hooks are cheap and must be ready immediately; wide achievement checks
@@ -1174,6 +1610,13 @@ eventFrame:SetScript("OnEvent", function()
         if OTLGM.InitializePveSync then SafeEventCallRC4("LOGIN_PVE", function() OTLGM:InitializePveSync() end) end
         if OTLGM.EnsureCraftingDB then SafeEventCallRC4("LOGIN_CRAFT_DB", function() OTLGM:EnsureCraftingDB() end) end
         local loginJitter180 = math.random and math.random(0, 6) or 3
+        OTLGM.runtime = OTLGM.runtime or {}
+        -- A reload starts a new set of optional login-sync deadlines. Never let
+        -- pressure history from a replaced deadline shorten its bounded window.
+        OTLGM.runtime.initialSyncPressureStarted181 = {}
+        OTLGM.runtime.lastGuildContextFingerprint181 = GuildContextFingerprint181()
+        if OTLGM.ScheduleAfter180 and OTLGM.CaptureMemoryBaseline181 then ScheduleMemoryBaseline181(OTLGM, 45 + loginJitter180) end
+        if OTLGM.ScheduleAfter180 then ScheduleWeeklyMaintenance181(OTLGM, 90 + loginJitter180) end
         if OTLGM.__impl180.RequestCraftingSync__impl1 then OTLGM.craftingInitialSyncAt = OTLGM:Now() + 10 + loginJitter180 end
         if OTLGM.RequestAnnouncementSync152 then OTLGM.announcementInitialSyncAt = OTLGM:Now() + 7 + loginJitter180 end
         if OTLGM.DetectWorldChannel153 then SafeEventCallRC4("LOGIN_WORLD_CHANNEL", function() OTLGM:DetectWorldChannel153(true) end) end
@@ -1184,18 +1627,30 @@ eventFrame:SetScript("OnEvent", function()
                 if GetGuildInfo and GetGuildInfo("player") then owner:RequestScan("LOGIN") end
             end, 40)
         elseif type(OTLGM.RequestScan) == "function" and GetGuildInfo("player") then OTLGM:RequestScan("LOGIN") end
-        if OTLGM.ScheduleAfter180 and (OTLGM.RunAchievementLoginBaseline180 or OTLGM.RunRelease175LoginBaseline180) then
-            OTLGM:ScheduleAfter180("achievement-login-baseline", 32 + loginJitter180, RunStableLoginBaseline180, 10)
+        -- The two retrospective catalog passes are independent and potentially
+        -- allocation-heavy. Give them separate keyed tasks and a real frame
+        -- boundary so they cannot stack inside one post-login callback.
+        if OTLGM.ScheduleAfter180 and OTLGM.RunAchievementLoginBaseline180 then
+            OTLGM:ScheduleAfter180("achievement-login-baseline", 32 + loginJitter180, RunStableAchievementLoginBaseline180, 10)
+        end
+        if OTLGM.ScheduleAfter180 and OTLGM.RunRelease175LoginBaseline180 then
+            OTLGM:ScheduleAfter180("release-login-baseline", 33 + loginJitter180, RunStableReleaseLoginBaseline180, 10)
         end
         if not OTLGM.systems152Loaded then PrintLine("The community module did not load; shared-data features are unavailable.", true) end
         if not OTLGM.fullUILoaded or type(OTLGM.ToggleUI) ~= "function" then
             PrintLine("Full UI did not load. Type /otltest for details.", true)
         end
-    elseif event == "PLAYER_ENTERING_WORLD" or event == "CHANNEL_NOTICE" then
+    elseif event == "PLAYER_ENTERING_WORLD" or event == "CHAT_MSG_CHANNEL_NOTICE" or event == "CHANNEL_NOTICE" then
         if event == "PLAYER_ENTERING_WORLD" and OTLGM and OTLGM.InstallTooltipCompatibility160 then
             SafeEventCallRC4("WORLD_TOOLTIP", function() OTLGM:InstallTooltipCompatibility160() end)
         end
+        if event == "PLAYER_ENTERING_WORLD" and OTLGM and OTLGM.InstallSocialGuildHook183 then
+            -- Retry once after the world is ready for UI replacements that create
+            -- their Social tab late. InstallSocialGuildHook183 is idempotent.
+            SafeEventCallRC4("WORLD_SOCIAL_GUILD_HOOK", function() OTLGM:InstallSocialGuildHook183() end)
+        end
         if OTLGM and OTLGM.DetectWorldChannel153 then SafeEventCallRC4("WORLD_CHANNEL", function() OTLGM:DetectWorldChannel153(true) end) end
+        if OTLGM and OTLGM.MarkQuickDockDirty182 then SafeEventCallRC4("QUICK_DOCK_WORLD", function() OTLGM:MarkQuickDockDirty182("world") end) end
         if event == "PLAYER_ENTERING_WORLD" and OTLGM and OTLGM.ui and OTLGM.ui.main and OTLGM.RebaseUIParentGeometry180 then
             -- Most zone transitions do not alter UIParent. Rebase only when the
             -- logical size/effective scale really changed; this avoids repeating
@@ -1214,16 +1669,36 @@ eventFrame:SetScript("OnEvent", function()
     elseif event == "CHAT_MSG_SYSTEM" then
         if OTLGM and OTLGM.TryCaptureSystemGuildAction then SafeEventCallRC4("CHAT_MSG_SYSTEM", function() OTLGM:TryCaptureSystemGuildAction(arg1) end) end
     elseif event == "CHAT_MSG_ADDON" then
+        -- R44: this frame receives addon traffic for every prefix on the channel.
+        -- Unrelated addons must not trigger our packet diagnostics or a complete
+        -- scheduler deadline walk. This is especially important in Stormwind.
+        if arg1 ~= "OTLGM" then return end
+        if OTLGM and OTLGM.FastDiscardAddonPacketR44 then
+            local fastOk, fastDiscarded = pcall(OTLGM.FastDiscardAddonPacketR44, OTLGM, arg1, arg2, arg3, arg4)
+            if fastOk and fastDiscarded then return end
+            if not fastOk and OTLGM.RecordInternalIssueRC3 then
+                pcall(OTLGM.RecordInternalIssueRC3, OTLGM, "Event/CHAT_MSG_ADDON_FASTPATH", fastDiscarded)
+            end
+        end
         if OTLGM and OTLGM.HandleAddonMessage then
             local started = BeginPerformanceSampleSafe180(OTLGM)
             if OTLGM.RecordPerformancePacket180 then pcall(OTLGM.RecordPerformancePacket180, OTLGM, "IN", arg2) end
-            SafeEventCallRC4("CHAT_MSG_ADDON", function() OTLGM:HandleAddonMessage(arg1, arg2, arg3, arg4) end)
-            EndPerformanceSampleSafe180(OTLGM, "sender validation", started)
+            -- Avoid one short-lived closure per network packet. At guild traffic
+            -- rates this otherwise becomes visible later as unattributed GC stalls.
+            local dispatchOk, dispatchProblem = pcall(OTLGM.HandleAddonMessage, OTLGM, arg1, arg2, arg3, arg4)
+            if not dispatchOk and OTLGM.RecordInternalIssueRC3 then
+                pcall(OTLGM.RecordInternalIssueRC3, OTLGM, "Event/CHAT_MSG_ADDON", dispatchProblem)
+            end
+            -- R25 labelled the whole protocol dispatch as sender validation. That
+            -- made a 20-25 ms Crafting/PvE handler look like a security lookup.
+            -- Security.lua now instruments the rare roster-cache rebuild itself.
+            EndPerformanceSampleSafe180(OTLGM, "addon-message dispatch", started)
         end
     elseif event == "CHAT_MSG_GUILD" then
         -- Recruitment echo tracking is secondary. It must never be able to stop
         -- canonical Guild Chat capture for the same client event.
         if OTLGM and OTLGM.HandleRecruitmentDeliveryEcho180 then SafeEventCallRC4("GUILD_RECRUIT_ECHO", function() OTLGM:HandleRecruitmentDeliveryEcho180("GUILD", arg1, arg2) end) end
+        if OTLGM and OTLGM.ObserveBrandedAchievementPresenceCP7 then SafeEventCallRC4("GUILD_BRANDED_PRESENCE_CP7", function() OTLGM:ObserveBrandedAchievementPresenceCP7(arg1, arg2) end) end
         if OTLGM then SafeEventCallRC4("CHAT_MSG_GUILD", function() CaptureGuildChatEventRC5("GUILD", arg1, arg2) end) end
     elseif event == "CHAT_MSG_CHANNEL" then
         if OTLGM and OTLGM.HandleRecruitmentDeliveryEcho180 then SafeEventCallRC4("CHANNEL_RECRUIT_ECHO", function() OTLGM:HandleRecruitmentDeliveryEcho180("WORLD", arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) end) end
@@ -1231,28 +1706,38 @@ eventFrame:SetScript("OnEvent", function()
         if OTLGM then SafeEventCallRC4("CHAT_MSG_OFFICER", function() CaptureGuildChatEventRC5("OFFICER", arg1, arg2) end) end
     elseif event == "TRADE_SKILL_SHOW" then
         if OTLGM and OTLGM.__impl180.ScanCurrentProfession__impl1 then SafeEventCallRC4("TRADE_SKILL_SHOW", function() OTLGM:ScanCurrentProfession("TRADE", 0) end) end
+        if OTLGM and OTLGM.ObserveTradeSkillEventR27 then SafeEventCallRC4("TRADE_SKILL_SHOW_CAPTURE_R27", function() OTLGM:ObserveTradeSkillEventR27("show") end) end
     elseif event == "CRAFT_SHOW" then
         if OTLGM and OTLGM.__impl180.ScanCurrentProfession__impl1 then SafeEventCallRC4("CRAFT_SHOW", function() OTLGM:ScanCurrentProfession("CRAFT", 0) end) end
+        if OTLGM and OTLGM.ObserveCraftEventR43 then SafeEventCallRC4("CRAFT_SHOW_CAPTURE_R43", function() OTLGM:ObserveCraftEventR43("show") end) end
     elseif event == "TRADE_SKILL_UPDATE" then
         if OTLGM and OTLGM.ScheduleProfessionRescan then SafeEventCallRC4("TRADE_SKILL_UPDATE", function() OTLGM:ScheduleProfessionRescan("TRADE", 2, 0.6) end) end
+        if OTLGM and OTLGM.ObserveTradeSkillEventR27 then SafeEventCallRC4("TRADE_SKILL_UPDATE_CAPTURE_R27", function() OTLGM:ObserveTradeSkillEventR27("update") end) end
     elseif event == "CRAFT_UPDATE" then
         if OTLGM and OTLGM.ScheduleProfessionRescan then SafeEventCallRC4("CRAFT_UPDATE", function() OTLGM:ScheduleProfessionRescan("CRAFT", 2, 0.6) end) end
+        if OTLGM and OTLGM.ObserveCraftEventR43 then SafeEventCallRC4("CRAFT_UPDATE_CAPTURE_R43", function() OTLGM:ObserveCraftEventR43("update") end) end
     elseif event == "PLAYER_REGEN_ENABLED" then
         if OTLGM and OTLGM.WakeScheduler180 then SafeEventCallRC4("COMBAT_ENDED_WAKE", function() OTLGM:WakeScheduler180("combat-ended") end) end
     elseif event == "PLAYER_GUILD_UPDATE" then
         if OTLGM and OTLGM.runtime then OTLGM.runtime.guildPermissionFlags170 = nil end
-        if OTLGM and OTLGM.__impl180.RefreshSenderRosterCache__impl1 then SafeEventCallRC4("GUILD_SENDER_CACHE", function() OTLGM:RefreshSenderRosterCache(true) end) end
-        if OTLGM and OTLGM.__impl180.BroadcastVersion__impl1 then SafeEventCallRC4("GUILD_VERSION", function() OTLGM:BroadcastVersion() end) end
-        if OTLGM and OTLGM.RequestPveSync then SafeEventCallRC4("GUILD_PVE_SYNC", function() OTLGM:RequestPveSync(true) end) end
-        if OTLGM and type(OTLGM.RequestCraftingSync) == "function" then SafeEventCallRC4("GUILD_CRAFT_SYNC", function() OTLGM:RequestCraftingSync(true) end) end
-        if OTLGM and OTLGM.RequestAnnouncementSync152 then SafeEventCallRC4("GUILD_ANNOUNCEMENT_SYNC", function() OTLGM:RequestAnnouncementSync152(true) end) end
+        if OTLGM then
+            OTLGM.runtime = OTLGM.runtime or {}
+            local fingerprint = GuildContextFingerprint181()
+            local previous = OTLGM.runtime.lastGuildContextFingerprint181
+            local changed = previous ~= fingerprint
+            OTLGM.runtime.lastGuildContextFingerprint181 = fingerprint
+            SafeEventCallRC4("GUILD_CONTEXT_SYNC", function() ScheduleGuildContextSync181(OTLGM, changed and fingerprint ~= "none") end)
+        end
         if OTLGM and OTLGM.__impl180.RefreshNavigation__impl1 then SafeEventCallRC4("GUILD_NAVIGATION", function() OTLGM:RefreshNavigation() end) end
     elseif event == "GUILD_ROSTER_UPDATE" then
         if OTLGM and OTLGM.runtime then
             OTLGM.runtime.guildPermissionFlags170 = nil
+            OTLGM.runtime.achievementRosterDirty176 = true
+            OTLGM.runtime.groupSnapshotDirty176 = true
+            OTLGM.runtime.guildLeader175 = nil
             OTLGM.runtime.guildLeaderR6 = nil
+            OTLGM.runtime.guildLeader176 = nil
         end
-        if OTLGM and OTLGM.RefreshActiveRaidInviteSessions180 then SafeEventCallRC4("ROSTER_RAID_INVITES", function() OTLGM:RefreshActiveRaidInviteSessions180(true) end) end
         local targetedRankName
         local targetedRankOnly = false
         if OTLGM and OTLGM.rosterActionPending180 and OTLGM.rosterActionPending180.targeted180 and not OTLGM.pendingScan then
@@ -1289,13 +1774,25 @@ eventFrame:SetScript("OnEvent", function()
                 SafeEventCallRC4("ROSTER_TARGET_REFRESH", function() OTLGM:RefreshRosterTarget180(targetedRankName) end)
                 EndPerformanceSampleSafe180(OTLGM, "roster targeted refresh", started)
             elseif not targetedRankOnly then
-                -- An unsolicited roster event only marks hidden data dirty. If a
-                -- roster-consuming page is visible, one keyed scan is scheduled;
-                -- event storms replace the same task instead of rebuilding rows.
-                SafeEventCallRC4("ROSTER_VISIBLE_SCAN", function() ScheduleVisibleRosterEventScan180(OTLGM) end)
+                -- r59: ordinary login/logout presence no longer forces the full
+                -- authoritative 800+ member scan just because Home/Roster is
+                -- visible. The lightweight presence lane reads only volatile
+                -- online/zone fields and escalates to the existing full scan on
+                -- any membership/rank/note/level mismatch.
+                if OTLGM.BeginRosterPresenceRefreshR59 then
+                    local presenceHandledR59 = false
+                    SafeEventCallRC4("ROSTER_PRESENCE_R59", function()
+                        presenceHandledR59 = OTLGM:BeginRosterPresenceRefreshR59("GUILD_EVENT") and true or false
+                    end)
+                    if not presenceHandledR59 then
+                        SafeEventCallRC4("ROSTER_VISIBLE_SCAN", function() ScheduleVisibleRosterEventScan180(OTLGM) end)
+                    end
+                else
+                    SafeEventCallRC4("ROSTER_VISIBLE_SCAN", function() ScheduleVisibleRosterEventScan180(OTLGM) end)
+                end
             end
         end
-        if OTLGM and OTLGM.OnGuildRosterUpdatedRecruitmentC5R4 then SafeEventCallRC4("ROSTER_RECRUITMENT", function() OTLGM:OnGuildRosterUpdatedRecruitmentC5R4() end) end
+        if OTLGM then SafeEventCallRC4("ROSTER_SECONDARY", function() ScheduleRosterSecondaryRefresh181(OTLGM) end) end
     end
     if OTLGM and OTLGM.UpdateSchedulerState180 then
         local schedulerOk, schedulerProblem = pcall(OTLGM.UpdateSchedulerState180, OTLGM, "event:" .. tostring(event or "unknown"))

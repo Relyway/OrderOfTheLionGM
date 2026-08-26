@@ -21,8 +21,8 @@ function OTLGM:BuildMinimapButton()
     OTLGM:PrepareInteractiveControl170(button, "button")
     button:SetWidth(34)
     button:SetHeight(34)
-    button:SetFrameStrata("HIGH")
-    button:SetFrameLevel(10)
+    button:SetFrameStrata("LOW")
+    button:SetFrameLevel(8)
     button:SetMovable(true)
     button:SetClampedToScreen(true)
     button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
@@ -77,7 +77,7 @@ function OTLGM:BuildMinimapButton()
             if type(OTLGM.RequestScan) == "function" then
                 OTLGM:RequestScan("MANUAL")
             elseif DEFAULT_CHAT_FRAME then
-                DEFAULT_CHAT_FRAME:AddMessage("|cffff3333[Lion GM]|r Roster scan is unavailable because the core API did not finish loading. Type /otltest.")
+                DEFAULT_CHAT_FRAME:AddMessage("|cffff3333[Lion GM]|r The guild list could not be updated because a required game function is unavailable. Type /otltest for troubleshooting details.")
             end
         else
             if type(OTLGM.ToggleUI) == "function" then OTLGM:ToggleUI()

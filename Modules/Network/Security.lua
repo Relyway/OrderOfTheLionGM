@@ -5,6 +5,8 @@ local RATE_WINDOW = tonumber(OTLGM.networkRateWindow180) or 10
 local RATE_MAXIMUM = tonumber(OTLGM.networkInboundMaximum180) or 90
 local AUTHORITY_QUARANTINE_TTL_RC5 = 10
 local AUTHORITY_QUARANTINE_LIMIT_RC5 = 24
+local AUTHORITY_TRACK_LIMIT_R14 = 64
+local AUTHORITY_VALIDATION_TTL_R14 = 60
 local TARGET_ENVELOPE = "T1^"
 local CRAFT_TRANSFER_WINDOW = 120
 
@@ -38,37 +40,94 @@ local function Reject(self, reason, sender, detail)
     return false
 end
 
-local function FindStoredMember(self, sender)
-    local db = self:GetGuildDB()
-    local normalized = self:NormalizeName(sender)
-    local name, member
-    for name, member in pairs(db and db.roster or {}) do
-        if self:NormalizeName(name) == normalized then return member end
-    end
-    return nil
-end
-
 function OTLGM.__impl180.RefreshSenderRosterCache__impl1(self, force)
     self.runtime = self.runtime or {}
     local cache = self.runtime.senderRoster
     local now = self:Now()
     if cache and not force and now - (cache.builtAt or 0) < 30 then return cache end
 
-    cache = { builtAt = now, members = {} }
-    local player = UnitName and UnitName("player") or ""
-    if player ~= "" then cache.members[self:NormalizeName(player)] = { name = player, self = true } end
-
     local db = self:GetGuildDB()
-    local name, member
-    for name, member in pairs(db and db.roster or {}) do
-        cache.members[self:NormalizeName(name)] = member
+    local lookup = self.runtime.rosterMemberLookup180
+    if not lookup or lookup.roster ~= (db and db.roster) or lookup.lastScan ~= (db and db.lastScan)
+        or type(lookup.byKey) ~= "table" then
+        if not force then
+            -- Never allocate/normalize an 800+ member allow-list from the packet
+            -- receive path. The bounded roster reader will publish it atomically.
+            -- Until then, fail closed for other senders; the player itself remains
+            -- known and authority validation can request fresh roster data.
+            self.runtime.senderRosterDeferredR26 = (tonumber(self.runtime.senderRosterDeferredR26) or 0) + 1
+            cache = { builtAt = now, members = {} }
+            local player = UnitName and UnitName("player") or ""
+            if player ~= "" then cache.selfKey = self:NormalizeName(player) end
+            self.runtime.senderRoster = cache
+            return cache
+        end
+        -- Explicit fallback only (unusual direct Scan/load ordering). Normal
+        -- sliced commits should make this counter stay at zero in live tests.
+        local started = self.BeginPerformanceSample180 and self:BeginPerformanceSample180() or nil
+        lookup = { roster = db and db.roster, lastScan = db and db.lastScan, byKey = {} }
+        local name, member, key
+        for name, member in pairs(db and db.roster or {}) do
+            key = self:NormalizeName(name)
+            if key ~= "" then lookup.byKey[key] = member end
+            key = self:NormalizeName(member and member.name)
+            if key ~= "" then lookup.byKey[key] = member end
+        end
+        self.runtime.rosterMemberLookup180 = lookup
+        self.runtime.senderRosterFallbackBuildsR26 = (tonumber(self.runtime.senderRosterFallbackBuildsR26) or 0) + 1
+        if started and self.EndPerformanceSample180 then self:EndPerformanceSample180("sender roster fallback rebuild", started) end
     end
+
+    cache = { builtAt = now, members = lookup.byKey }
+    local player = UnitName and UnitName("player") or ""
+    if player ~= "" then cache.selfKey = self:NormalizeName(player) end
 
     -- The committed roster database is the only sender allow-list. Never walk
     -- 780+ live guild rows from the packet receive path; login/stale-on-open
     -- scans populate this cache asynchronously through the bounded roster reader.
+    -- Security and GetMember share the same normalized index, so a cache refresh
+    -- does not allocate and normalize a second copy of a 700+ member roster.
     self.runtime.senderRoster = cache
     return cache
+end
+
+local function PruneAuthorityTrackingR14(self, now)
+    self.runtime = self.runtime or {}
+    local validation = self.runtime.authorityValidationRC4
+    local pending = self.runtime.authorityPendingRC5
+    local rows = {}
+    local key, value
+    if type(validation) == "table" then
+        for key, value in pairs(validation) do
+            local stamp = tonumber(value) or 0
+            if stamp <= 0 or now - stamp > AUTHORITY_VALIDATION_TTL_R14 then
+                validation[key] = nil
+            else
+                table.insert(rows, { key = key, stamp = stamp })
+            end
+        end
+        if table.getn(rows) > AUTHORITY_TRACK_LIMIT_R14 then
+            table.sort(rows, function(left, right) return left.stamp < right.stamp end)
+            local index
+            for index = 1, table.getn(rows) - AUTHORITY_TRACK_LIMIT_R14 do validation[rows[index].key] = nil end
+        end
+    end
+    rows = {}
+    if type(pending) == "table" then
+        for key, value in pairs(pending) do
+            local expires = tonumber(value) or 0
+            if expires <= now then
+                pending[key] = nil
+            else
+                table.insert(rows, { key = key, expires = expires })
+            end
+        end
+        if table.getn(rows) > AUTHORITY_TRACK_LIMIT_R14 then
+            table.sort(rows, function(left, right) return left.expires < right.expires end)
+            local index
+            for index = 1, table.getn(rows) - AUTHORITY_TRACK_LIMIT_R14 do pending[rows[index].key] = nil end
+        end
+    end
 end
 
 local function RequestAuthorityValidationRC4(self, sender, reason)
@@ -76,11 +135,13 @@ local function RequestAuthorityValidationRC4(self, sender, reason)
     local now = self:Now()
     local key = self:NormalizeName(sender or "")
     self.runtime.authorityValidationRC4 = self.runtime.authorityValidationRC4 or {}
+    self.runtime.authorityPendingRC5 = self.runtime.authorityPendingRC5 or {}
+    PruneAuthorityTrackingR14(self, now)
     local last = tonumber(self.runtime.authorityValidationRC4[key]) or 0
     if now - last < 15 then return false end
     self.runtime.authorityValidationRC4[key] = now
-    self.runtime.authorityPendingRC5 = self.runtime.authorityPendingRC5 or {}
     self.runtime.authorityPendingRC5[key] = now + AUTHORITY_QUARANTINE_TTL_RC5
+    PruneAuthorityTrackingR14(self, now)
     self.runtime.authorityValidationRequestsRC4 = (tonumber(self.runtime.authorityValidationRequestsRC4) or 0) + 1
     -- One bounded roster read validates all waiting senders. Do not start a
     -- fresh 788-member scan for every newly heard peer in a busy guild.
@@ -95,7 +156,8 @@ end
 function OTLGM:IsKnownGuildSender(sender)
     if not sender or sender == "" or not GetGuildInfo or not GetGuildInfo("player") then return false end
     local cache = self:RefreshSenderRosterCache(false)
-    local known = cache.members[self:NormalizeName(sender)] ~= nil
+    local key = self:NormalizeName(sender)
+    local known = key == cache.selfKey or cache.members[key] ~= nil
     if not known then RequestAuthorityValidationRC4(self, sender, "unknown") end
     return known
 end
@@ -135,6 +197,11 @@ local authorityKindsRC5 = {
     A3 = { DEL=true, META=true, BODY=true },
     B1 = { GOAL=true, DEL=true, END=true, CONTRIB=true, DONOR=true },
     P1 = { RAID=true, RDMETA=true, NOTICE=true, RAIDDEL=true, RTEAM1=true, RTMEM1=true, RTDEL1=true, RMETA1=true, RRMEM1=true, RRDEL1=true },
+    M1 = {
+        RACK=true, RSTATUS=true, RREPLY=true, WARNING=true, WCLEAR=true,
+        MSUM=true, MREQ=true, MIDX=true, MWARN=true, MWTEXT=true,
+        MCASE=true, MCTEXT=true, MACK=true,
+    },
 }
 
 local function AuthorityPayloadKindRC5(self, message, channel)
@@ -155,6 +222,7 @@ end
 
 function OTLGM:IsAuthorityValidationPendingRC5(sender)
     self.runtime = self.runtime or {}
+    PruneAuthorityTrackingR14(self, self:Now())
     local key = self:NormalizeName(sender or "")
     local expires = self.runtime.authorityPendingRC5 and tonumber(self.runtime.authorityPendingRC5[key]) or 0
     if expires <= self:Now() then
@@ -370,6 +438,95 @@ local function ValidShortField(value, maximum)
     return value ~= "" and string.len(value) <= (tonumber(maximum) or 64)
 end
 
+local function ValidIdentityPeers184(value, role)
+    value = tostring(value or "")
+    if role == "N" then return value == "" end
+    if value == "" or string.len(value) > 77 or string.find(value, "[|%^%c%s]") then return false end
+    local count = 0
+    local token
+    for token in string.gfind(value, "[^,]+") do
+        if string.len(token) < 1 or string.len(token) > 12 then return false end
+        count = count + 1
+        if count > 6 then return false end
+    end
+    if role == "A" then return count == 1 and not string.find(value, ",", 1, true) end
+    return role == "M" and count >= 1 and count <= 6
+end
+
+local MODERATION_TYPES_183 = { PLAYER=true, GUILD=true, ADDON=true, SUGGESTION=true }
+local MODERATION_CATEGORIES_183 = {
+    HARASSMENT=true, SPAM=true, CHAT=true, LOOT=true, GROUP=true, RULES=true, SCAM=true, CONTENT=true,
+    ORGANIZATION=true, RANK=true, RAID=true, RECRUITMENT=true,
+    FPS=true, UI=true, FEATURE=true, DATA=true, SYNC=true, PROFESSION=true, ACHIEVEMENT=true,
+    ADDON=true, GUILD=true, EVENT=true, OTHER=true,
+    BEHAVIOUR=true, TRADE=true,
+}
+local MODERATION_REPORT_CATEGORIES_183 = {
+    PLAYER = { HARASSMENT=true, SPAM=true, CHAT=true, LOOT=true, GROUP=true, RULES=true, SCAM=true, CONTENT=true, OTHER=true },
+    GUILD = { ORGANIZATION=true, RANK=true, RAID=true, RECRUITMENT=true, RULES=true, OTHER=true },
+    ADDON = { FPS=true, UI=true, FEATURE=true, DATA=true, SYNC=true, PROFESSION=true, ACHIEVEMENT=true, OTHER=true },
+    SUGGESTION = { ADDON=true, GUILD=true, EVENT=true, OTHER=true },
+}
+local MODERATION_STATUSES_183 = {
+    NEW=true, SEEN=true, REVIEW=true, WAITING=true, HOLD=true, ACTION=true,
+    RESOLVED=true, NO_ACTION=true, REJECTED=true, DUPLICATE=true, ARCHIVED=true, WITHDRAWN=true,
+}
+local MODERATION_CLEAR_REASONS_183 = { EXPIRED=true, RESOLVED=true, MISTAKE=true, DECISION=true }
+local MODERATION_RECONCILIATION_KINDS_183 = {
+    MSUM=true, MREQ=true, MIDX=true, MWARN=true, MWTEXT=true,
+    MCASE=true, MCTEXT=true, MACK=true,
+}
+
+local function ValidModerationTimestamp183(self, value)
+    value = tonumber(value) or 0
+    return value > 0 and value <= self:Now() + 86400
+end
+
+local function ValidModerationText183(value, maximum, allowEmpty)
+    value = tostring(value or "")
+    if not allowEmpty and value == "" then return false end
+    return string.len(value) <= (tonumber(maximum) or 120) and not string.find(value, "[%c]")
+end
+
+local function ValidModerationName183(value, allowEmpty)
+    value = tostring(value or "")
+    if allowEmpty and value == "" then return true end
+    return value ~= "" and string.len(value) <= 32 and not string.find(value, "[%c%^]")
+end
+
+local function ValidModerationBucketText183(self, value)
+    local buckets = self:Split(tostring(value or ""), ",")
+    if table.getn(buckets) ~= 6 then return false end
+    local index, separator, count, hash
+    for index = 1, table.getn(buckets) do
+        separator = string.find(buckets[index], ".", 1, true)
+        if not separator then return false end
+        count = tonumber(string.sub(buckets[index], 1, separator - 1)) or -1
+        hash = tonumber(string.sub(buckets[index], separator + 1)) or -1
+        if count < 0 or count > 120 or hash < 0 or hash > 99990 then return false end
+    end
+    return true
+end
+
+local function ValidModerationIndexEntries183(self, value, recordType)
+    value = tostring(value or "")
+    if value == "" then return true end
+    local entries = self:Split(value, "~")
+    if table.getn(entries) > 2 then return false end
+    local index, fields, revision, state, updatedAt, digest
+    for index = 1, table.getn(entries) do
+        fields = self:Split(entries[index], ",")
+        revision, state = tonumber(fields[2]) or 0, fields[3] or ""
+        updatedAt, digest = tonumber(fields[4]) or -1, tonumber(fields[5]) or -1
+        if table.getn(fields) ~= 5 or not self:IsValidID(fields[1] or "", 24)
+            or revision < 1 or revision > 1000000 or updatedAt < 0
+            or digest < 0 or digest > 99990 then return false end
+        if recordType == "W" and state ~= "0" and state ~= "1" then return false end
+        if recordType == "C" and not MODERATION_STATUSES_183[state] then return false end
+    end
+    return true
+end
+
 local function CanRelayPve(self, channel, sender, leadershipOnly)
     if channel ~= "WHISPER" or not IsRecentPveSync(self) then return false end
     return not leadershipOnly or self:IsLeadershipSender(sender)
@@ -445,6 +602,49 @@ local function CanApplyCraftRequestMeta180(self, fields, sender, channel)
         and self:Now() - (tonumber(craft.syncState.started) or 0) <= CRAFT_TRANSFER_WINDOW
 end
 
+-- R44 city-stutter fast path. Vanilla targeted addon traffic is physically
+-- broadcast through GUILD, so every compatible guild client receives packets
+-- addressed to somebody else. In large guilds this can be thousands of events
+-- in a few minutes. Discard no-op packets before diagnostics, pcall closure
+-- creation and scheduler recomputation; the full security handler still owns
+-- malformed/self-addressed/real packets.
+function OTLGM:FastDiscardAddonPacketR44(prefix, message, channel, sender)
+    if prefix ~= "OTLGM" or type(message) ~= "string" or type(sender) ~= "string" then return false end
+    self.runtime = self.runtime or {}
+    local player = UnitName and (UnitName("player") or "") or ""
+    local playerKey = self.runtime.fastAddonPlayerKeyR44
+    if self.runtime.fastAddonPlayerRawR44 ~= player or not playerKey then
+        self.runtime.fastAddonPlayerRawR44 = player
+        playerKey = self:NormalizeName(player)
+        self.runtime.fastAddonPlayerKeyR44 = playerKey
+    end
+
+    -- The canonical handler already ignores our own echo. Doing it here avoids
+    -- allocating packet diagnostics and walking CompatibilityDue180 afterwards.
+    if playerKey ~= "" and self:NormalizeName(sender) == playerKey then
+        self.runtime.metrics = self.runtime.metrics or {}
+        self.runtime.metrics.network = self.runtime.metrics.network or { queued = 0, sent = 0, retried = 0, dropped = 0, rejected = 0 }
+        self.runtime.metrics.network.selfEchoFastSkippedR44 = (tonumber(self.runtime.metrics.network.selfEchoFastSkippedR44) or 0) + 1
+        return true
+    end
+
+    if channel ~= "GUILD" or string.sub(message, 1, string.len(TARGET_ENVELOPE)) ~= TARGET_ENVELOPE then return false end
+    local separator = string.find(message, "^", string.len(TARGET_ENVELOPE) + 1, true)
+    if not separator then return false end
+    local target = string.sub(message, string.len(TARGET_ENVELOPE) + 1, separator - 1)
+    -- Let the canonical handler reject malformed envelopes so diagnostics and
+    -- abuse accounting remain authoritative.
+    if target == "" or string.len(target) > 48 or string.find(target, "[%c]") then return false end
+    if self:NormalizeName(target) == playerKey then return false end
+
+    self.runtime.metrics = self.runtime.metrics or {}
+    self.runtime.metrics.network = self.runtime.metrics.network or { queued = 0, sent = 0, retried = 0, dropped = 0, rejected = 0 }
+    local metrics = self.runtime.metrics.network
+    metrics.targetedSkipped = (tonumber(metrics.targetedSkipped or metrics.targetedIgnored) or 0) + 1
+    metrics.targetedFastSkippedR44 = (tonumber(metrics.targetedFastSkippedR44) or 0) + 1
+    return true
+end
+
 function OTLGM.__impl180.HandleAddonMessage__impl1(self, prefix, message, channel, sender)
     if prefix ~= "OTLGM" or type(message) ~= "string" or type(sender) ~= "string" then return false end
     if string.len(message) == 0 or string.len(message) > 250 then return Reject(self, "invalid-size", sender) end
@@ -478,6 +678,13 @@ function OTLGM.__impl180.HandleAddonMessage__impl1(self, prefix, message, channe
     local fields = self:Split(message, "^")
     local protocol = fields[1] or ""
     local kind = fields[2] or ""
+    -- No persistent peer/version state may be mutated until the actual addon
+    -- sender is present in the committed guild roster and has passed the shared
+    -- inbound rate limit. This also prevents spoofed legacy-sync packets from
+    -- being accepted as harmless before sender validation.
+    if not self:IsKnownGuildSender(sender) then return Reject(self, "unknown-sender", sender) end
+    if not (self.runtime and self.runtime.authorityReplaySkipRateRC5) and not self:CheckInboundRate(sender) then return Reject(self, "rate-limit", sender) end
+
     local advertisedVersion = nil
     if protocol == "P1" and kind == "SYNC" then advertisedVersion = fields[4] end
     if protocol == "C1" and kind == "SYNC157" then advertisedVersion = fields[3] end
@@ -505,22 +712,306 @@ function OTLGM.__impl180.HandleAddonMessage__impl1(self, prefix, message, channe
         return true
     end
 
-    if not self:IsKnownGuildSender(sender) then return Reject(self, "unknown-sender", sender) end
-    if not (self.runtime and self.runtime.authorityReplaySkipRateRC5) and not self:CheckInboundRate(sender) then return Reject(self, "rate-limit", sender) end
-
     if protocol == "F1" then
-        if channel ~= "WHISPER" then return Reject(self, "release175-channel", sender) end
         if kind == "STATE" then
+            if channel ~= "WHISPER" then return Reject(self, "release175-channel", sender) end
             if not ValidShortField(fields[3] or "", 16) or string.len(fields[4] or "") > 12
                 or string.len(fields[5] or "") > 180 or string.len(fields[6] or "") > 80
                 or not tonumber(fields[7]) then return Reject(self, "release175-state-shape", sender) end
         elseif kind == "REVIVE" then
+            if channel ~= "WHISPER" then return Reject(self, "release175-channel", sender) end
             if not ValidShortField(fields[3] or "", 48) or string.len(fields[4] or "") > 80
                 or not tonumber(fields[5]) or string.len(fields[6] or "") > 80 then return Reject(self, "release175-revive-shape", sender) end
+        elseif kind == "LEVEL" then
+            local level, timestamp = tonumber(fields[4]) or 0, tonumber(fields[6]) or 0
+            if channel ~= "WHISPER" or not ValidShortField(fields[3] or "", 48)
+                or level < 1 or level > 255 or string.len(fields[5] or "") > 180 or timestamp <= 0 then
+                return Reject(self, "release175-level-shape", sender)
+            end
+        elseif kind == "REQ" then
+            if channel ~= "WHISPER" or not ValidShortField(fields[3] or "", 32) then
+                return Reject(self, "profile-request-shape", sender)
+            end
+        elseif kind == "PROFILE" then
+            local revision = tonumber(fields[3]) or 0
+            local completed, total = tonumber(fields[4]) or -1, tonumber(fields[5]) or -1
+            local timestamp = tonumber(fields[6]) or 0
+            local recent = fields[7] or ""
+            local fieldCount = table.getn(fields)
+            if (channel ~= "GUILD" and channel ~= "WHISPER") or revision < 1 or revision > 1000000000
+                or completed < 0 or completed > 500 or total < 1 or total > 500 or completed > total
+                or timestamp <= 0 or string.len(recent) > 120 or string.find(recent, "[%c]")
+                or (fieldCount ~= 7 and fieldCount ~= 11) then
+                return Reject(self, "profile-summary-shape", sender)
+            end
+            -- r34 optional Main/Alt identity extension. Old clients safely
+            -- ignore fields 8..11; r34 validates them here before feature code.
+            if fieldCount == 11 then
+                local identityRole = fields[8] or ""
+                local identityPeers = fields[9] or ""
+                local identityRevision = tonumber(fields[10]) or 0
+                local identityUpdatedAt = tonumber(fields[11]) or 0
+                if (identityRole ~= "A" and identityRole ~= "M" and identityRole ~= "N")
+                    or not ValidIdentityPeers184(identityPeers, identityRole)
+                    or identityRevision < 1 or identityRevision > 1000000000 or identityUpdatedAt <= 0 then
+                    return Reject(self, "profile-identity-shape", sender)
+                end
+            end
+        elseif kind == "ACHREQ" then
+            local requestAt = tonumber(fields[3]) or 0
+            local catalogRevision = tonumber(fields[4]) or 0
+            if channel ~= "WHISPER" or table.getn(fields) ~= 4 or requestAt <= 0
+                or catalogRevision < 1 or catalogRevision > 1000000000 then
+                return Reject(self, "profile-achievement-request-shape", sender)
+            end
+        elseif kind == "ACHMAP" then
+            local revision = tonumber(fields[3]) or 0
+            local catalogRevision = tonumber(fields[4]) or 0
+            local completed, total = tonumber(fields[5]) or -1, tonumber(fields[6]) or -1
+            local timestamp = tonumber(fields[7]) or 0
+            local bitmap = fields[8] or ""
+            if channel ~= "WHISPER" or table.getn(fields) ~= 8 or revision < 1 or revision > 1000000000
+                or catalogRevision < 1 or catalogRevision > 1000000000
+                or completed < 0 or total < 1 or total > 500 or completed > total or timestamp <= 0
+                or string.len(bitmap) ~= math.ceil(total / 4) or string.len(bitmap) > 128 or string.find(bitmap, "[^0-9A-Fa-f]") then
+                return Reject(self, "profile-achievement-map-shape", sender)
+            end
+        elseif kind == "ABOUT" then
+            local revision, timestamp = tonumber(fields[3]) or 0, tonumber(fields[4]) or 0
+            local about = fields[5] or ""
+            if (channel ~= "GUILD" and channel ~= "WHISPER") or revision < 1 or revision > 1000000000
+                or timestamp <= 0 or string.len(about) > 180 or string.find(about, "[%c]") then
+                return Reject(self, "profile-about-shape", sender)
+            end
+        elseif kind == "IDREQ" or kind == "IDACK" or kind == "IDREJ" or kind == "IDUNLINK" then
+            local identityName = fields[3] or ""
+            local requestRevision = tonumber(fields[4]) or 0
+            local identityTimestamp = tonumber(fields[5]) or 0
+            if channel ~= "WHISPER" or table.getn(fields) ~= 5
+                or not ValidShortField(identityName, 12) or string.find(identityName, "[,|]")
+                or requestRevision < 1 or requestRevision > 1000000000 or identityTimestamp <= 0 then
+                return Reject(self, "character-identity-shape", sender)
+            end
         else
             return Reject(self, "unknown-release175-kind", sender)
         end
         return self.HandleRelease175Message and self:HandleRelease175Message(message, channel, sender) or false
+    end
+
+    if protocol == "M1" then
+        if channel ~= "WHISPER" then return Reject(self, "moderation-channel", sender) end
+        local reportId = fields[3] or ""
+        local revision = tonumber(fields[4]) or 0
+        if not self:IsValidID(reportId, 24) or revision < 1 or revision > 1000000 then
+            return Reject(self, "moderation-id-revision", sender)
+        end
+
+        if MODERATION_RECONCILIATION_KINDS_183[kind] then
+            if not self:IsOfficerMode() then return Reject(self, "moderation-reconcile-recipient", sender) end
+            if not self:IsLeadershipSender(sender) then return Reject(self, "moderation-authority", sender) end
+            local expectedFields = kind == "MSUM" and 12 or kind == "MREQ" and 8 or kind == "MIDX" and 9
+                or kind == "MWARN" and 19 or kind == "MCASE" and 24
+                or (kind == "MWTEXT" or kind == "MCTEXT") and 9 or kind == "MACK" and 8 or 0
+            if table.getn(fields) ~= expectedFields then
+                return Reject(self, "moderation-reconcile-field-count", sender)
+            end
+            if kind == "MSUM" then
+                local activeWarnings, warningCount, warningHash = tonumber(fields[5]) or -1,
+                    tonumber(fields[6]) or -1, tonumber(fields[7]) or -1
+                local openCases, caseCount, caseHash = tonumber(fields[8]) or -1,
+                    tonumber(fields[9]) or -1, tonumber(fields[10]) or -1
+                if activeWarnings < 0 or activeWarnings > warningCount or warningCount > 120
+                    or warningHash < 0 or warningHash > 99990 or openCases < 0 or openCases > caseCount
+                    or caseCount > 120 or caseHash < 0 or caseHash > 99990
+                    or not ValidModerationBucketText183(self, fields[11])
+                    or not ValidModerationBucketText183(self, fields[12]) then
+                    return Reject(self, "moderation-summary-shape", sender)
+                end
+            elseif kind == "MREQ" then
+                local mode, recordType = fields[5] or "", fields[6] or ""
+                if (mode ~= "I" and mode ~= "R") or (recordType ~= "W" and recordType ~= "C") then
+                    return Reject(self, "moderation-request-shape", sender)
+                end
+                if mode == "I" then
+                    local bucket, offset = tonumber(fields[7]) or 0, tonumber(fields[8]) or 0
+                    if bucket < 1 or bucket > 6 or offset < 1 or offset > 121 then
+                        return Reject(self, "moderation-request-shape", sender)
+                    end
+                else
+                    local ids = self:Split(fields[7] or "", ",")
+                    local index
+                    if table.getn(ids) < 1 or table.getn(ids) > 2 or tostring(fields[8] or "") ~= "0" then
+                        return Reject(self, "moderation-request-shape", sender)
+                    end
+                    for index = 1, table.getn(ids) do
+                        if not self:IsValidID(ids[index], 24) then return Reject(self, "moderation-request-shape", sender) end
+                    end
+                end
+            elseif kind == "MIDX" then
+                local recordType = fields[5] or ""
+                local bucket, offset, nextOffset = tonumber(fields[6]) or 0, tonumber(fields[7]) or 0, tonumber(fields[8]) or -1
+                if (recordType ~= "W" and recordType ~= "C") or bucket < 1 or bucket > 6
+                    or offset < 1 or offset > 121 or nextOffset < 0 or nextOffset > 121
+                    or (nextOffset > 0 and nextOffset <= offset)
+                    or not ValidModerationIndexEntries183(self, fields[9], recordType) then
+                    return Reject(self, "moderation-index-shape", sender)
+                end
+            elseif kind == "MWARN" then
+                if self:NormalizeName(fields[8] or "") == self:NormalizeName(UnitName("player") or "") then
+                    return Reject(self, "moderation-warning-private-recipient", sender)
+                end
+                local active, announced, acknowledged = fields[11] or "", tonumber(fields[12]) or 0, fields[13] or ""
+                local acknowledgedAt, clearReason, clearedAt = tonumber(fields[14]) or 0, fields[15] or "", tonumber(fields[16]) or 0
+                local relatedCaseId = fields[17] or ""
+                local reasonParts, commentParts = tonumber(fields[18]) or -1, tonumber(fields[19]) or -1
+                if not self:IsValidID(fields[5] or "", 24) or not ValidModerationTimestamp183(self, fields[6])
+                    or not ValidModerationTimestamp183(self, fields[7]) or not ValidModerationName183(fields[8], false)
+                    or not ValidModerationName183(fields[9], false) or not MODERATION_CATEGORIES_183[fields[10] or ""]
+                    or (relatedCaseId ~= "" and not self:IsValidID(relatedCaseId, 24))
+                    or (active ~= "0" and active ~= "1") or announced < 1 or announced > 2
+                    or (acknowledged ~= "0" and acknowledged ~= "1")
+                    or (acknowledgedAt > 0 and not ValidModerationTimestamp183(self, acknowledgedAt))
+                    or reasonParts < 0 or reasonParts > 1 or commentParts < 0 or commentParts > 2
+                    or (active == "1" and (reasonParts < 1 or clearReason ~= "" or clearedAt ~= 0))
+                    or (active == "0" and (not MODERATION_CLEAR_REASONS_183[clearReason]
+                        or not ValidModerationTimestamp183(self, clearedAt) or reasonParts ~= 0 or commentParts ~= 0)) then
+                    return Reject(self, "moderation-warning-record-shape", sender)
+                end
+            elseif kind == "MCASE" then
+                local sourceRevision = tonumber(fields[6]) or 0
+                local reportType, category, status = fields[11] or "", fields[12] or "", fields[13] or ""
+                local privacyScope = fields[14] or ""
+                local assignedTo, relatedCaseId, caseKind = fields[15] or "", fields[16] or "", fields[17] or ""
+                local textParts, diagnosticParts = tonumber(fields[18]) or -1, tonumber(fields[19]) or -1
+                local responseParts, followupParts, commentParts = tonumber(fields[20]) or -1,
+                    tonumber(fields[21]) or -1, tonumber(fields[22]) or -1
+                local reasonParts, timelineParts = tonumber(fields[23]) or -1, tonumber(fields[24]) or -1
+                local terminal = status == "RESOLVED" or status == "NO_ACTION" or status == "REJECTED"
+                    or status == "DUPLICATE" or status == "ARCHIVED" or status == "WITHDRAWN"
+                if not self:IsValidID(fields[5] or "", 24) or sourceRevision < 1 or sourceRevision > 1000000
+                    or not ValidModerationTimestamp183(self, fields[7]) or not ValidModerationTimestamp183(self, fields[8])
+                    or not ValidModerationName183(fields[9], false) or not ValidModerationName183(fields[10], true)
+                    or (assignedTo ~= "" and not ValidModerationName183(assignedTo, false))
+                    or (relatedCaseId ~= "" and not self:IsValidID(relatedCaseId, 24))
+                    or (caseKind ~= "REPORT" and caseKind ~= "ESCALATION")
+                    or (privacyScope ~= "LEADERSHIP" and privacyScope ~= "GUILD_LEADER")
+                    or self:NormalizeName(fields[10] or "") == self:NormalizeName(UnitName("player") or "")
+                    or (privacyScope == "GUILD_LEADER" and (not self.IsGuildLeader170 or not self:IsGuildLeader170()))
+                    or not MODERATION_TYPES_183[reportType] or not MODERATION_REPORT_CATEGORIES_183[reportType]
+                    or not MODERATION_REPORT_CATEGORIES_183[reportType][category] or not MODERATION_STATUSES_183[status]
+                    or textParts < 0 or textParts > 3 or diagnosticParts < 0 or diagnosticParts > 2
+                    or responseParts < 0 or responseParts > 2 or followupParts < 0 or followupParts > 2
+                    or commentParts < 0 or commentParts > 2 or reasonParts < 0 or reasonParts > 1
+                    or timelineParts < 0 or timelineParts > 8
+                    or (not terminal and textParts < 1)
+                    or (terminal and (textParts ~= 0 or diagnosticParts ~= 0 or responseParts ~= 0
+                        or followupParts ~= 0 or commentParts ~= 0))
+                    or (reportType ~= "ADDON" and diagnosticParts ~= 0) then
+                    return Reject(self, "moderation-case-record-shape", sender)
+                end
+            elseif kind == "MWTEXT" or kind == "MCTEXT" then
+                local code, sequence, total = fields[6] or "", tonumber(fields[7]) or 0, tonumber(fields[8]) or 0
+                local maximum = code == "T" and 3 or code == "D" and 2 or code == "R" and 2
+                    or code == "F" and 2 or code == "P" and 2 or code == "S" and 1 or code == "L" and 8 or 0
+                if kind == "MWTEXT" and code ~= "R" and code ~= "P" then maximum = 0 end
+                if kind == "MCTEXT" and code ~= "T" and code ~= "D" and code ~= "R" and code ~= "F"
+                    and code ~= "P" and code ~= "S" and code ~= "L" then maximum = 0 end
+                if not self:IsValidID(fields[5] or "", 24) or maximum == 0 or sequence < 1 or total < 1
+                    or sequence > total or total > maximum or not ValidModerationText183(fields[9] or "", 84, false) then
+                    return Reject(self, "moderation-record-chunk-shape", sender)
+                end
+            elseif kind == "MACK" then
+                local recordType, result = fields[5] or "", fields[8] or ""
+                if (recordType ~= "S" and recordType ~= "W" and recordType ~= "C")
+                    or not self:IsValidID(fields[6] or "", 24) or not ValidRevision(fields[7])
+                    or (result ~= "OK" and result ~= "BUSY") then
+                    return Reject(self, "moderation-reconcile-ack-shape", sender)
+                end
+            end
+        elseif kind == "REPORT" then
+            local timestamp = fields[5]
+            local reportType, category, target = fields[6] or "", fields[7] or "", fields[8] or ""
+            local textParts, diagnosticParts = tonumber(fields[9]) or 0, tonumber(fields[10]) or -1
+            local privacyScope = fields[11] or ""
+            if not self:IsOfficerMode() then return Reject(self, "moderation-officer-recipient", sender) end
+            local targetMember = reportType == "PLAYER" and self.GetMember and self:GetMember(target) or nil
+            local targetIsLeadership = targetMember and self.IsLeadership and self:IsLeadership(targetMember) and true or false
+            local canonicalLeaderR30 = self.GetCanonicalGuildLeaderName180 and self:GetCanonicalGuildLeaderName180() or ""
+            local senderIsGuildLeaderR30 = canonicalLeaderR30 ~= "" and self:NormalizeName(sender) == self:NormalizeName(canonicalLeaderR30)
+            if privacyScope == "" then privacyScope = targetIsLeadership and "GUILD_LEADER" or "LEADERSHIP" end
+            if not ValidModerationTimestamp183(self, timestamp) or not MODERATION_TYPES_183[reportType]
+                or not MODERATION_REPORT_CATEGORIES_183[reportType] or not MODERATION_REPORT_CATEGORIES_183[reportType][category]
+                or not ValidModerationName183(target, true)
+                or (reportType == "PLAYER" and not targetMember)
+                or self:NormalizeName(target) == self:NormalizeName(UnitName("player") or "")
+                or (privacyScope ~= "LEADERSHIP" and privacyScope ~= "GUILD_LEADER")
+                or (targetIsLeadership and privacyScope ~= "GUILD_LEADER" and not (privacyScope == "LEADERSHIP" and senderIsGuildLeaderR30))
+                or (privacyScope == "GUILD_LEADER" and (not self.IsGuildLeader170 or not self:IsGuildLeader170()))
+                or textParts < 1 or textParts > 3 or diagnosticParts < 0 or diagnosticParts > 2
+                or (reportType ~= "ADDON" and diagnosticParts ~= 0) then
+                return Reject(self, "moderation-report-shape", sender)
+            end
+        elseif kind == "RTEXT" or kind == "RDIAG" then
+            local sequence, total = tonumber(fields[5]) or 0, tonumber(fields[6]) or 0
+            local maximumParts = kind == "RTEXT" and 3 or 2
+            if not self:IsOfficerMode() then return Reject(self, "moderation-officer-recipient", sender) end
+            if sequence < 1 or total < 1 or sequence > total or total > maximumParts
+                or not ValidModerationText183(fields[7] or "", 84, false) then
+                return Reject(self, "moderation-chunk-shape", sender)
+            end
+        elseif kind == "RFOLLOW" then
+            if not self:IsOfficerMode() then return Reject(self, "moderation-officer-recipient", sender) end
+            if not ValidModerationTimestamp183(self, fields[5])
+                or not ValidModerationText183(fields[6] or "", 120, false) then
+                return Reject(self, "moderation-followup-shape", sender)
+            end
+        elseif kind == "RWITH" then
+            if not self:IsOfficerMode() then return Reject(self, "moderation-officer-recipient", sender) end
+            if not ValidModerationTimestamp183(self, fields[5]) then return Reject(self, "moderation-withdraw-shape", sender) end
+        elseif kind == "WACK" then
+            if not self:IsOfficerMode() then return Reject(self, "moderation-officer-recipient", sender) end
+            if not ValidModerationTimestamp183(self, fields[5]) then return Reject(self, "moderation-warning-ack-shape", sender) end
+        elseif kind == "RACK" then
+            if not ValidModerationTimestamp183(self, fields[5]) then return Reject(self, "moderation-ack-shape", sender) end
+            if not self:IsLeadershipSender(sender) then return Reject(self, "moderation-authority", sender) end
+        elseif kind == "RSTATUS" then
+            if not MODERATION_STATUSES_183[fields[5] or ""] or not ValidModerationTimestamp183(self, fields[6])
+                or not ValidModerationText183(fields[7] or "", 72, true) then
+                return Reject(self, "moderation-status-shape", sender)
+            end
+            if not self:IsLeadershipSender(sender) then return Reject(self, "moderation-authority", sender) end
+        elseif kind == "RREPLY" then
+            if not ValidModerationTimestamp183(self, fields[5])
+                or not ValidModerationText183(fields[6] or "", 120, false) then
+                return Reject(self, "moderation-reply-shape", sender)
+            end
+            if not self:IsLeadershipSender(sender) then return Reject(self, "moderation-authority", sender) end
+        elseif kind == "WARNING" then
+            local target, category = fields[6] or "", fields[7] or ""
+            local activeCount = tonumber(fields[8]) or 0
+            if not ValidModerationTimestamp183(self, fields[5]) or not ValidModerationName183(target, false)
+                or not MODERATION_CATEGORIES_183[category] or activeCount < 1 or activeCount > 2
+                or not ValidModerationText183(fields[9] or "", 72, false) then
+                return Reject(self, "moderation-warning-shape", sender)
+            end
+            if self:NormalizeName(target) ~= self:NormalizeName(UnitName("player") or "") and not self:IsOfficerMode() then
+                return Reject(self, "moderation-warning-recipient", sender)
+            end
+            if not self:IsLeadershipSender(sender) then return Reject(self, "moderation-authority", sender) end
+        elseif kind == "WCLEAR" then
+            local target, clearReason = fields[6] or "", fields[7] or ""
+            if not ValidModerationTimestamp183(self, fields[5]) or not ValidModerationName183(target, false)
+                or not MODERATION_CLEAR_REASONS_183[clearReason] then
+                return Reject(self, "moderation-warning-clear-shape", sender)
+            end
+            if self:NormalizeName(target) ~= self:NormalizeName(UnitName("player") or "") and not self:IsOfficerMode() then
+                return Reject(self, "moderation-warning-recipient", sender)
+            end
+            if not self:IsLeadershipSender(sender) then return Reject(self, "moderation-authority", sender) end
+        else
+            return Reject(self, "unknown-moderation-kind", sender)
+        end
+        return self.HandleModerationMessage183 and self:HandleModerationMessage183(fields, channel, sender) or false
     end
 
     if protocol == "P1" then
@@ -580,8 +1071,18 @@ function OTLGM.__impl180.HandleAddonMessage__impl1(self, prefix, message, channe
             if self:NormalizeName(owner) ~= self:NormalizeName(sender) then return Reject(self, "craft-change-author", sender) end
         elseif kind == "CMAN" or kind == "CMEND" then
             local craft = self:EnsureCraftingDB()
-            if channel ~= "WHISPER" or not craft or not craft.syncState or not craft.syncState.active or self:Now() - (craft.syncState.started or 0) > CRAFT_TRANSFER_WINDOW then
-                return Reject(self, "craft-manifest-window", sender)
+            if channel ~= "WHISPER" then return Reject(self, "craft-manifest-channel", sender) end
+            local state = craft and craft.syncState
+            local attempted = state and state.peerAttemptedKeysR26
+            local senderKey = self:NormalizeName(sender or "")
+            if not state or not state.active or self:Now() - (state.started or 0) > CRAFT_TRANSFER_WINDOW
+                or (type(attempted) == "table" and next(attempted) and not attempted[senderKey]) then
+                -- A delayed CMAN/CMEND from a previously valid peer is stale
+                -- transport, not a hostile packet. Ignoring it avoids turning a
+                -- harmless mixed-latency response into rejection/backoff noise.
+                self.runtime = self.runtime or {}
+                self.runtime.craftingStaleManifestIgnoredR26 = (tonumber(self.runtime.craftingStaleManifestIgnoredR26) or 0) + 1
+                return true
             end
         elseif kind == "CWANT" then
             if channel ~= "WHISPER" or not ValidShortField(WireUnescape(fields[3]), 42) or not ValidShortField(WireUnescape(fields[4]), 24) then return Reject(self, "craft-request-shape", sender) end
@@ -604,7 +1105,7 @@ function OTLGM.__impl180.HandleAddonMessage__impl1(self, prefix, message, channe
 
     if protocol == "A3" then
         if kind == "SYNC" then
-            if channel ~= "GUILD" then return Reject(self, "announcement-sync-channel", sender) end
+            if channel ~= "GUILD" and channel ~= "WHISPER" then return Reject(self, "announcement-sync-channel", sender) end
         elseif kind == "DEL" then
             if not self:IsValidID(fields[3], 56) or not ValidRevision(fields[4]) then return Reject(self, "announcement-delete-shape", sender) end
             if not self:IsLeadershipSender(sender) then return Reject(self, "announcement-delete-authority", sender) end
@@ -707,6 +1208,7 @@ local authorityRejectReasonsRC5 = {
     ["pve-notice-leadership"] = true, ["pve-delete-authority"] = true, ["stage-c-pve-authority"] = true,
     ["announcement-delete-authority"] = true, ["announcement-authority"] = true, ["announcement-body-authority"] = true,
     ["treasury-authority"] = true,
+    ["moderation-authority"] = true,
 }
 
 function OTLGM:HandleAddonMessage(prefix, message, channel, sender)
@@ -731,6 +1233,7 @@ OTLGM:RegisterModule("Security", {
     rateMaximum = RATE_MAXIMUM,
     authorityQuarantineTTL = AUTHORITY_QUARANTINE_TTL_RC5,
     authorityQuarantineLimit = AUTHORITY_QUARANTINE_LIMIT_RC5,
+    authorityTrackingLimit = AUTHORITY_TRACK_LIMIT_R14,
     validatesRoster = true,
     validatesLeadership = true,
 })

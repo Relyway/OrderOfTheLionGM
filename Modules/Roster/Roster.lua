@@ -35,6 +35,21 @@ local function CopySimpleTable(source)
     return target
 end
 
+-- r30: roster backup rows are flat durable records. Never recursively clone an
+-- accidental cache/table attached to a member row; doing so caused rare 300+ ms
+-- GC/copy spikes even though the outer snapshot loop was sliced.
+local function CopyRosterSnapshotRowR30(source)
+    local target = {}
+    local key, value, valueType
+    for key, value in pairs(source or {}) do
+        valueType = type(value)
+        if valueType == "string" or valueType == "number" or valueType == "boolean" then
+            target[key] = value
+        end
+    end
+    return target
+end
+
 -- Rich profession dictionary. Short ambiguous aliases are checked as whole words
 -- and usually require a compact note or an adjacent skill number.
 OTLGM.professionDefinitions = {
@@ -115,10 +130,10 @@ OTLGM.professionDefinitions = {
 
 OTLGM.rankInformation = {
     {
-        number = "!", name = "Muted", kind = "Restricted",
-        aliases = { "muted", "mute", "tormented", "punished", "restricted", "warning" },
-        receive = "Assigned temporarily by leadership after a serious warning, rule violation or refusal to follow guild decisions.",
-        access = "Restricted disciplinary status. Normal guild privileges remain limited until leadership reviews the situation."
+        number = "!", name = "Timeout", kind = "Restricted",
+        aliases = { "timeout", "muted", "mute", "tormented", "punished", "restricted", "warning" },
+        receive = "Assigned temporarily by leadership when a member needs restricted guild access.",
+        access = "Disciplinary status outside the normal promotion path. Leadership reviews it before normal access is restored."
     },
     {
         number = "1", name = "Guest", kind = "Visitor",
@@ -163,16 +178,16 @@ OTLGM.rankInformation = {
         access = "Guild management, moderation, recruitment, member assistance and disciplinary decisions."
     },
     {
-        number = "8", name = "Lionheart", kind = "Leadership",
-        aliases = { "lionheart", "8 - lionheart" },
-        receive = "Granted only to senior leadership with exceptional long-term trust and responsibility.",
-        access = "Senior leadership status with broad responsibility for the guild and its officers."
+        number = "8", name = "Raid Leader", kind = "Leadership",
+        aliases = { "raid leader", "raidleader", "8 - raid leader", "lionheart", "8 - lionheart" },
+        receive = "Assigned to lead organized guild raids and coordinate the raid roster.",
+        access = "Raid planning, preparation, tactics, invites and decisions during organized guild raids."
     },
     {
-        number = "9", name = "Lucky Luck", displayName = "Lucky Luck", kind = "Leadership",
-        aliases = { "lucky luck", "guild leader", "guild master", "gm" },
+        number = "9", name = "Guild Leader", kind = "Leadership",
+        aliases = { "guild leader", "guild master", "gm", "lucky luck" },
         receive = "Guild Leader position.",
-        access = "Overall guild direction, final responsibility and the last decision on guild-wide matters."
+        access = "Overall guild direction, final responsibility and guild-wide decisions."
     },
 }
 
@@ -216,6 +231,16 @@ function OTLGM:ApplyAdvancedDefaults()
     if settings.globalSearch == nil then settings.globalSearch = "" end
     if settings.updateWarningDismissed == nil then settings.updateWarningDismissed = "" end
     if settings.lowLevelAddonCutoff == nil then settings.lowLevelAddonCutoff = 10 end
+    -- r47 version-awareness state is deliberately tiny and account-local.
+    -- Existing installations get one quiet What's New hint after the upgrade;
+    -- a clean first-run installation does not need an upgrade notice.
+    if settings.whatsNewSeenVersionR47 == nil then
+        settings.whatsNewSeenVersionR47 = settings.firstRunComplete and "" or tostring(self.version or "")
+    end
+    if settings.updateNoticeSeenVersionR47 == nil then settings.updateNoticeSeenVersionR47 = "" end
+    if settings.latestTrustedVersionR47 == nil then settings.latestTrustedVersionR47 = "" end
+    if settings.latestTrustedVersionAtR47 == nil then settings.latestTrustedVersionAtR47 = 0 end
+    if settings.latestTrustedVersionSourceR47 == nil then settings.latestTrustedVersionSourceR47 = "" end
 
     OTLGM_DB.version = self.version
 end
@@ -330,13 +355,28 @@ function OTLGM:AddLog(db, kind, name, detail, actor, source, meta)
 
     table.insert(db.log, 1, eventInfo)
     if not eventInfo.reviewed then db.unread = (db.unread or 0) + 1 end
-    while table.getn(db.log) > 500 do table.remove(db.log) end
+    while table.getn(db.log) > 500 do
+        local removed = table.remove(db.log)
+        if removed and removed.reviewed ~= true then
+            db.unread = math.max(0, (tonumber(db.unread) or 0) - 1)
+        end
+    end
     return eventInfo
 end
 
 function OTLGM:GetUnreadCount()
     local db = self:GetGuildDB()
-    return db and (db.unread or 0) or 0
+    if not db then return 0 end
+    local unread = tonumber(db.unread) or 0
+    local retained = table.getn(db.log or {})
+    -- Fail closed if imported/manual legacy data ever contains an impossible
+    -- aggregate again. This is O(1) in the normal path and only recounts the
+    -- retained <=500 rows when the stored counter cannot be valid.
+    if unread < 0 or unread > retained then
+        if self.RecountHistoryUnreadR59 then unread = self:RecountHistoryUnreadR59(db, true)
+        else unread = math.max(0, math.min(unread, retained)) db.unread = unread end
+    end
+    return unread
 end
 
 function OTLGM:MarkHistoryRead()
@@ -395,9 +435,63 @@ local function ContainsStrict(text, term)
     return false
 end
 
+local function GetCachedCraftingCharacterForRoster183(owner, member)
+    if not member or not member.name then return nil end
+    local db = owner.GetGuildDB and owner:GetGuildDB() or nil
+    local characters = db and db.crafting and db.crafting.characters
+    if type(characters) ~= "table" then return nil end
+    owner.runtime = owner.runtime or {}
+    local revision = owner.GetCraftingRecipeRevisionR46 and owner:GetCraftingRecipeRevisionR46() or (tonumber(owner.runtime.craftingDataRevisionRC3) or 0)
+    local lookup = owner.runtime.rosterCraftingCharacterLookup183
+    if not lookup or lookup.characters ~= characters or lookup.revision ~= revision then
+        lookup = { characters = characters, revision = revision, byName = {} }
+        local characterName, character, normalized
+        for characterName, character in pairs(characters) do
+            normalized = owner.NormalizeName and owner:NormalizeName(characterName or "") or string.lower(tostring(characterName or ""))
+            if normalized ~= "" and type(character) == "table" then lookup.byName[normalized] = character end
+        end
+        owner.runtime.rosterCraftingCharacterLookup183 = lookup
+    end
+    local normalized = owner.NormalizeName and owner:NormalizeName(member.name or "") or string.lower(tostring(member.name or ""))
+    return lookup.byName[normalized]
+end
+
 function OTLGM:GetMemberProfessionKeys(member)
-    local result = {}
+    local result, seen = {}, {}
     if not member then return result end
+
+    -- RC4-r9: profession inference is used by every member while a Roster
+    -- profession filter is active.  The canonical Crafting lookup is already
+    -- revisioned; cache the combined Crafting + note inference as well so an
+    -- 800-member roster does not repeatedly normalize notes and rescan every
+    -- profession alias while the player scrolls the same view.  Member-table
+    -- identity and both note fields keep targeted note edits safe.
+    self.runtime = self.runtime or {}
+    self.runtime.rosterProfessionKeys184 = self.runtime.rosterProfessionKeys184 or {}
+    local professionCache184 = self.runtime.rosterProfessionKeys184
+    local memberKey184 = self.NormalizeName and self:NormalizeName(member.name or "") or string.lower(tostring(member.name or ""))
+    local craftRevision184 = self.GetCraftingRecipeRevisionR46 and self:GetCraftingRecipeRevisionR46() or (tonumber(self.runtime.craftingDataRevisionRC3) or 0)
+    local cached184 = memberKey184 ~= "" and professionCache184[memberKey184] or nil
+    if cached184 and cached184.member == member and cached184.craftRevision == craftRevision184
+        and cached184.note == tostring(member.note or "") and cached184.officerNote == tostring(member.officerNote or "") then
+        return cached184.keys
+    end
+
+    -- Canonical Crafting Network data is the primary profession source. This
+    -- makes custom Octo professions (Survival included) available to Roster
+    -- filters without guessing from notes or scanning TradeSkill on selection.
+    local character = GetCachedCraftingCharacterForRoster183(self, member)
+    local professionKey, profession
+    for professionKey, profession in pairs(character and character.professions or {}) do
+        if type(profession) == "table" and professionKey ~= "ALL" and not seen[professionKey] then
+            seen[professionKey] = true
+            table.insert(result, professionKey)
+        end
+    end
+
+    -- Legacy structured note inference remains a fallback for members who have
+    -- never shared Crafting data. Survival is intentionally absent from this
+    -- free-text dictionary so Hunter/spec text cannot become a false profession.
     local text = self:GetProfessionNormalizedText(member)
     local i, j, definition
     for i = 1, table.getn(self.professionDefinitions) do
@@ -421,7 +515,16 @@ function OTLGM:GetMemberProfessionKeys(member)
                 if ContainsPlain(text, definition.typos[j]) then matched = true break end
             end
         end
-        if matched then table.insert(result, definition.key) end
+        if matched and not seen[definition.key] then
+            seen[definition.key] = true
+            table.insert(result, definition.key)
+        end
+    end
+    if memberKey184 ~= "" then
+        professionCache184[memberKey184] = {
+            member = member, craftRevision = craftRevision184,
+            note = tostring(member.note or ""), officerNote = tostring(member.officerNote or ""), keys = result,
+        }
     end
     return result
 end
@@ -474,10 +577,14 @@ function OTLGM:GetMemberProfessionLabels(member)
     local i, j, baseLabel, specialization
     for i = 1, table.getn(keys) do
         baseLabel = nil
-        for j = 1, table.getn(self.professionDefinitions) do
-            if self.professionDefinitions[j].key == keys[i] then
-                baseLabel = self.professionDefinitions[j].label
-                break
+        local canonicalDefinition = self.GetCraftingProfessionDefinition183 and self:GetCraftingProfessionDefinition183(keys[i]) or nil
+        if canonicalDefinition then baseLabel = canonicalDefinition.label end
+        if not baseLabel then
+            for j = 1, table.getn(self.professionDefinitions) do
+                if self.professionDefinitions[j].key == keys[i] then
+                    baseLabel = self.professionDefinitions[j].label
+                    break
+                end
             end
         end
         if baseLabel then
@@ -509,7 +616,7 @@ function OTLGM:GetLeadershipRole(member)
     local canonicalLeader = self.IsCanonicalGuildLeaderName180 and self:IsCanonicalGuildLeaderName180(member.name)
 
     -- For Order of the Lion the visible Guild Leader identity is deliberately
-    -- fixed to Morrow/Lucks.  Live rank indexes still drive permissions, but a
+    -- fixed to the configured leader identities.  Live rank indexes still drive permissions, but a
     -- stale rank-0 snapshot must never give another character the crown badge.
     if canonicalLeader then
         return "Interface\\Icons\\INV_Crown_01", rankLabel, 1.0, 0.76, 0.18
@@ -624,7 +731,7 @@ function OTLGM.__impl180.Stage_Advanced_RequestScan_2__impl1(self, reason)
     if self.pendingScan and mode ~= "MANUAL" then return end
     if self.lastScanRequestAt and (now - self.lastScanRequestAt) < minGap then
         if mode == "MANUAL" and self.SetStatus then
-            self:SetStatus("A roster request is already in progress. Please wait a moment.")
+            self:SetStatus("The guild member list is already updating. Please wait a moment.")
         end
         return
     end
@@ -635,12 +742,11 @@ function OTLGM.__impl180.Stage_Advanced_RequestScan_2__impl1(self, reason)
     self.pendingScan = true
     self.pendingScanReason = mode
     GuildRoster()
-    if self.SetStatus then
-        if mode == "CONFIRM" then
-            self:SetStatus("Confirming roster completeness...")
-        else
-            self:SetStatus("Requesting guild roster...")
-        end
+    -- Automatic freshness scans happen while players use every page of the addon.
+    -- Keep them silent; only a user-requested/confirmation scan deserves a global
+    -- status banner.
+    if self.SetStatus and mode == "MANUAL" then
+        self:SetStatus("Updating guild roster...", nil, { source = "roster", manual = true })
     end
 end
 
@@ -652,15 +758,155 @@ function OTLGM:GetSnapshotSignature(snapshot)
     return table.concat(names, "\031")
 end
 
+-- CP7: suspicious durable-field bursts need a signature stronger than names, but
+-- public/officer note text must never be copied into a diagnostic candidate. Hash
+-- the note values locally and retain only one compact numeric digest.
+local function SafeRosterTextHashCP7(value, seed)
+    local text = tostring(value or "")
+    local hash = tonumber(seed) or 5381
+    local index
+    for index = 1, string.len(text) do
+        hash = math.fmod((hash * 131) + string.byte(text, index), 2147483647)
+    end
+    return hash
+end
+
+function OTLGM:GetDurableSnapshotSignatureCP7(snapshot)
+    local names = {}
+    local name
+    for name in pairs(snapshot or {}) do table.insert(names, name) end
+    table.sort(names)
+    local hash = 5381
+    local index, member
+    for index = 1, table.getn(names) do
+        name = names[index]
+        member = snapshot[name] or {}
+        hash = SafeRosterTextHashCP7(name, hash)
+        hash = SafeRosterTextHashCP7(member.rank or "", hash)
+        hash = SafeRosterTextHashCP7(tostring(member.rankIndex or 99), hash)
+        hash = SafeRosterTextHashCP7(tostring(member.level or 0), hash)
+        hash = SafeRosterTextHashCP7(member.class or "", hash)
+        hash = SafeRosterTextHashCP7(tostring(SafeRosterTextHashCP7(member.note or "", 17)), hash)
+        hash = SafeRosterTextHashCP7(tostring(SafeRosterTextHashCP7(member.officerNote or "", 29)), hash)
+    end
+    return tostring(table.getn(names)) .. ":" .. tostring(math.floor(hash))
+end
+
+local function CrossedRosterMilestoneCP7(oldLevel, newLevel)
+    oldLevel, newLevel = tonumber(oldLevel) or 0, tonumber(newLevel) or 0
+    if newLevel <= oldLevel then return oldLevel ~= newLevel and true or false end
+    return (oldLevel < 20 and newLevel >= 20) or (oldLevel < 40 and newLevel >= 40) or (oldLevel < 60 and newLevel >= 60)
+end
+
+local function CountHistoryRelevantRosterChurnCP7(oldRoster, current)
+    local changed = 0
+    local name, info
+    for name, info in pairs(current or {}) do
+        local old = oldRoster and oldRoster[name]
+        if old then
+            local memberChanged = tostring(old.rank or "") ~= tostring(info.rank or "")
+                or tonumber(old.rankIndex or 99) ~= tonumber(info.rankIndex or 99)
+                or tostring(old.class or "") ~= tostring(info.class or "")
+                or tostring(old.note or "") ~= tostring(info.note or "")
+                or tostring(old.officerNote or "") ~= tostring(info.officerNote or "")
+                or CrossedRosterMilestoneCP7(old.level, info.level)
+            if memberChanged then changed = changed + 1 end
+        end
+    end
+    return changed
+end
+
+-- Building a 700-800 member backup snapshot used to deep-copy the entire
+-- roster inside the final roster commit callback. The API read itself is now
+-- sliced, so that last synchronous copy had become one of the few remaining
+-- places where a successful update could still create a noticeable frame spike.
+-- Copy the immutable backup progressively and publish it only when complete.
+local function PublishCompletedRosterSnapshot181(owner, db, entry)
+    if not db or not entry then return end
+    db.snapshots = db.snapshots or {}
+    entry.building181 = nil
+    entry.completedAt181 = owner:Now()
+    table.insert(db.snapshots, 1, entry)
+    while table.getn(db.snapshots) > 3 do table.remove(db.snapshots) end
+end
+
 function OTLGM:PushSnapshot(db, roster, total, online)
     db.snapshots = db.snapshots or {}
-    table.insert(db.snapshots, 1, {
+    roster = type(roster) == "table" and roster or {}
+    local entry = {
         ts = self:Now(),
         total = total or TableCount(roster),
         online = online or 0,
-        roster = CopySimpleTable(roster),
-    })
-    while table.getn(db.snapshots) > 3 do table.remove(db.snapshots) end
+        roster = {},
+        building181 = true,
+    }
+
+    if not self.ScheduleAfter180 then
+        entry.roster = CopySimpleTable(roster)
+        PublishCompletedRosterSnapshot181(self, db, entry)
+        return
+    end
+
+    self.runtime = self.runtime or {}
+    local previousGeneration181 = tonumber(self.runtime.rosterSnapshotGeneration181) or 0
+    local previousPending181 = self.runtime.rosterSnapshotPending181
+    if previousGeneration181 > 0 and previousPending181
+        and tonumber(previousPending181.generation) == previousGeneration181 and self.CancelTask180 then
+        -- Only the newest committed roster needs a new backup. Do not let two
+        -- large snapshots allocate/copy concurrently after rapid valid scans.
+        self:CancelTask180("roster-snapshot-copy-" .. tostring(previousGeneration181))
+    end
+    self.runtime.rosterSnapshotGeneration181 = previousGeneration181 + 1
+    local generation = self.runtime.rosterSnapshotGeneration181
+    local state = { source = roster, key = nil, copied = 0, entry = entry, startedAt = self:Now() }
+    self.runtime.rosterSnapshotPending181 = { generation = generation, startedAt = self:Now(), total = tonumber(entry.total) or 0, copied = 0 }
+    local taskKey = "roster-snapshot-copy-" .. tostring(generation)
+    local function CopySlice(current)
+        if not state or not state.source or not state.entry then return end
+        if not current.runtime or (tonumber(current.runtime.rosterSnapshotGeneration181) or 0) ~= generation then
+            state = nil
+            return
+        end
+        local pressure = current.GetClientPressure181 and current:GetClientPressure181() or nil
+        local pressureLevel = pressure and tonumber(pressure.level) or 0
+        local age = current:Now() - (tonumber(state.startedAt) or current:Now())
+        if pressureLevel >= 3 and age < 30 then
+            current.runtime.rosterSnapshotPressureDeferrals181 = (tonumber(current.runtime.rosterSnapshotPressureDeferrals181) or 0) + 1
+            current:ScheduleAfter180(taskKey, 1, CopySlice, 8)
+            return
+        end
+        local maximum = pressureLevel >= 3 and 3 or pressureLevel >= 2 and 6 or 12
+        local budgetMs = pressureLevel >= 3 and 0.35 or pressureLevel >= 2 and 0.55 or 0.80
+        local nextGap = pressureLevel >= 3 and 0.25 or pressureLevel >= 2 and 0.10 or 0.02
+        local started
+        if debugprofilestop then local ok, value = pcall(debugprofilestop) if ok then started = tonumber(value) end end
+        local processed = 0
+        while processed < maximum do
+            local key, value = next(state.source, state.key)
+            if key == nil then
+                current.runtime = current.runtime or {}
+                current.runtime.lastRosterSnapshotRows181 = tonumber(state.copied) or 0
+                current.runtime.lastRosterSnapshotCompleted181 = current:Now()
+                if current.runtime.rosterSnapshotPending181 and current.runtime.rosterSnapshotPending181.generation == generation then current.runtime.rosterSnapshotPending181 = nil end
+                PublishCompletedRosterSnapshot181(current, db, state.entry)
+                state = nil
+                return
+            end
+            state.key = key
+            state.entry.roster[key] = type(value) == "table" and CopyRosterSnapshotRowR30(value) or value
+            state.copied = (tonumber(state.copied) or 0) + 1
+            if current.runtime and current.runtime.rosterSnapshotPending181 and current.runtime.rosterSnapshotPending181.generation == generation then current.runtime.rosterSnapshotPending181.copied = state.copied end
+            processed = processed + 1
+            if started and debugprofilestop and processed >= 8 then
+                local ok, nowMs = pcall(debugprofilestop)
+                if ok and tonumber(nowMs) and tonumber(nowMs) - started >= budgetMs then break end
+            end
+        end
+        current.runtime = current.runtime or {}
+        current.runtime.rosterSnapshotSlices181 = (tonumber(current.runtime.rosterSnapshotSlices181) or 0) + 1
+        current:ScheduleAfter180(taskKey, nextGap, CopySlice, 8)
+    end
+    self:ScheduleAfter180(taskKey, 0.08, CopySlice, 8)
 end
 
 function OTLGM:ScheduleConfirmScan()
@@ -682,16 +928,35 @@ function OTLGM:IsSuspiciousSnapshot(db, current, total)
     end
     local shrinkThreshold = math.max(10, math.floor(previousTotal * 0.12))
     if total < math.floor(previousTotal * 0.85) and missing >= shrinkThreshold then
-        return true, previousTotal, missing, "SHRINK"
+        return true, previousTotal, missing, "SHRINK", "NAMES"
     end
     -- A large upward jump usually means that the previous accepted roster was
     -- incomplete. Confirm it, then re-baseline without generating hundreds of
     -- false JOIN records.
     local expansionThreshold = math.max(25, math.floor(previousTotal * 0.15))
     if total > math.floor(previousTotal * 1.15) and added >= expansionThreshold then
-        return true, previousTotal, added, "EXPANSION"
+        return true, previousTotal, added, "EXPANSION", "NAMES"
     end
-    return false, previousTotal, 0, nil
+
+    -- CP7 live guard: a broken/stale client cache can keep almost the same total
+    -- while replacing many row identities. The old total-only safety gate missed
+    -- this and could emit hundreds of JOIN/LEAVE History events. Require a second
+    -- identical snapshot before any such burst is allowed through.
+    local identityThreshold = math.max(20, math.floor(previousTotal * 0.08))
+    local nearSameTotal = math.abs((tonumber(total) or 0) - (tonumber(previousTotal) or 0)) <= math.max(5, math.floor(previousTotal * 0.03))
+    if nearSameTotal and missing >= identityThreshold and added >= identityThreshold then
+        return true, previousTotal, math.max(missing, added), "IDENTITY_CHURN", "NAMES"
+    end
+
+    -- A second failure mode keeps names/total stable but returns many changed
+    -- rank/note/class/milestone fields at once. Those are exactly the fields that
+    -- can flood retained History. Do not trust a single such read.
+    local durableChanged = CountHistoryRelevantRosterChurnCP7(db.roster, current)
+    local durableThreshold = math.max(20, math.floor(previousTotal * 0.05))
+    if durableChanged >= durableThreshold then
+        return true, previousTotal, durableChanged, "DURABLE_CHURN", "DURABLE"
+    end
+    return false, previousTotal, 0, nil, nil
 end
 
 local function ActivityDayParts180(key)
@@ -900,6 +1165,63 @@ function OTLGM:CarryMemberMetadata(old, current)
     end
 end
 
+local function ScheduleRosterPresentation181(owner)
+    if not owner then return end
+    local pageRefreshStarted181 = owner:Now()
+    local function Small(current)
+        if current.UpdateMinimapBadge then pcall(current.UpdateMinimapBadge, current) end
+        if current.RefreshNavigation then pcall(current.RefreshNavigation, current) end
+    end
+    local function Page(current)
+        local pressure = current.GetClientPressure181 and current:GetClientPressure181() or nil
+        if pressure and tonumber(pressure.level) >= 2 and current.ScheduleAfter180 and current:Now() - pageRefreshStarted181 < 15 then
+            current.runtime = current.runtime or {}
+            current.runtime.rosterPresentationDeferrals181 = (tonumber(current.runtime.rosterPresentationDeferrals181) or 0) + 1
+            current:ScheduleAfter180("roster-post-commit-page", 2, Page, 18)
+            return
+        end
+        if current.RefreshVisiblePage then
+            pcall(current.RefreshVisiblePage, current)
+        elseif current.RefreshAll then
+            pcall(current.RefreshAll, current)
+        end
+    end
+    if owner.ScheduleAfter180 then
+        owner:ScheduleAfter180("roster-post-commit-small", 0.04, Small, 28)
+        owner:ScheduleAfter180("roster-post-commit-page", 0.10, Page, 18)
+    else
+        Small(owner)
+        Page(owner)
+    end
+end
+
+local function PublishCommittedRosterLookupR26(owner, roster, scanAt)
+    owner.runtime = owner.runtime or {}
+    local pending = owner.runtime.pendingRosterMemberLookupR26
+    local lookup
+    if type(pending) == "table" and pending.roster == roster and type(pending.byKey) == "table" then
+        lookup = { roster = roster, lastScan = scanAt, byKey = pending.byKey }
+        owner.runtime.pendingRosterMemberLookupR26 = nil
+        owner.runtime.rosterLookupAdoptedR26 = (tonumber(owner.runtime.rosterLookupAdoptedR26) or 0) + 1
+    else
+        -- Legacy/direct Scan() callers have no sliced lookup to adopt. Keep the
+        -- old safe behavior; the sender cache may rebuild later outside this path.
+        lookup = nil
+        owner.runtime.pendingRosterMemberLookupR26 = nil
+    end
+    owner.runtime.rosterMemberLookup180 = lookup
+    if lookup then
+        local player = UnitName and UnitName("player") or ""
+        owner.runtime.senderRoster = {
+            builtAt = scanAt,
+            members = lookup.byKey,
+            selfKey = player ~= "" and owner:NormalizeName(player) or nil,
+        }
+    else
+        owner.runtime.senderRoster = nil
+    end
+end
+
 function OTLGM.__impl180.Stage_Advanced_Scan_2__impl1(self, reason)
     local db = self:GetGuildDB()
     if not db then return end
@@ -927,13 +1249,15 @@ function OTLGM.__impl180.Stage_Advanced_Scan_2__impl1(self, reason)
     end
     self.zeroScanAttempts = 0
 
-    local suspicious, previousTotal, difference, suspiciousDirection = self:IsSuspiciousSnapshot(db, current, total)
-    local confirmedExpansion = false
+    local suspicious, previousTotal, difference, suspiciousDirection, signatureModeCP7 = self:IsSuspiciousSnapshot(db, current, total)
+    local confirmedRebaselineCP7 = nil
     if suspicious then
-        local signature = self:GetSnapshotSignature(current)
+        local signature = signatureModeCP7 == "DURABLE" and self:GetDurableSnapshotSignatureCP7(current) or self:GetSnapshotSignature(current)
         local candidate = db.suspiciousCandidate
-        if candidate and candidate.signature == signature and (self:Now() - (candidate.ts or 0)) <= 45 then
-            if suspiciousDirection == "EXPANSION" then confirmedExpansion = true end
+        if candidate and candidate.signature == signature and candidate.direction == suspiciousDirection and (self:Now() - (candidate.ts or 0)) <= 45 then
+            if suspiciousDirection == "EXPANSION" or suspiciousDirection == "IDENTITY_CHURN" or suspiciousDirection == "DURABLE_CHURN" then
+                confirmedRebaselineCP7 = suspiciousDirection
+            end
             db.suspiciousCandidate = nil
             self.suspiciousScanAttempts = 0
         else
@@ -946,6 +1270,10 @@ function OTLGM.__impl180.Stage_Advanced_Scan_2__impl1(self, reason)
                 if self.SetStatus then
                     if suspiciousDirection == "EXPANSION" then
                         self:SetStatus("Large roster restoration suspected: " .. tostring(previousTotal) .. " -> " .. tostring(total) .. ". Confirming before recording changes...")
+                    elseif suspiciousDirection == "IDENTITY_CHURN" then
+                        self:SetStatus("Large roster identity change suspected (" .. tostring(difference) .. " rows). Confirming before recording History...")
+                    elseif suspiciousDirection == "DURABLE_CHURN" then
+                        self:SetStatus("Large roster rank/note change burst suspected (" .. tostring(difference) .. " members). Confirming before recording History...")
                     else
                         self:SetStatus("Incomplete roster suspected: " .. tostring(total) .. " of " .. tostring(previousTotal) .. ". No leave events recorded; confirmation " .. tostring(self.suspiciousScanAttempts) .. " of 3...")
                     end
@@ -959,7 +1287,7 @@ function OTLGM.__impl180.Stage_Advanced_Scan_2__impl1(self, reason)
                 if failedOrigin == "AUTO" then self.elapsed = 0 end
                 if self.SetStatus then self:SetStatus("Roster remained incomplete. The saved database was preserved without recording departures.") end
                 if failedOrigin == "MANUAL" then
-                    self:Notify("Incomplete Roster Preserved", "Three inconsistent partial rosters were received. The previous valid database and backup snapshots were kept, and no leave events were recorded.")
+                    self:Notify("Incomplete Roster Preserved", "Three inconsistent partial rosters were received. The previous valid roster and backups were kept, and no leave events were recorded.")
                 end
             end
             return
@@ -973,7 +1301,7 @@ function OTLGM.__impl180.Stage_Advanced_Scan_2__impl1(self, reason)
     if reason == "CONFIRM" and self.confirmOriginReason then outputReason = self.confirmOriginReason end
     self.confirmOriginReason = nil
 
-    if confirmedExpansion then
+    if confirmedRebaselineCP7 then
         local baselineNow = self:Now()
         local memberName, memberInfo
         for memberName, memberInfo in pairs(current) do
@@ -987,18 +1315,38 @@ function OTLGM.__impl180.Stage_Advanced_Scan_2__impl1(self, reason)
         end
         self:PushSnapshot(db, current, total, online)
         db.roster = current
+        -- RC4-r9: profession-filter cache entries hold member-table identities.
+        -- A committed roster replaces every member table; release the old cache
+        -- immediately so it cannot retain an entire previous 800-member snapshot.
+        self.runtime = self.runtime or {}
+        self.runtime.rosterProfessionKeys184 = nil
+        self.runtime.sortedRosterView184 = nil
+        self.runtime.rosterSummaryCounts184 = nil
+        self.runtime.moderationTargetRosterIndex183 = nil
+        self.runtime.globalSearchRosterIndexRC4 = nil
         db.lastScan = baselineNow
+        PublishCommittedRosterLookupR26(self, current, baselineNow)
         db.lastTotal = total
         db.lastOnline = online
         db.lastScanReason = outputReason
-        self:AddLog(db, "BASELINE", "Guild", "Confirmed full roster restoration: " .. tostring(total) .. " members; mass JOIN events suppressed")
+        local baselineDetailCP7 = "Confirmed full roster restoration: " .. tostring(total) .. " members; mass JOIN events suppressed"
+        local baselineStatusCP7 = "Roster baseline safely refreshed at " .. date("%H:%M", baselineNow) .. "; mass false joins were not recorded."
+        if confirmedRebaselineCP7 == "IDENTITY_CHURN" then
+            baselineDetailCP7 = "Confirmed bulk roster identity refresh: " .. tostring(total) .. " members; individual JOIN/LEAVE burst suppressed"
+            baselineStatusCP7 = "Confirmed bulk roster identity refresh was safely re-baselined; individual History burst was suppressed."
+        elseif confirmedRebaselineCP7 == "DURABLE_CHURN" then
+            baselineDetailCP7 = "Confirmed bulk roster metadata refresh: " .. tostring(total) .. " members; individual rank/note burst suppressed"
+            baselineStatusCP7 = "Confirmed bulk roster metadata refresh was safely re-baselined; individual History burst was suppressed."
+        end
+        self:AddLog(db, "BASELINE", "Guild", baselineDetailCP7)
+        self.runtime = self.runtime or {}
+        self.runtime.rosterBulkRebaselineCP7 = (tonumber(self.runtime.rosterBulkRebaselineCP7) or 0) + 1
+        self.runtime.rosterBulkRebaselineLastCP7 = tostring(confirmedRebaselineCP7)
         if outputReason == "MANUAL" or outputReason == "AUTO" then self:RecordActivitySample(db, total, online) end
         self:RecordScan(db, total, online, 0, true, "REBASELINE")
         if outputReason == "MANUAL" or outputReason == "AUTO" then self.elapsed = 0 end
-        if self.RefreshVisiblePage then self:RefreshVisiblePage() elseif self.RefreshAll then self:RefreshAll() end
-        if self.UpdateMinimapBadge then self:UpdateMinimapBadge() end
-        if self.RefreshNavigation then self:RefreshNavigation() end
-        if self.SetStatus then self:SetStatus("Roster baseline safely refreshed at " .. date("%H:%M", baselineNow) .. "; mass false joins were not recorded.") end
+        ScheduleRosterPresentation181(self)
+        if self.SetStatus then self:SetStatus(baselineStatusCP7) end
         return
     end
 
@@ -1112,9 +1460,30 @@ function OTLGM.__impl180.Stage_Advanced_Scan_2__impl1(self, reason)
         db.initialized = true
     end
 
-    self:PushSnapshot(db, current, total, online)
+    local changes = joined + left + rankChanged + milestones + notesChanged + returned
+    -- r30/CP7: automatic scans with no meaningful guild change no longer allocate
+    -- a brand-new 800+ row backup. CP6 accidentally tested `changes` before this
+    -- local existed, so real automatic changes could skip their intended snapshot.
+    local shouldSnapshotR30 = (tonumber(changes) or 0) > 0 or outputReason == "MANUAL"
+        or table.getn(db.snapshots or {}) == 0
+    if shouldSnapshotR30 then
+        self:PushSnapshot(db, current, total, online)
+    else
+        self.runtime = self.runtime or {}
+        self.runtime.rosterSnapshotSkippedUnchangedR30 = (tonumber(self.runtime.rosterSnapshotSkippedUnchangedR30) or 0) + 1
+    end
     db.roster = current
+    -- The combined profession cache deliberately stores member identity for safe
+    -- note edits. Drop it on each full commit instead of retaining obsolete member
+    -- tables until every profession filter happens to touch those names again.
+    self.runtime = self.runtime or {}
+    self.runtime.rosterProfessionKeys184 = nil
+    self.runtime.sortedRosterView184 = nil
+    self.runtime.rosterSummaryCounts184 = nil
+    self.runtime.moderationTargetRosterIndex183 = nil
+    self.runtime.globalSearchRosterIndexRC4 = nil
     db.lastScan = now
+    PublishCommittedRosterLookupR26(self, current, now)
     db.lastTotal = total
     db.lastOnline = online
     db.lastScanReason = outputReason
@@ -1133,7 +1502,6 @@ function OTLGM.__impl180.Stage_Advanced_Scan_2__impl1(self, reason)
     if outputReason == "MANUAL" or outputReason == "AUTO" then
         self:RecordActivitySample(db, total, online)
     end
-    local changes = joined + left + rankChanged + milestones + notesChanged + returned
     self:RecordScan(db, total, online, changes, true, outputReason)
     if outputReason == "MANUAL" or outputReason == "AUTO" then self.elapsed = 0 end
 
@@ -1142,9 +1510,7 @@ function OTLGM.__impl180.Stage_Advanced_Scan_2__impl1(self, reason)
             " online / " .. self.colors.white .. tostring(total) .. self.colors.reset .. " members.")
     end
 
-    if self.RefreshVisiblePage then self:RefreshVisiblePage() elseif self.RefreshAll then self:RefreshAll() end
-    if self.UpdateMinimapBadge then self:UpdateMinimapBadge() end
-    if self.RefreshNavigation then self:RefreshNavigation() end
+    ScheduleRosterPresentation181(self)
     if self.SetStatus then self:SetStatus("Roster database updated at " .. date("%H:%M", now) .. ".") end
 end
 
@@ -1337,6 +1703,7 @@ function OTLGM:GetComposition(onlineOnly)
     if not db then return EmptyComposition180() end
     self.runtime = self.runtime or {}
     local revision = tostring(tonumber(db.lastScan) or 0) .. ":" .. tostring(tonumber(self.runtime.factionObservationRevision180) or 0)
+        .. ":" .. tostring(tonumber(self.runtime.rosterPresenceRevisionR59) or 0)
     local cache = self.runtime.compositionCache180
     if not cache or cache.revision ~= revision then
         local total = EmptyComposition180()
@@ -1350,6 +1717,48 @@ function OTLGM:GetComposition(onlineOnly)
         self.runtime.compositionCache180 = cache
     end
     return onlineOnly and cache.online or cache.total
+end
+
+-- RC4-r9: normalized presence lookup.  Current builds store short character
+-- names directly, but old SavedVariables can contain realm/case variants.  A
+-- lazy compatibility index turns the legacy fallback from an O(roster * peers)
+-- scan into O(1) lookups when Addon presence filters are used.
+local function GetAddonDetectionInfo184(owner, db, name)
+    local detected = db and db.detectedVersions
+    if type(detected) ~= "table" then return nil end
+    local short = string.gsub(tostring(name or ""), "%-.*$", "")
+    local direct = detected[short]
+    if type(direct) == "table" then return direct end
+    owner.runtime = owner.runtime or {}
+    local index = owner.runtime.addonDetectionIndex184
+    local revision = tonumber(owner.runtime.addonDetectionRevision184) or 0
+    if not index or index.source ~= detected or tonumber(index.revision) ~= revision then
+        index = { source = detected, revision = revision, byName = {} }
+        local storedName, stored
+        for storedName, stored in pairs(detected) do
+            if type(stored) == "table" then
+                local normalized = owner.NormalizeName and owner:NormalizeName(storedName or "") or string.lower(tostring(storedName or ""))
+                if normalized ~= "" then index.byName[normalized] = stored end
+            end
+        end
+        owner.runtime.addonDetectionIndex184 = index
+    end
+    local normalized = owner.NormalizeName and owner:NormalizeName(short) or string.lower(short)
+    return index.byName[normalized]
+end
+
+local function GetAddonDetectionState184(owner, db, name, now)
+    local player = UnitName and UnitName("player") or ""
+    local normalized = owner.NormalizeName and owner:NormalizeName(name or "") or string.lower(tostring(name or ""))
+    local playerNormalized = owner.NormalizeName and owner:NormalizeName(player) or string.lower(tostring(player or ""))
+    if normalized ~= "" and normalized == playerNormalized then return "ACTIVE", nil end
+    local info = GetAddonDetectionInfo184(owner, db, name)
+    local timestamp = info and tonumber(info.ts) or nil
+    if not timestamp then return "UNDETECTED", nil end
+    local age = math.max(0, (tonumber(now) or owner:Now()) - timestamp)
+    if age <= 300 then return "ACTIVE", info end
+    if age <= 86400 then return "RECENT", info end
+    return "SEEN", info
 end
 
 function OTLGM:GetSortedRoster(searchText, filter, rankFilter, professionFilter)
@@ -1368,6 +1777,32 @@ function OTLGM:GetSortedRoster(searchText, filter, rankFilter, professionFilter)
     local search = string.lower(ATrim(searchText or ""))
     local now = self:Now()
     local recentCutoff = now - (14 * 86400)
+    local addonFilter184 = string.sub(tostring(filter or ""), 1, 6) == "ADDON_"
+
+    -- A scroll action used to sort the same 800-member view once to calculate
+    -- its bounds and immediately again to paint the rows.  Keep one tiny,
+    -- revision-aware view cache; it is short-lived by design and therefore
+    -- cannot hide real roster/note changes for more than a moment.
+    self.runtime = self.runtime or {}
+    local preciseNow184 = GetTime and GetTime() or now
+    local rosterCount184 = tonumber(db.lastTotal) or 0
+    local sortKey184 = tostring(OTLGM_DB.settings.rosterSortKey or "RANK")
+    local sortAsc184 = OTLGM_DB.settings.rosterSortAsc and "1" or "0"
+    local cacheKey184 = table.concat({
+        tostring(db.lastScan or 0), tostring(rosterCount184), tostring(db.roster), search, tostring(filter or "ALL"),
+        tostring(rankFilter or ""), tostring(professionFilter or ""), sortKey184, sortAsc184,
+        tostring(playerZone), tostring(playerLevel), tostring(self.GetCraftingRecipeRevisionR46 and self:GetCraftingRecipeRevisionR46() or (tonumber(self.runtime.craftingDataRevisionRC3) or 0)),
+        tostring(tonumber(self.runtime.addonDetectionRevision184) or 0), tostring(tonumber(self.runtime.characterIdentityViewRevision184) or 0),
+        tostring(tonumber(self.runtime.rosterPresenceRevisionR59) or 0),
+    }, "\031")
+    local viewCache184 = self.runtime.sortedRosterView184
+    if viewCache184 and viewCache184.key == cacheKey184 and preciseNow184 >= (tonumber(viewCache184.at) or 0)
+        and preciseNow184 - (tonumber(viewCache184.at) or 0) <= 4.0 then
+        self.runtime.sortedRosterViewHits184 = (tonumber(self.runtime.sortedRosterViewHits184) or 0) + 1
+        return viewCache184.list
+    end
+    self.runtime.sortedRosterViewBuilds184 = (tonumber(self.runtime.sortedRosterViewBuilds184) or 0) + 1
+
     local name, member
 
     for name, member in pairs(db.roster or {}) do
@@ -1387,9 +1822,16 @@ function OTLGM:GetSortedRoster(searchText, filter, rankFilter, professionFilter)
         if filter == "LEVEL1_19" and ((member.level or 0) < 1 or (member.level or 0) > 19) then allowed = false end
         if filter == "LEVEL20_39" and ((member.level or 0) < 20 or (member.level or 0) > 39) then allowed = false end
         if filter == "LEVEL40_59" and ((member.level or 0) < 40 or (member.level or 0) > 59) then allowed = false end
-        if filter == "ADDON_ACTIVE" and self:GetAddonDetection170(member.name).state ~= "ACTIVE" then allowed = false end
-        if filter == "ADDON_SEEN" and self:GetAddonDetection170(member.name).state == "UNDETECTED" then allowed = false end
-        if filter == "ADDON_UNDETECTED" and self:GetAddonDetection170(member.name).state ~= "UNDETECTED" then allowed = false end
+        if filter == "MAIN_ALT" then
+            local identityView184 = self.GetCharacterIdentityView184 and self:GetCharacterIdentityView184(member.name) or nil
+            if not identityView184 or identityView184.role == "NONE" then allowed = false end
+        end
+        if addonFilter184 then
+            local detectionState184 = GetAddonDetectionState184(self, db, member.name, now)
+            if filter == "ADDON_ACTIVE" and detectionState184 ~= "ACTIVE" then allowed = false end
+            if filter == "ADDON_SEEN" and detectionState184 == "UNDETECTED" then allowed = false end
+            if filter == "ADDON_UNDETECTED" and detectionState184 ~= "UNDETECTED" then allowed = false end
+        end
         if rankFilter and rankFilter ~= "" and member.rank ~= rankFilter then allowed = false end
         if allowed and professionFilter ~= "" and not self:MemberMatchesProfession(member, professionFilter) then allowed = false end
 
@@ -1425,27 +1867,31 @@ function OTLGM:GetSortedRoster(searchText, filter, rankFilter, professionFilter)
         if (a.level or 0) ~= (b.level or 0) then return (a.level or 0) > (b.level or 0) end
         return Text(a.name) < Text(b.name)
     end)
+    -- Keep the normalized position map with the cached list. Roster paints need
+    -- to locate the current selection/focus on every wheel step; scanning all
+    -- ~800 sorted rows again just to find one name defeats the view cache.
+    local positionByName184 = {}
+    local position184, positionedMember184
+    for position184 = 1, table.getn(list) do
+        positionedMember184 = list[position184]
+        local positionedKey184 = self.NormalizeName and self:NormalizeName(positionedMember184 and positionedMember184.name or "")
+            or string.lower(tostring(positionedMember184 and positionedMember184.name or ""))
+        if positionedKey184 ~= "" then positionByName184[positionedKey184] = position184 end
+    end
+    list.otlPositionByName184 = positionByName184
+    self.runtime.sortedRosterView184 = { key = cacheKey184, at = preciseNow184, list = list }
     return list
 end
 
 function OTLGM:GetAddonDetection170(name)
     name = string.gsub(tostring(name or ""), "%-.*$", "")
-    if self:NormalizeName(name) == self:NormalizeName(UnitName("player") or "") then
-        return { state = "ACTIVE", label = "Active now", version = self.version, ts = self:Now(), self = true }
-    end
     local db = self:GetGuildDB()
-    local info = db and db.detectedVersions and db.detectedVersions[name]
-    if type(info) ~= "table" then info = nil end
-    if not info then
-        local storedName, stored
-        for storedName, stored in pairs(db and db.detectedVersions or {}) do
-            if type(stored) == "table" and self:NormalizeName(storedName) == self:NormalizeName(name) then info = stored break end
-        end
-    end
-    if not info or not tonumber(info.ts) then return { state = "UNDETECTED", label = "Not detected", version = nil, ts = 0 } end
-    local age = math.max(0, self:Now() - info.ts)
-    if age <= 300 then return { state = "ACTIVE", label = "Active now", version = info.version, ts = info.ts } end
-    if age <= 86400 then return { state = "RECENT", label = "Seen in 24h", version = info.version, ts = info.ts } end
+    local now = self:Now()
+    local state184, info = GetAddonDetectionState184(self, db, name, now)
+    if state184 == "UNDETECTED" then return { state = "UNDETECTED", label = "Not detected", version = nil, ts = 0 } end
+    if not info then return { state = "ACTIVE", label = "Active now", version = self.version, ts = now, self = true } end
+    if state184 == "ACTIVE" then return { state = "ACTIVE", label = "Active now", version = info.version, ts = info.ts } end
+    if state184 == "RECENT" then return { state = "RECENT", label = "Seen in 24h", version = info.version, ts = info.ts } end
     return { state = "SEEN", label = "Detected before", version = info.version, ts = info.ts }
 end
 
@@ -1454,18 +1900,25 @@ function OTLGM:PruneDetectedAddonUsers170()
     local now = self:Now()
     local name, info
     local entries = {}
+    local changed184 = false
     for name, info in pairs(db and db.detectedVersions or {}) do
         local timestamp = type(info) == "table" and tonumber(info.ts) or nil
         -- Keep durable evidence for current guild members. Old entries for
         -- characters no longer in the roster expire, and the hard cap below
         -- still bounds renamed/transferred-character residue.
-        if not timestamp or (not self:GetMember(name) and now - timestamp > (180 * 86400)) then db.detectedVersions[name] = nil
+        if not timestamp or (not self:GetMember(name) and now - timestamp > (180 * 86400)) then db.detectedVersions[name] = nil changed184 = true
         else table.insert(entries, { name = name, ts = timestamp }) end
     end
     if table.getn(entries) > 1000 then
         table.sort(entries, function(left, right) return left.ts < right.ts end)
         local index
-        for index = 1, table.getn(entries) - 1000 do db.detectedVersions[entries[index].name] = nil end
+        for index = 1, table.getn(entries) - 1000 do db.detectedVersions[entries[index].name] = nil changed184 = true end
+    end
+    if changed184 then
+        self.runtime = self.runtime or {}
+        self.runtime.addonDetectionRevision184 = (tonumber(self.runtime.addonDetectionRevision184) or 0) + 1
+        self.runtime.addonDetectionIndex184 = nil
+        self.runtime.sortedRosterView184 = nil
     end
 end
 
@@ -1481,7 +1934,7 @@ function OTLGM:SaveRosterView(slot)
         sortKey = OTLGM_DB.settings.rosterSortKey or "RANK",
         sortAsc = OTLGM_DB.settings.rosterSortAsc and true or false,
     }
-    if self.SetStatus then self:SetStatus("Saved current roster filters to View " .. tostring(slot) .. ".") end
+    if self.SetStatus then self:SetStatus("Saved current roster filters to Favorite " .. tostring(slot) .. ".") end
 end
 
 function OTLGM:LoadRosterView(slot)
@@ -1489,7 +1942,7 @@ function OTLGM:LoadRosterView(slot)
     slot = tonumber(slot)
     local view = slot and OTLGM_DB.settings.savedRosterViews[slot]
     if not view then
-        self:Notify("Saved View Empty", "View " .. tostring(slot or "?") .. " has not been saved yet.")
+        self:Notify("Empty Favorite", "Favorite " .. tostring(slot or "?") .. " has not been saved yet.")
         return
     end
     OTLGM_DB.settings.rosterSearch = view.search or ""
@@ -1918,11 +2371,13 @@ function OTLGM:GenerateWeeklySummary()
 end
 
 function OTLGM:GetFreshnessText(timestamp)
-    if not timestamp then return "NO DATA", self.colors.red end
-    local elapsed = self:Now() - timestamp
-    if elapsed < 1800 then return "LIVE - " .. self:FormatElapsedShort(elapsed), self.colors.green end
-    if elapsed < 7200 then return "SAVED - " .. self:FormatElapsedShort(elapsed), self.colors.gold end
-    return "STALE - " .. self:FormatElapsedShort(elapsed), self.colors.red
+    if not timestamp then return "No data", self.colors.grey end
+    local elapsed = math.max(0, self:Now() - timestamp)
+    if elapsed < 1800 then return "Live  •  " .. self:FormatElapsedShort(elapsed), self.colors.green end
+    if elapsed < 7200 then return "Updated  •  " .. self:FormatElapsedShort(elapsed), self.colors.gold end
+    -- Old information is not an error. A calm age label is easier to read in
+    -- Roster/Professions than the previous red STALE warning.
+    return self:FormatElapsedShort(elapsed), self.colors.grey
 end
 
 function OTLGM.__impl180.Stage_Advanced_GetDiagnosticsText_1__impl1(self)
@@ -1982,9 +2437,11 @@ function OTLGM:RequestAddonUserPing()
     self.lastAddonUserPingAt = now
     local ownFaction180 = UnitFactionGroup and UnitFactionGroup("player") or ""
     self:QueueNetworkPayload(table.concat({ "Q", tostring(self.version or "Detected"), tostring(self.build or "unknown"), tostring(ownFaction180 or "") }, "^"), "GUILD", nil, 2, "presence", "presence:query")
-    -- PvE synchronization uses the same hidden addon channel. Triggering both paths
-    -- makes presence detection reliable even on servers that handle guild pings oddly.
-    if self.RequestPveSync then self:RequestPveSync(true) end
+    -- Presence detection and PvE synchronization are independent concerns.
+    -- Older builds forced a PvE request every time the addon-user indicator was
+    -- checked (including ordinary UI opens), creating needless network work and
+    -- delayed PvE timeout state on unrelated pages. PvE has its own bounded
+    -- initial/manual/guild-context refresh paths, so keep this query presence-only.
     if self.SetStatus then self:SetStatus("Checking for other Order of the Lion addon users...") end
     return true
 end
@@ -2013,6 +2470,10 @@ function OTLGM:RememberAddonUser(sender, version, build, faction)
     end
     db.detectedVersions[key] = { version = storedVersion, build = storedBuild, faction180 = storedFaction180, ts = self:Now(), sender = sender }
     if sender ~= key then db.detectedVersions[sender] = nil end
+    self.runtime = self.runtime or {}
+    self.runtime.addonDetectionRevision184 = (tonumber(self.runtime.addonDetectionRevision184) or 0) + 1
+    self.runtime.addonDetectionIndex184 = nil
+    self.runtime.sortedRosterView184 = nil
     if storedVersion ~= "Detected" and self:IsVersionNewer(storedVersion, OTLGM_DB.settings.latestDetectedVersion or self.version) then
         OTLGM_DB.settings.latestDetectedVersion = storedVersion
     end
@@ -2076,10 +2537,55 @@ function OTLGM:HandlePresenceAddonMessageLegacy(prefix, message, channel, sender
         end
         if uiVisible and self.RefreshAddonUsersIndicator then self:RefreshAddonUsersIndicator() end
         if uiVisible and self.ui.currentPage == "overview" and self.RefreshOverviewPage then self:RefreshOverviewPage() end
-        if uiVisible and self.ui.currentPage == "settings" and self.RefreshSettingsPage then self:RefreshSettingsPage() end
+        if uiVisible and self.ui.currentPage == "settings" and self.RefreshSettingsPage then
+            -- VERSION/Q replies can arrive in bursts. Refreshing the full visible
+            -- Settings page for every presence packet was unnecessary work and,
+            -- before r42, also multiplied the support-status tonumber error.
+            if self.ScheduleAfter180 then
+                self:ScheduleAfter180("settings-version-presence-refresh-r42", 0.25, function(owner)
+                    if owner.ui and owner.ui.main and owner.ui.main:IsVisible() and owner.ui.currentPage == "settings"
+                        and owner.RefreshSettingsPage then owner:RefreshSettingsPage() end
+                end, 4)
+            else
+                self:RefreshSettingsPage()
+            end
+        end
         return true
     end
     return false
+end
+
+-- CP7: a real guild-chat achievement announcement is immediate evidence that
+-- its sender is running some OrderOfTheLionGM build, even if their presence/version
+-- ping has not arrived yet. This only records version=Detected; it grants no feature
+-- capability, trusted-version status or permission. The embedded player must match
+-- the actual CHAT_MSG_GUILD sender to avoid crediting a third party.
+function OTLGM:ObserveBrandedAchievementPresenceCP7(message, sender)
+    message, sender = tostring(message or ""), tostring(sender or "")
+    if message == "" or sender == "" then return false end
+    local tag
+    if string.sub(message, 1, 13) == "[Lion Addon] " then tag = "[Lion Addon] "
+    elseif string.sub(message, 1, 26) == "[Order of the Lion Addon] " then tag = "[Order of the Lion Addon] "
+    else return false end
+    local earnedAt = string.find(message, " earned ", string.len(tag) + 1, true)
+    if not earnedAt then return false end
+    local embedded = string.sub(message, string.len(tag) + 1, earnedAt - 1)
+    if ANormalizeName(embedded) ~= ANormalizeName(sender) then
+        self.runtime = self.runtime or {}
+        self.runtime.brandedPresenceRejectedCP7 = (tonumber(self.runtime.brandedPresenceRejectedCP7) or 0) + 1
+        return false
+    end
+    local suffix = string.sub(message, earnedAt + 8)
+    if string.find(suffix, "[", 1, true) ~= 1 and string.find(suffix, "|H", 1, true) ~= 1 then return false end
+    if self.GetMember and not self:GetMember(sender) then return false end
+    self:RememberAddonUser(sender, nil, nil)
+    self.runtime = self.runtime or {}
+    self.runtime.brandedPresenceAcceptedCP7 = (tonumber(self.runtime.brandedPresenceAcceptedCP7) or 0) + 1
+    self.runtime.brandedPresenceLastCP7 = string.gsub(sender, "%-.*$", "")
+    if self.ui and self.ui.main and self.ui.main:IsVisible() and self.ui.currentPage == "roster" and self.RefreshRosterTarget180 then
+        pcall(self.RefreshRosterTarget180, self, sender)
+    end
+    return true
 end
 
 function OTLGM:GetDetectedAddonUserList(maxAge)
@@ -2119,16 +2625,33 @@ function OTLGM:GetDetectedAddonUserList(maxAge)
 end
 
 function OTLGM:GetDetectedAddonUsers(maxAge)
-    local list = self:GetDetectedAddonUserList(maxAge or 86400)
-    local latest = self.version
-    local online = 0
-    local i, info
-    for i = 1, table.getn(list) do
-        info = list[i]
-        if info.online then online = online + 1 end
-        if info.version ~= "Detected" and self:IsVersionNewer(info.version, latest) then latest = info.version end
+    -- Count-only callers (navigation, Home, PvE summary, Settings) used to build
+    -- the full decorated peer list and sort it even though they never consumed a
+    -- row.  Walk the tiny presence map directly; the ordered list remains
+    -- available through GetDetectedAddonUserList for drawers/moderation views.
+    local db = self:GetGuildDB()
+    if not db then return 0, self.version, 0 end
+    local now = self:Now()
+    local cutoff = now - (tonumber(maxAge) or 86400)
+    local count184, online184 = 0, 0
+    local latest184 = self.version
+    local sender184, info184
+    for sender184, info184 in pairs(db.detectedVersions or {}) do
+        local ts184 = type(info184) == "table" and tonumber(info184.ts) or nil
+        if ts184 and ts184 >= cutoff then
+            count184 = count184 + 1
+            local seenOnline184 = (now - ts184) <= 300
+            if not seenOnline184 then
+                local short184 = string.gsub(tostring(sender184 or ""), "%-.*$", "")
+                local member184 = self:GetMember(short184)
+                seenOnline184 = member184 and member184.online and true or false
+            end
+            if seenOnline184 then online184 = online184 + 1 end
+            local version184 = tostring(info184.version or "Detected")
+            if version184 ~= "Detected" and self:IsVersionNewer(version184, latest184) then latest184 = version184 end
+        end
     end
-    return table.getn(list), latest, online
+    return count184, latest184, online184
 end
 
 local function UnescapeField(value)
@@ -2185,9 +2708,14 @@ function OTLGM:_Legacy_ImportBackupV1(text)
     if table.getn(importedLog) == 0 then return false, "The backup contains no history entries." end
     db.log = importedLog
     db.memberFlags = importedFlags
-    db.unread = 0
-    local i
-    for i = 1, table.getn(db.log) do if not db.log[i].reviewed then db.unread = db.unread + 1 end end
+    if self.RecountHistoryUnreadR59 then
+        self:RecountHistoryUnreadR59(db, true)
+        if self.RepairSyntheticHistoryBurst183 and not db.historySyntheticBurstRepair183 then self:RepairSyntheticHistoryBurst183(db) end
+    else
+        db.unread = 0
+        local i
+        for i = 1, table.getn(db.log) do if not db.log[i].reviewed then db.unread = db.unread + 1 end end
+    end
 
     local key, value
     for key, value in pairs(importedSettings) do
@@ -2257,44 +2785,47 @@ function OTLGM:RecordRecruitmentDiagnostic180(eventName, pending, details, resul
     return row
 end
 
-function OTLGM:BeginRecruitmentDelivery180(message, target, key, label, rotateAfter)
+function OTLGM:BeginRecruitmentDelivery180(message, target, key, label, rotateAfter, quietFeedback)
     message = ATrim(message or "")
     target = target == "GUILD" and "GUILD" or "WORLD"
-    if message == "" then self:Notify("Message Empty", "Enter or select a message before sending.") return false end
+    if message == "" then
+        if not quietFeedback then self:Notify("Message Empty", "Enter or select a message before sending.") end
+        return false, "Enter or select a message before sending."
+    end
     if self.recruitmentDeliveryPending180 then
-        self:Notify("Delivery Pending", "Wait for the current recruitment message to be confirmed or time out before sending another one.")
-        return false
+        if not quietFeedback then self:Notify("Delivery Pending", "Wait for the current recruitment message to be confirmed or time out before sending another one.") end
+        return false, "A recruitment delivery is already awaiting confirmation."
     end
 
     local chatType, channelId, channelName
     if target == "GUILD" then
         if not GetGuildInfo or not GetGuildInfo("player") then
-            self:Notify("Guild Message Failed", "You are not currently in a guild.")
-            return false
+            if not quietFeedback then self:Notify("Guild Message Failed", "You are not currently in a guild.") end
+            return false, "You are not currently in a guild."
         end
         chatType = "GUILD"
         channelName = "Guild"
     else
         local timing = self.GetWorldRecruitmentInfo and self:GetWorldRecruitmentInfo() or nil
         if timing and timing.state == "WAIT" then
-            self:Notify("World Recruitment Cooldown", timing.detail or "Wait before posting another recruitment message.")
+            if not quietFeedback then self:Notify("World Recruitment Cooldown", timing.detail or "Wait before posting another recruitment message.") end
             if self.SetStatus then self:SetStatus("World recruitment cooldown is still active.") end
             self:RecordRecruitmentDiagnostic180("SEND_BLOCKED", nil, { channelName = "World" }, "cooldown")
-            return false
+            return false, timing.detail or "World recruitment cooldown is still active."
         end
         local requested = self:GetWorldChannelNumber()
         if not requested or not GetChannelName then
-            self:Notify("World Channel Not Found", "Join the World channel or enter its real channel number before sending.")
+            if not quietFeedback then self:Notify("World Channel Not Found", "Join the World channel or enter its real channel number before sending.") end
             if self.SetStatus then self:SetStatus("Channel unavailable. Message was not sent.") end
-            return false
+            return false, "Join the World channel or enter its real channel number before sending."
         end
         local ok, resolvedId, resolvedName = pcall(GetChannelName, requested)
         resolvedId = ok and tonumber(resolvedId) or nil
         if not resolvedId or resolvedId <= 0 then
-            self:Notify("World Channel Not Found", "The selected channel is not joined. The recruitment timer and A/B rotation were not changed.")
+            if not quietFeedback then self:Notify("World Channel Not Found", "The selected channel is not joined. The recruitment timer and Send Next order were not changed.") end
             if self.SetStatus then self:SetStatus("Channel unavailable. Message was not sent.") end
             self:RecordRecruitmentDiagnostic180("SEND_BLOCKED", nil, { channelId = resolvedId, channelName = resolvedName }, "channel-missing")
-            return false
+            return false, "The selected World channel is not joined; timer and Send Next order were not changed."
         end
         channelId = math.floor(resolvedId)
         channelName = tostring(resolvedName or OTLGM_DB.settings.worldChannelName153 or "World")
@@ -2316,11 +2847,13 @@ function OTLGM:BeginRecruitmentDelivery180(message, target, key, label, rotateAf
         startedClock = GetTime and GetTime() or nil,
         timeoutAt = self:Now() + 18,
         awaitingEcho = false,
+        quietFeedback182 = quietFeedback and true or false,
     }
     self.recruitmentDeliveryPending180 = pending
     if self.WakeScheduler180 then self:WakeScheduler180("recruitment-delivery") end
     if self.SetStatus then self:SetStatus("Sending…") end
     if self.RefreshRecruitmentPage then self:RefreshRecruitmentPage() end
+    if self.MarkQuickDockDirty182 then self:MarkQuickDockDirty182("recruitment") end
     self:RecordRecruitmentDiagnostic180("SEND_REQUEST", pending, { channelId = channelId, channelName = channelName }, "sending")
 
     local ok, errorText
@@ -2328,10 +2861,11 @@ function OTLGM:BeginRecruitmentDelivery180(message, target, key, label, rotateAf
     else ok, errorText = pcall(SendChatMessage, message, "CHANNEL", nil, channelId) end
     if not ok then
         self.recruitmentDeliveryPending180 = nil
-        self:Notify("Recruitment Send Failed", tostring(errorText or "The game client rejected the message."))
+        if not quietFeedback then self:Notify("Recruitment Send Failed", tostring(errorText or "The game client rejected the message.")) end
         if self.SetStatus then self:SetStatus("Unable to send recruitment message.") end
         self:RecordRecruitmentDiagnostic180("SEND_ERROR", pending, { channelId = channelId, channelName = channelName }, tostring(errorText or "rejected"))
-        return false
+        if self.MarkQuickDockDirty182 then self:MarkQuickDockDirty182("recruitment") end
+        return false, tostring(errorText or "The game client rejected the message.")
     end
     pending.sentAt = self:Now()
     pending.sentClock = GetTime and GetTime() or pending.startedClock
@@ -2339,6 +2873,7 @@ function OTLGM:BeginRecruitmentDelivery180(message, target, key, label, rotateAf
     pending.timeoutAt = pending.sentAt + 18
     if self.SetStatus then self:SetStatus(target == "WORLD" and "Waiting for World echo…" or "Waiting for Guild echo…") end
     if self.RefreshRecruitmentPage then self:RefreshRecruitmentPage() end
+    if self.MarkQuickDockDirty182 then self:MarkQuickDockDirty182("recruitment") end
     return true
 end
 
@@ -2427,11 +2962,16 @@ function OTLGM:HandleRecruitmentDeliveryEcho180(channel, message, sender, arg3, 
     self.recruitmentDeliveryPending180 = nil
     self:MarkRecruitmentSent(pending.key, pending.target, pending.label)
     if pending.rotateAfter then
-        OTLGM_DB.settings.nextRecruitIndex = (OTLGM_DB.settings.nextRecruitIndex or 1) == 1 and 2 or 1
+        if self.AdvanceRecruitmentQueueR56 then self:AdvanceRecruitmentQueueR56()
+        else OTLGM_DB.settings.nextRecruitIndex = 1 end
+    end
+    if pending.quietFeedback182 and self.SetQuickDockRecruitmentStatus182 then
+        self:SetQuickDockRecruitmentStatus182("Delivered — confirmed in World chat. Send Next advanced.", "success")
     end
     if self.SetStatus then self:SetStatus("Delivered — confirmed by a new chat echo.") end
     if self.ShowToast then self:ShowToast("Recruitment message delivered.", "success") end
     if self.RefreshRecruitmentPage then self:RefreshRecruitmentPage() end
+    if self.MarkQuickDockDirty182 then self:MarkQuickDockDirty182("recruitment") end
     return true
 end
 
@@ -2442,8 +2982,13 @@ function OTLGM:ProcessRecruitmentDelivery180()
     self.recruitmentDeliveryPending180 = nil
     if self.SetStatus then self:SetStatus("Delivery not confirmed.") end
     self:RecordRecruitmentDiagnostic180("DELIVERY_TIMEOUT", pending, { channelId = pending.channelId, channelName = pending.channelName }, "timeout")
-    self:Notify("Delivery Not Confirmed", "No matching new self-echo arrived from chat. The timer, cooldown and A/B rotation were not changed. Use Open in Chat if the server blocks reliable confirmation.")
+    if pending.quietFeedback182 and self.SetQuickDockRecruitmentStatus182 then
+        self:SetQuickDockRecruitmentStatus182("Delivery was not confirmed; timer, cooldown and Send Next order were not changed.", "error")
+    else
+        self:Notify("Delivery Not Confirmed", "Your recruitment message did not appear back in World chat, so the timer and Send Next order were left unchanged. Use Open in Chat if you want to send it manually.")
+    end
     if self.RefreshRecruitmentPage then self:RefreshRecruitmentPage() end
+    if self.MarkQuickDockDirty182 then self:MarkQuickDockDirty182("recruitment") end
 end
 
 function OTLGM:OpenRecruitmentInChat180(message, target)
@@ -2469,7 +3014,7 @@ function OTLGM:OpenRecruitmentInChat180(message, target)
 end
 
 function OTLGM:SendMessageText(message, target)
-    return self:BeginRecruitmentDelivery180(message, target, "WORKING", "Working Copy", false)
+    return self:BeginRecruitmentDelivery180(message, target, "WORKING", "Message Editor", false)
 end
 
 OTLGM:RegisterModule("Roster", { layer = "feature", owns = { "RequestScan", "Scan", "GetSortedRoster" } })

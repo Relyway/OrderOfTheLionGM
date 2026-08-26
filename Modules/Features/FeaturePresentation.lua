@@ -328,8 +328,8 @@ local function SameChatGroupR5(previous,current)
     if NameKeyR5(previous.sender)~=NameKeyR5(current.sender) then return false end
     local gap=(tonumber(current.ts) or 0)-(tonumber(previous.ts) or 0)
     if gap<0 or gap>120 then return false end
-    if string.find(tostring(previous.text or ""),"^%[Guild Achievement%]") then return false end
-    if string.find(tostring(current.text or ""),"^%[Guild Achievement%]") then return false end
+    if OTLGM:IsGuildAchievementChatMessage180(previous.text or "") then return false end
+    if OTLGM:IsGuildAchievementChatMessage180(current.text or "") then return false end
     return true
 end
 
@@ -342,7 +342,7 @@ end
 function OTLGM.__impl180.GetGuildChatRowMetrics__impl4(self, messages,index,markerIndex)
     local info=messages[index]
     if not info then return 28,1,nil,false end
-    local achievement=string.find(tostring(info.text or ""),"^%[Guild Achievement%]")~=nil
+    local achievement=self:IsGuildAchievementChatMessage180(info.text or "")
     local width=achievement and 578 or (info.channel=="OFFICER" and 272 or 420)
     local textHeight=MeasureChatHeightR5(self,info.text or "",width)
     local lines=math.max(1,math.ceil(textHeight/16))
@@ -702,7 +702,10 @@ function OTLGM:RefreshRaidPlanner156()
     local result=PreviousRefreshRaidPlannerR5(self)
     ApplyRaidDetailLayoutR5(self)
     if self.ui and self.ui.raidSeen156 then
-        local raid=self.GetSelectedRaid156 and self:GetSelectedRaid156() or nil
+        -- There is no GetSelectedRaid156 method in the active architecture.
+        -- Resolve the durable selection through the canonical raid lookup so
+        -- the "Seen by N" label actually refreshes.
+        local raid=self.GetRaidById156 and self:GetRaidById156(self.ui.raidSelected156) or nil
         local seen=raid and raid.seen and 0 or nil
         if raid and raid.seen then local k for k in pairs(raid.seen) do seen=seen+1 end end
         if seen then SetButtonTextR5(self.ui.raidSeen156,"Seen by "..tostring(seen)) end
@@ -753,7 +756,7 @@ function OTLGM.__impl180.RefreshTreasuryPage170__impl2(self, forceEditor)
             if kind=="ADD" or kind=="SYNC ADD" then label="created a shared goal"
             elseif kind=="DELETE" or kind=="SYNC DELETE" then label="removed a shared goal"
             else label="updated a shared goal" end
-            ui.history[index]:SetText(date("%d %b",entry.ts or self:Now()).."  "..tostring(entry.actor or "Leadership").." "..label)
+            ui.history[index]:SetText(date("%d %b",entry.ts or self:Now()).."  "..(self.DisplayGuildActor180 and self:DisplayGuildActor180(entry.actor) or tostring(entry.actor or "Leadership")).." "..label)
         else ui.history[index]:SetText("") end
     end
     return result
@@ -896,4 +899,4 @@ function OTLGM.__impl180.RefreshAll__impl2(self)
     return result
 end
 
-if OTLGM.RegisterModule then OTLGM:RegisterModule("FeaturePresentation",{layer="feature",corrective=true,revision=5,catalogAfterLayer=121,finalCatalog=146,eventDriven=true,noOnUpdate=true}) end
+if OTLGM.RegisterModule then OTLGM:RegisterModule("FeaturePresentation",{layer="feature",corrective=true,revision=5,catalogAfterLayer=122,finalCatalog=147,eventDriven=true,noOnUpdate=true}) end

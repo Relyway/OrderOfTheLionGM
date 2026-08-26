@@ -59,6 +59,55 @@ local function HashLine(hash, line)
     return hash
 end
 
+-- Backup/rollback copies must be lossless. The general-purpose OTLGM:Copy
+-- intentionally drops unsupported values and over-deep branches, which is safe
+-- for presentation snapshots but unsafe for disaster recovery because a backup
+-- could appear successful after silently losing durable data.
+local function StrictCloneBackupR14(value, maximumDepth)
+    maximumDepth = tonumber(maximumDepth) or MAX_BACKUP_DEPTH
+    local stack = {}
+    local function clone(current, depth)
+        if depth > maximumDepth then return nil, "The database nesting depth is invalid." end
+        local currentType = type(current)
+        if currentType == "table" then
+            if stack[current] then return nil, "The database contains a cyclic table." end
+            stack[current] = true
+            local result = {}
+            local key, child, problem
+            for key, child in pairs(current) do
+                local keyType = type(key)
+                if keyType == "string" then
+                    if string.len(key) > 200 then stack[current] = nil return nil, "A backup key is too long." end
+                elseif keyType == "number" then
+                    if key ~= key or key ~= math.floor(key) or math.abs(key) > 10000000 then
+                        stack[current] = nil
+                        return nil, "A numeric backup key is invalid."
+                    end
+                else
+                    stack[current] = nil
+                    return nil, "Unsupported backup key type: " .. keyType
+                end
+                child, problem = clone(child, depth + 1)
+                if problem then stack[current] = nil return nil, problem end
+                result[key] = child
+            end
+            stack[current] = nil
+            return result
+        elseif currentType == "string" then
+            if string.len(current) > MAX_BACKUP_STRING then return nil, "A database text field is unexpectedly large." end
+            return current
+        elseif currentType == "number" then
+            local encoded = tostring(current)
+            if current ~= current or encoded == "inf" or encoded == "-inf" then return nil, "The database contains an invalid number." end
+            return current
+        elseif currentType == "boolean" or current == nil then
+            return current
+        end
+        return nil, "Unsupported backup value type: " .. currentType
+    end
+    return clone(value, 1)
+end
+
 local function EncodeSegment(key)
     if type(key) == "number" then return "N:" .. tostring(key) end
     return "S:" .. EscapeToken(key)
@@ -106,6 +155,7 @@ local function SerializeValue(state, value, path, depth)
         for index = 1, table.getn(keys) do
             key = keys[index]
             childPath = path .. "/" .. EncodeSegment(key)
+            if string.len(childPath) > 1200 then state.error = "A backup path is too long." break end
             SerializeValue(state, value[key], childPath, depth + 1)
             if state.error then break end
         end
@@ -125,9 +175,10 @@ local function SerializeValue(state, value, path, depth)
 end
 
 local function BuildDurableSnapshot(self, db)
-    local guild = self:Copy(db, MAX_BACKUP_DEPTH)
-    local settings = self:Copy(OTLGM_DB and OTLGM_DB.settings or {}, MAX_BACKUP_DEPTH)
-    if type(guild) ~= "table" or type(settings) ~= "table" then return nil end
+    local guild, guildProblem = StrictCloneBackupR14(db, MAX_BACKUP_DEPTH)
+    if type(guild) ~= "table" then return nil, guildProblem or "The guild database could not be cloned safely." end
+    local settings, settingsProblem = StrictCloneBackupR14(OTLGM_DB and OTLGM_DB.settings or {}, MAX_BACKUP_DEPTH)
+    if type(settings) ~= "table" then return nil, settingsProblem or "The settings database could not be cloned safely." end
 
     guild.pendingInvites = {}
     guild.pendingActions = {}
@@ -161,8 +212,8 @@ end
 function OTLGM:ExportBackup()
     local db = self:GetGuildDB()
     if not db then return BACKUP_HEADER .. "\nERROR|No guild database is available." end
-    local snapshot = BuildDurableSnapshot(self, db)
-    if not snapshot then return BACKUP_HEADER .. "\nERROR|The database could not be prepared safely." end
+    local snapshot, snapshotProblem = BuildDurableSnapshot(self, db)
+    if not snapshot then return BACKUP_HEADER .. "\nERROR|" .. tostring(snapshotProblem or "The database could not be prepared safely.") end
 
     local state = { lines = {}, count = 0, bytes = 0, hash = 5381, stack = {} }
     SerializeValue(state, snapshot.settings, EncodeSegment("settings"), 1)
@@ -260,7 +311,7 @@ local function ValidateImportedSnapshot(self, snapshot, metadata)
     if not tonumber(metadata.schema) or not tonumber(metadata.created) then return false, "The backup metadata is invalid." end
     if tonumber(metadata.schema) > tonumber(self.schemaVersion) then return false, "This backup was created by a newer, incompatible addon version." end
     local storedSchema = tonumber(snapshot.guild.schemaVersion) or tonumber(metadata.schema)
-    if not storedSchema or storedSchema < 0 then return false, "The guild schema in this backup is invalid." end
+    if not storedSchema or storedSchema < 0 then return false, "The guild data version in this backup is invalid." end
     if storedSchema > tonumber(self.schemaVersion) then return false, "The guild data was created by a newer, incompatible addon version." end
     local currentName = GetGuildInfo("player") or ""
     local importedName = snapshot.guild.name or metadata.guild or ""
@@ -323,7 +374,7 @@ function OTLGM:ImportBackup(text)
                 if metadata.seen then return false, "The backup metadata is duplicated." end
                 metadata = { seen = true, version = UnescapeToken(fields[2]), schema = tonumber(fields[3]), created = tonumber(fields[4]), realm = UnescapeToken(fields[5]), guild = UnescapeToken(fields[6]) }
             elseif kind == "T" or kind == "V" then
-                if foundCheck then return false, "The backup contains data after its checksum." end
+                if foundCheck then return false, "This backup has extra data after its integrity record." end
                 calculatedCount = calculatedCount + 1
                 if calculatedCount > MAX_BACKUP_ENTRIES then return false, "The backup contains too many entries." end
                 calculatedHash = HashLine(calculatedHash, line)
@@ -338,11 +389,11 @@ function OTLGM:ImportBackup(text)
                 end
                 if not ok then return false, problem end
             elseif kind == "CHECK" then
-                if foundCheck then return false, "The backup checksum record is duplicated." end
+                if foundCheck then return false, "This backup contains a duplicated integrity record." end
                 expectedCount, expectedHash = tonumber(fields[2]), tonumber(fields[3])
                 foundCheck = true
             elseif kind == "END" then
-                if not foundCheck then return false, "The backup checksum is missing." end
+                if not foundCheck then return false, "This backup is missing its integrity record." end
                 foundEnd = true
                 local trailingIndex
                 for trailingIndex = index + 1, table.getn(lines) do
@@ -355,15 +406,17 @@ function OTLGM:ImportBackup(text)
         end
     end
     if not metadata.seen or not foundEnd or not expectedCount or not expectedHash then return false, "The backup is incomplete." end
-    if expectedCount ~= calculatedCount or expectedHash ~= calculatedHash then return false, "The backup checksum does not match; paste it again without editing." end
+    if expectedCount ~= calculatedCount or expectedHash ~= calculatedHash then return false, "The backup integrity check failed; paste it again without editing." end
     local valid, problem = ValidateImportedSnapshot(self, snapshot, metadata)
     if not valid then return false, problem end
 
     local guildKey = self:GuildKey()
     if not guildKey then return false, "No current guild database is available." end
-    local previousGuild = self:Copy(OTLGM_DB.guilds[guildKey], MAX_BACKUP_DEPTH)
-    local previousSettings = self:Copy(OTLGM_DB.settings, MAX_BACKUP_DEPTH)
-    if type(previousGuild) ~= "table" or type(previousSettings) ~= "table" then return false, "The current database could not be copied for a safe rollback." end
+    local previousGuild, previousGuildProblem = StrictCloneBackupR14(OTLGM_DB.guilds[guildKey], MAX_BACKUP_DEPTH)
+    local previousSettings, previousSettingsProblem = StrictCloneBackupR14(OTLGM_DB.settings, MAX_BACKUP_DEPTH)
+    if type(previousGuild) ~= "table" or type(previousSettings) ~= "table" then
+        return false, "The current database could not be copied for a safe rollback. " .. tostring(previousGuildProblem or previousSettingsProblem or "")
+    end
     local previousVersion, previousSchema = OTLGM_DB.version, OTLGM_DB.schemaVersion
     local committed, commitProblem = pcall(function()
         OTLGM_DB.settings = snapshot.settings
@@ -371,6 +424,8 @@ function OTLGM:ImportBackup(text)
         OTLGM_DB.version = self.version
         OTLGM_DB.schemaVersion = self.schemaVersion
         self:MigrateGuildDB(snapshot.guild)
+        if self.RecountHistoryUnreadR59 then self:RecountHistoryUnreadR59(snapshot.guild, true) end
+        if self.RepairSyntheticHistoryBurst183 and not snapshot.guild.historySyntheticBurstRepair183 then self:RepairSyntheticHistoryBurst183(snapshot.guild) end
         self:EnsureDB()
         self:ResetSessionData()
     end)
@@ -407,13 +462,22 @@ function OTLGM:UndoLastImportRC4()
     if not self:CanUndoLastImportRC4() then return false, "There is no import to undo in this session." end
     local state = self.runtime.preImportBackup160
     if not OTLGM_DB or not OTLGM_DB.guilds then return false, "The local database is unavailable." end
-    local currentGuild = self:Copy(OTLGM_DB.guilds[state.guildKey], MAX_BACKUP_DEPTH)
-    local currentSettings = self:Copy(OTLGM_DB.settings, MAX_BACKUP_DEPTH)
-    if type(currentGuild) ~= "table" or type(currentSettings) ~= "table" then return false, "The current state could not be copied safely." end
+    local currentGuild, currentGuildProblem = StrictCloneBackupR14(OTLGM_DB.guilds[state.guildKey], MAX_BACKUP_DEPTH)
+    local currentSettings, currentSettingsProblem = StrictCloneBackupR14(OTLGM_DB.settings, MAX_BACKUP_DEPTH)
+    if type(currentGuild) ~= "table" or type(currentSettings) ~= "table" then
+        return false, "The current state could not be copied safely. " .. tostring(currentGuildProblem or currentSettingsProblem or "")
+    end
+    local restoreGuild, restoreGuildProblem = StrictCloneBackupR14(state.guild, MAX_BACKUP_DEPTH)
+    local restoreSettings, restoreSettingsProblem = StrictCloneBackupR14(state.settings, MAX_BACKUP_DEPTH)
+    if type(restoreGuild) ~= "table" or type(restoreSettings) ~= "table" then
+        return false, "The stored undo state is invalid. " .. tostring(restoreGuildProblem or restoreSettingsProblem or "")
+    end
     local ok, problem = pcall(function()
-        OTLGM_DB.guilds[state.guildKey] = self:Copy(state.guild, MAX_BACKUP_DEPTH)
-        OTLGM_DB.settings = self:Copy(state.settings, MAX_BACKUP_DEPTH)
+        OTLGM_DB.guilds[state.guildKey] = restoreGuild
+        OTLGM_DB.settings = restoreSettings
         self:MigrateGuildDB(OTLGM_DB.guilds[state.guildKey])
+        if self.RecountHistoryUnreadR59 then self:RecountHistoryUnreadR59(OTLGM_DB.guilds[state.guildKey], true) end
+        if self.RepairSyntheticHistoryBurst183 and not OTLGM_DB.guilds[state.guildKey].historySyntheticBurstRepair183 then self:RepairSyntheticHistoryBurst183(OTLGM_DB.guilds[state.guildKey]) end
         self:EnsureDB()
         self:ResetSessionData()
     end)

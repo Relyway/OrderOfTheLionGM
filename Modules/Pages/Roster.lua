@@ -16,6 +16,11 @@ local CLASS_COORDS = {
     PALADIN = { 0, 0.25, 0.5, 0.75 },
 }
 
+local CLASS_RGB_183 = {
+    Warrior = {0.78,0.61,0.43}, Mage = {0.41,0.80,0.94}, Rogue = {1.00,0.96,0.41}, Druid = {1.00,0.49,0.04},
+    Hunter = {0.67,0.83,0.45}, Shaman = {0.00,0.44,0.87}, Priest = {0.94,0.94,0.94}, Warlock = {0.58,0.51,0.79}, Paladin = {0.96,0.55,0.73},
+}
+
 local function ApplyClassIcon(texture, className)
     local coordinates = CLASS_COORDS[string.upper(tostring(className or ""))]
     if coordinates then
@@ -83,7 +88,7 @@ local function GetRankGroup(member)
     if string.find(rank, "core raider", 1, true) or string.find(rank, "the devoted", 1, true) then return "CORE_RAIDER", "Core Raider" end
     if string.find(rank, "raid leader", 1, true) or string.find(rank, "raidlead", 1, true) then return "RAID_LEADER", "Raid Leader" end
     -- Do not infer the guild-leader identity from a stale rank label/index.
-    -- Only Morrow or Lucks are canonical guild leaders for this guild.
+    -- Only the configured guild-leader identities can receive the guild-leader badge.
     if string.find(rank, "officer", 1, true) or string.find(rank, "lionheart", 1, true) then return "OFFICER", "Officer" end
     if string.find(rank, "helper", 1, true) or string.find(rank, "inn keeper", 1, true) then return "HELPER", "Helper" end
     if string.find(rank, "raider", 1, true) then return "RAIDER", "Raider" end
@@ -139,8 +144,10 @@ local function ApplyRosterRowState180(row, member, leadership, selected)
         elseif selected then row:SetBackdropColor(0.105, 0.080, 0.038, 0.98)
         elseif leadership and member.online then row:SetBackdropColor(0.125, 0.086, 0.032, 0.97)
         elseif leadership then row:SetBackdropColor(0.078, 0.060, 0.035, 0.96)
-        elseif member.online then row:SetBackdropColor(0.045, 0.041, 0.035, 0.92)
-        else row:SetBackdropColor(0.022, 0.022, 0.022, 0.96) end
+        elseif member.online and row.otlEven183 then row:SetBackdropColor(0.054, 0.047, 0.037, 0.94)
+        elseif member.online then row:SetBackdropColor(0.040, 0.037, 0.032, 0.93)
+        elseif row.otlEven183 then row:SetBackdropColor(0.029, 0.027, 0.024, 0.97)
+        else row:SetBackdropColor(0.019, 0.019, 0.019, 0.97) end
     end
     if row.SetBackdropBorderColor then
         if selected and leadership then row:SetBackdropBorderColor(C.gold[1], C.gold[2], C.gold[3], 0.98)
@@ -157,7 +164,7 @@ local FILTERS = {
     { "INACTIVE14", "Inactive 14d" }, { "INACTIVE30", "Inactive 30d" }, { "INACTIVE60", "Inactive 60d" },
     { "INACTIVE90", "Inactive 90d" }, { "LEVEL1_19", "Level 1-19" }, { "LEVEL20_39", "Level 20-39" },
     { "LEVEL40_59", "Level 40-59" }, { "ADDON_ACTIVE", "Addon active" }, { "ADDON_SEEN", "Addon seen" },
-    { "ADDON_UNDETECTED", "Addon unknown" },
+    { "ADDON_UNDETECTED", "Addon unknown" }, { "MAIN_ALT", "Main / Alts" },
 }
 
 local function Label(parent, value, template, x, y, width, justify)
@@ -174,6 +181,18 @@ local function Short(value, maximum)
     return string.sub(value, 1, math.max(1, maximum - 3)) .. "..."
 end
 
+local function SetRosterMemberNameR35(owner, row, member)
+    local badge184 = owner.GetCharacterIdentityRosterBadge184 and owner:GetCharacterIdentityRosterBadge184(member.name) or nil
+    local canShowBadge184 = badge184 and row and row.nameText and (tonumber(row.nameText:GetWidth()) or 0) >= 82
+    local maximum184 = canShowBadge184 and 16 or 20
+    local prefix184 = canShowBadge184 and (tostring(badge184.color or owner.colors.blue) .. tostring(badge184.label or "") .. owner.colors.reset .. " ") or ""
+    if member.online then
+        row.nameText:SetText(prefix184 .. owner:GetClassColor(member.class) .. Short(member.name, maximum184) .. owner.colors.reset)
+    else
+        row.nameText:SetText(prefix184 .. owner.colors.grey .. Short(member.name, maximum184) .. owner.colors.reset)
+    end
+end
+
 local function MakeNoteEdit(parent, width, height)
     return UI:EditBox(parent, width, height, {
         maxLetters = 31,
@@ -184,12 +203,23 @@ local function MakeNoteEdit(parent, width, height)
     })
 end
 
+local RefreshDetails
+
 local function CurrentFilterLabel(key)
     local index
     for index = 1, table.getn(FILTERS) do
         if FILTERS[index][1] == key then return FILTERS[index][2] end
     end
     return key or "All members"
+end
+
+local function SavedRosterViewLabelR39(slot, view)
+    slot = tonumber(slot) or 1
+    if not view then return "Favorite " .. tostring(slot) .. "  •  Empty" end
+    local primary = CurrentFilterLabel(view.filter or "ALL")
+    if view.rank and view.rank ~= "" then primary = primary .. " / " .. tostring(view.rank) end
+    if view.search and view.search ~= "" then primary = "Search: " .. tostring(view.search) end
+    return Short("Favorite " .. tostring(slot) .. "  •  " .. primary, 37)
 end
 
 function OTLGM:PersistRosterPosition180()
@@ -202,9 +232,17 @@ function OTLGM:ScrollRosterShell180(lines)
     if not self.ui or not self.ui.rosterTable then return end
     local filter = self.ui.rosterFilter or OTLGM_DB.settings.rosterFilter or "ALL"
     local search = self.ui.rosterSearch and self.ui.rosterSearch:GetText() or OTLGM_DB.settings.rosterSearch or ""
-    local list = self:GetSortedRoster(search, filter, self.ui.rosterRankFilter, self.ui.rosterProfessionFilter)
+    -- RC4-r9: the current view count is already known after every paint.  Do
+    -- not sort the entire roster merely to learn the scrollbar maximum before
+    -- RefreshRosterPage() paints the same view.  The fallback is only for the
+    -- impossible/early case where scrolling happens before the first refresh.
+    local listCount184 = tonumber(self.ui.rosterLastListCount184)
+    if not listCount184 then
+        local list184 = self:GetSortedRoster(search, filter, self.ui.rosterRankFilter, self.ui.rosterProfessionFilter)
+        listCount184 = table.getn(list184)
+    end
     local capacity = math.max(MIN_ROW_COUNT, tonumber(self.ui.rosterVisibleCapacity180) or MIN_ROW_COUNT)
-    local maximum = math.max(0, table.getn(list) - capacity)
+    local maximum = math.max(0, listCount184 - capacity)
     self.ui.rosterOffset = math.max(0, math.min(maximum, (tonumber(self.ui.rosterOffset) or 0) + (tonumber(lines) or 0)))
     self:PersistRosterPosition180()
     self:RefreshRosterPage()
@@ -217,6 +255,12 @@ function OTLGM:ShowRosterRowTooltip180(row)
     for index = 1, table.getn(row.otlTooltipLines) do
         local line = row.otlTooltipLines[index]
         if line and line ~= "" then GameTooltip:AddLine(line, index == 1 and 1 or 0.9, index == 1 and 0.82 or 0.9, index == 1 and 0.35 or 0.9, true) end
+    end
+    -- r34 identity adds one tooltip line only; roster row geometry and columns
+    -- remain untouched. Unverified/pending foreign claims are never shown.
+    if row.otlMemberName and self.GetCharacterIdentityTooltipLine184 then
+        local identityLine184 = self:GetCharacterIdentityTooltipLine184(row.otlMemberName)
+        if identityLine184 and identityLine184 ~= "" then GameTooltip:AddLine(identityLine184, 0.52, 0.72, 1.00, true) end
     end
     GameTooltip:Show()
 end
@@ -265,15 +309,79 @@ function OTLGM:CycleRosterProfessionShell(direction)
     self:RefreshRosterPage()
 end
 
+local function BuildRosterChoiceMenu180(parent, width, maximumItems, columns)
+    columns = math.max(1, tonumber(columns) or 1)
+    local menu = UI:Card(parent, width, 40, "")
+    menu:SetFrameLevel((parent.GetFrameLevel and parent:GetFrameLevel() or 1) + 24)
+    menu.rows180 = {}
+    menu.columns180 = columns
+    local gap, pad = 5, 5
+    local cellWidth = math.floor((width - (pad * 2) - ((columns - 1) * gap)) / columns)
+    local index
+    for index = 1, maximumItems do
+        local column = math.mod(index - 1, columns)
+        local rowIndex = math.floor((index - 1) / columns)
+        local row = UI:Button(menu, "", cellWidth, 24, function(button)
+            local current = button and button.otlChoiceMenu180
+            if not current or button.otlChoiceKey180 == nil then return end
+            local callback = current.otlChoiceHandler180
+            current:Hide()
+            if callback then callback(button.otlChoiceKey180) end
+        end, "filter")
+        row:SetPoint("TOPLEFT", menu, "TOPLEFT", pad + (column * (cellWidth + gap)), -pad - (rowIndex * 25))
+        row.otlChoiceMenu180 = menu
+        row:Hide()
+        menu.rows180[index] = row
+    end
+    menu:Hide()
+    return menu
+end
+
+local function HideRosterChoiceMenus180(drawer, except)
+    if not drawer then return end
+    local menus = { drawer.viewMenu180, drawer.rankMenu180, drawer.professionMenu180 }
+    local index
+    for index = 1, table.getn(menus) do
+        if menus[index] and menus[index] ~= except then menus[index]:Hide() end
+    end
+end
+
+local function ToggleRosterChoiceMenu180(drawer, menu, definitions, selected, handler)
+    if not drawer or not menu then return false end
+    local wasVisible = menu:IsVisible()
+    HideRosterChoiceMenus180(drawer, menu)
+    if wasVisible then menu:Hide() return false end
+    definitions = definitions or {}
+    local count = math.min(table.getn(definitions), table.getn(menu.rows180 or {}))
+    local index
+    for index = 1, table.getn(menu.rows180 or {}) do
+        local row, definition = menu.rows180[index], definitions[index]
+        if definition and index <= count then
+            row.otlChoiceKey180 = definition.key ~= nil and definition.key or definition[1]
+            UI:SetText(row, definition.label or definition[2] or tostring(row.otlChoiceKey180 or "Any"))
+            UI:SetSelected(row, row.otlChoiceKey180 == selected)
+            row:Show()
+        else
+            row.otlChoiceKey180 = nil
+            row:Hide()
+        end
+    end
+    local columns = math.max(1, tonumber(menu.columns180) or 1)
+    menu:SetHeight(10 + (math.ceil(count / columns) * 25))
+    menu.otlChoiceHandler180 = handler
+    menu:Show()
+    return true
+end
+
 function OTLGM:BuildRosterFiltersDrawer()
     if self.ui.rosterFiltersDrawer then return end
-    local drawer = UI:Drawer(self.ui.drawerHost, 420, 576)
+    local drawer = UI:Drawer(self.ui.drawerHost, 420, 500)
     drawer:SetPoint("TOPRIGHT", self.ui.drawerHost, "TOPRIGHT", -10, -10)
-    drawer.title = Label(drawer, "Roster Filters", "GameFontNormalLarge", 18, -18, 310, "LEFT")
+    drawer.title = Label(drawer, "Roster Filters", "GameFontNormalLarge", 18, -18, 250, "LEFT")
     drawer.title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
     drawer.close = UI:IconButton(drawer, "Interface\\Buttons\\UI-Panel-MinimizeButton-Up", 28, 28, function() OTLGM:CloseShellDrawer() end, "Close", "utility")
     drawer.close:SetPoint("TOPRIGHT", drawer, "TOPRIGHT", -12, -12)
-    drawer.clear = UI:Button(drawer, "Clear all", 90, 26, function()
+    drawer.clear = UI:Button(drawer, "Reset", 72, 26, function()
         OTLGM.ui.rosterRankFilter = nil
         OTLGM.ui.rosterProfessionFilter = nil
         OTLGM_DB.settings.rosterRankFilter = ""
@@ -281,62 +389,109 @@ function OTLGM:BuildRosterFiltersDrawer()
         OTLGM:SetRosterShellFilter("ALL")
         OTLGM:RefreshRosterFiltersDrawer()
     end, "utility")
-    drawer.clear:SetPoint("TOPRIGHT", drawer, "TOPRIGHT", -52, -14)
+    drawer.clear:SetPoint("TOPRIGHT", drawer, "TOPRIGHT", -50, -14)
 
-    Label(drawer, "MEMBER FILTER", "GameFontNormalSmall", 18, -60, 180, "LEFT"):SetTextColor(C.goldMuted[1], C.goldMuted[2], C.goldMuted[3])
-    drawer.filterButtons = {}
+    Label(drawer, "QUICK VIEW", "GameFontNormalSmall", 18, -60, 180, "LEFT"):SetTextColor(C.goldMuted[1], C.goldMuted[2], C.goldMuted[3])
+    drawer.quickButtons180 = {}
+    local quick = {
+        { "ALL", "All" }, { "ONLINE", "Online" }, { "LEADERSHIP", "Leadership" },
+        { "SAMEZONE", "My zone" }, { "NEARLEVEL", "Near level" }, { "LEVEL60", "Level 60" },
+    }
     local index
-    for index = 1, table.getn(FILTERS) do
+    for index = 1, table.getn(quick) do
         local captured = index
-        local definition = FILTERS[captured]
         local column = math.mod(captured - 1, 3)
         local rowIndex = math.floor((captured - 1) / 3)
-        local button = UI:FilterChip(drawer, definition[2], 122, function()
-            OTLGM:SetRosterShellFilter(definition[1])
+        local button = UI:FilterChip(drawer, quick[captured][2], 122, function()
+            OTLGM:SetRosterShellFilter(quick[captured][1])
             OTLGM:RefreshRosterFiltersDrawer()
         end)
         button:SetPoint("TOPLEFT", drawer, "TOPLEFT", 18 + (column * 128), -82 - (rowIndex * 30))
-        drawer.filterButtons[captured] = button
+        button.otlFilterKey180 = quick[captured][1]
+        drawer.quickButtons180[captured] = button
     end
 
-    Label(drawer, "RANK AND PROFESSION", "GameFontNormalSmall", 18, -306, 260, "LEFT"):SetTextColor(C.goldMuted[1], C.goldMuted[2], C.goldMuted[3])
-    drawer.rankPrev = UI:Button(drawer, "<", 30, 28, function() OTLGM:CycleRosterRankShell(-1) end, "utility")
-    drawer.rankPrev:SetPoint("TOPLEFT", drawer, "TOPLEFT", 18, -328)
-    drawer.rank = UI:Button(drawer, "Rank: Any", 160, 28, function() OTLGM:CycleRosterRankShell(1) end, "filter")
-    drawer.rank:SetPoint("LEFT", drawer.rankPrev, "RIGHT", 6, 0)
-    drawer.rankNext = UI:Button(drawer, ">", 30, 28, function() OTLGM:CycleRosterRankShell(1) end, "utility")
-    drawer.rankNext:SetPoint("LEFT", drawer.rank, "RIGHT", 6, 0)
-    drawer.profPrev = UI:Button(drawer, "<", 30, 28, function() OTLGM:CycleRosterProfessionShell(-1) end, "utility")
-    drawer.profPrev:SetPoint("TOPLEFT", drawer, "TOPLEFT", 18, -364)
-    drawer.profession = UI:Button(drawer, "Profession: Any", 210, 28, function() OTLGM:CycleRosterProfessionShell(1) end, "filter")
-    drawer.profession:SetPoint("LEFT", drawer.profPrev, "RIGHT", 6, 0)
-    drawer.profNext = UI:Button(drawer, ">", 30, 28, function() OTLGM:CycleRosterProfessionShell(1) end, "utility")
-    drawer.profNext:SetPoint("LEFT", drawer.profession, "RIGHT", 6, 0)
+    Label(drawer, "MEMBER VIEW", "GameFontNormalSmall", 18, -148, 180, "LEFT"):SetTextColor(C.goldMuted[1], C.goldMuted[2], C.goldMuted[3])
+    drawer.view = UI:Button(drawer, "View: All members  v", 384, 30, function()
+        local definitions = {}
+        local i
+        for i = 1, table.getn(FILTERS) do
+            if string.sub(FILTERS[i][1], 1, 6) ~= "ADDON_" or OTLGM:IsOfficerMode() then
+                table.insert(definitions, { key = FILTERS[i][1], label = FILTERS[i][2] })
+            end
+        end
+        ToggleRosterChoiceMenu180(drawer, drawer.viewMenu180, definitions, OTLGM.ui.rosterFilter or "ALL", function(key)
+            OTLGM:SetRosterShellFilter(key)
+            OTLGM:RefreshRosterFiltersDrawer()
+        end)
+    end, "filter")
+    drawer.view:SetPoint("TOPLEFT", drawer, "TOPLEFT", 18, -169)
+    drawer.viewMenu180 = BuildRosterChoiceMenu180(drawer, 384, table.getn(FILTERS), 2)
+    drawer.viewMenu180:SetPoint("TOPLEFT", drawer.view, "BOTTOMLEFT", 0, -2)
 
-    Label(drawer, "SAVED VIEWS", "GameFontNormalSmall", 18, -416, 220, "LEFT"):SetTextColor(C.goldMuted[1], C.goldMuted[2], C.goldMuted[3])
+    Label(drawer, "RANK", "GameFontNormalSmall", 18, -214, 120, "LEFT"):SetTextColor(C.goldMuted[1], C.goldMuted[2], C.goldMuted[3])
+    Label(drawer, "PROFESSION", "GameFontNormalSmall", 216, -214, 150, "LEFT"):SetTextColor(C.goldMuted[1], C.goldMuted[2], C.goldMuted[3])
+    drawer.rank = UI:Button(drawer, "Any rank  v", 186, 30, function()
+        local definitions = { { key = "", label = "Any rank" } }
+        local ranks = OTLGM:GetRosterRanks() or {}
+        local i
+        for i = 1, table.getn(ranks) do table.insert(definitions, { key = ranks[i].name, label = ranks[i].name }) end
+        ToggleRosterChoiceMenu180(drawer, drawer.rankMenu180, definitions, OTLGM.ui.rosterRankFilter or "", function(key)
+            OTLGM.ui.rosterRankFilter = key ~= "" and key or nil
+            OTLGM_DB.settings.rosterRankFilter = key or ""
+            OTLGM.ui.rosterOffset = 0
+            OTLGM:RefreshRosterFiltersDrawer()
+            OTLGM:RefreshRosterPage()
+        end)
+    end, "filter")
+    drawer.rank:SetPoint("TOPLEFT", drawer, "TOPLEFT", 18, -235)
+    drawer.profession = UI:Button(drawer, "Any profession  v", 186, 30, function()
+        local definitions = { { key = "", label = "Any profession" } }
+        local professions = OTLGM.GetCraftingProfessionDefinitions and OTLGM:GetCraftingProfessionDefinitions() or {}
+        local i
+        for i = 1, table.getn(professions) do
+            if professions[i].key ~= "ALL" then table.insert(definitions, { key = professions[i].key, label = professions[i].label }) end
+        end
+        ToggleRosterChoiceMenu180(drawer, drawer.professionMenu180, definitions, OTLGM.ui.rosterProfessionFilter or "", function(key)
+            OTLGM.ui.rosterProfessionFilter = key ~= "" and key or nil
+            OTLGM_DB.settings.rosterProfessionFilter = key or ""
+            OTLGM.ui.rosterOffset = 0
+            OTLGM:RefreshRosterFiltersDrawer()
+            OTLGM:RefreshRosterPage()
+        end)
+    end, "filter")
+    drawer.profession:SetPoint("TOPLEFT", drawer, "TOPLEFT", 216, -235)
+    drawer.rankMenu180 = BuildRosterChoiceMenu180(drawer, 384, 14, 2)
+    drawer.rankMenu180:SetPoint("TOPLEFT", drawer.rank, "BOTTOMLEFT", 0, -2)
+    drawer.professionMenu180 = BuildRosterChoiceMenu180(drawer, 384, 14, 2)
+    drawer.professionMenu180:SetPoint("TOPRIGHT", drawer.profession, "BOTTOMRIGHT", 0, -2)
+
+    Label(drawer, "QUICK FAVORITES", "GameFontNormalSmall", 18, -286, 220, "LEFT"):SetTextColor(C.goldMuted[1], C.goldMuted[2], C.goldMuted[3])
     drawer.saved = {}
     for index = 1, 3 do
         local captured = index
-        local load = UI:Button(drawer, "Load View " .. tostring(captured), 144, 28, function()
+        local load = UI:Button(drawer, "Favorite " .. tostring(captured), 270, 28, function()
             local exists = OTLGM_DB.settings.savedRosterViews and OTLGM_DB.settings.savedRosterViews[captured]
             if exists then
                 OTLGM:LoadRosterView(captured)
             else
                 OTLGM:SaveRosterView(captured)
-                OTLGM:ShowToast("Current roster view saved.", "success")
+                OTLGM:ShowToast("Roster favorite saved.", "success")
             end
             OTLGM:RefreshRosterFiltersDrawer()
         end, "secondary")
-        load:SetPoint("TOPLEFT", drawer, "TOPLEFT", 18, -438 - ((captured - 1) * 34))
-        local save = UI:Button(drawer, "Save", 82, 28, function()
+        load:SetPoint("TOPLEFT", drawer, "TOPLEFT", 18, -308 - ((captured - 1) * 34))
+        local save = UI:Button(drawer, "Save", 104, 28, function()
             OTLGM:SaveRosterView(captured)
-            OTLGM:ShowToast("Roster View " .. tostring(captured) .. " saved.", "success")
+            OTLGM:ShowToast("Favorite " .. tostring(captured) .. " updated.", "success")
             OTLGM:RefreshRosterFiltersDrawer()
         end, "utility")
         save:SetPoint("LEFT", load, "RIGHT", 8, 0)
         drawer.saved[captured] = { load = load, save = save }
     end
-    drawer.hint = Label(drawer, "Saved Views include search, filters and sort order.", "GameFontNormalSmall", 18, -552, 380, "LEFT")
+    drawer.hint = Label(drawer, "Favorites remember your search, filters and sorting. Select one to restore it, or replace it with the current roster view.", "GameFontNormalSmall", 18, -418, 384, "LEFT")
+    drawer.hint:SetHeight(48)
+    drawer.hint:SetJustifyV("TOP")
     drawer.hint:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
     self.ui.rosterFiltersDrawer = drawer
 end
@@ -346,39 +501,72 @@ function OTLGM:RefreshRosterFiltersDrawer()
     if not drawer then return end
     local current = self.ui.rosterFilter or OTLGM_DB.settings.rosterFilter or "ALL"
     local index
-    for index = 1, table.getn(drawer.filterButtons) do
-        UI:SetSelected(drawer.filterButtons[index], FILTERS[index][1] == current)
-        if string.sub(FILTERS[index][1], 1, 6) == "ADDON_" and not self:IsOfficerMode() then drawer.filterButtons[index]:Hide()
-        else drawer.filterButtons[index]:Show() end
+    for index = 1, table.getn(drawer.quickButtons180 or {}) do
+        local button = drawer.quickButtons180[index]
+        UI:SetSelected(button, button.otlFilterKey180 == current)
     end
+    UI:SetText(drawer.view, "View: " .. CurrentFilterLabel(current) .. "  v")
     local rank = self.ui.rosterRankFilter or OTLGM_DB.settings.rosterRankFilter or ""
     local profession = self.ui.rosterProfessionFilter or OTLGM_DB.settings.rosterProfessionFilter or ""
-    UI:SetText(drawer.rank, "Rank: " .. (rank ~= "" and rank or "Any"))
-    local professionLabel = "Any"
+    UI:SetText(drawer.rank, (rank ~= "" and rank or "Any rank") .. "  v")
+    local professionLabel = "Any profession"
     local definitions = self.GetCraftingProfessionDefinitions and self:GetCraftingProfessionDefinitions() or {}
     for index = 1, table.getn(definitions) do
         if definitions[index].key == profession then professionLabel = definitions[index].label break end
     end
-    UI:SetText(drawer.profession, "Profession: " .. professionLabel)
+    UI:SetText(drawer.profession, professionLabel .. "  v")
     for index = 1, 3 do
         local exists = OTLGM_DB.settings.savedRosterViews and OTLGM_DB.settings.savedRosterViews[index]
-        UI:SetText(drawer.saved[index].load, exists and ("Load View " .. tostring(index)) or "Save current view")
+        UI:SetText(drawer.saved[index].load, SavedRosterViewLabelR39(index, exists))
+        UI:SetText(drawer.saved[index].save, exists and "Replace" or "Save")
         UI:SetEnabled(drawer.saved[index].load, true)
     end
 end
 
 function OTLGM:OpenRosterFiltersDrawer()
     self:BuildRosterFiltersDrawer()
+    if self.ui and self.ui.rosterFiltersDrawer then HideRosterChoiceMenus180(self.ui.rosterFiltersDrawer) end
     self:RefreshRosterFiltersDrawer()
     self:ShowShellDrawer(self.ui.rosterFiltersDrawer)
 end
 
+function OTLGM:RefreshRosterSelection183(previousName, selectedName)
+    self.runtime = self.runtime or {}
+    self.runtime.rosterMetrics180 = self.runtime.rosterMetrics180 or { fullScans = 0, targetedRefreshes = 0, reasons = {} }
+    self.runtime.rosterMetrics180.selectionRefreshes183 =
+        (tonumber(self.runtime.rosterMetrics180.selectionRefreshes183) or 0) + 1
+    local selectedMember = selectedName and self:GetMember(selectedName) or nil
+    local previousKey, selectedKey = self:NormalizeName(previousName or ""), self:NormalizeName(selectedName or "")
+    local index
+    for index = 1, table.getn(self.ui and self.ui.rosterTable and self.ui.rosterTable.rows or {}) do
+        local row = self.ui.rosterTable.rows[index]
+        local rowKey = row and row.otlMemberName and self:NormalizeName(row.otlMemberName) or ""
+        if rowKey ~= "" and (rowKey == previousKey or rowKey == selectedKey) then
+            local member = self:GetMember(row.otlMemberName)
+            local selected = member and rowKey == selectedKey and true or false
+            UI:SetSelected(row, selected)
+            if member then ApplyRosterRowState180(row, member, self:IsLeadership(member), selected) end
+        end
+    end
+    if self.ui and self.ui.rosterDetails then RefreshDetails(self, selectedMember) end
+    self:PersistRosterPosition180()
+    return selectedMember ~= nil
+end
+
 function OTLGM:SelectRosterMember(name)
     local member = name and self:GetMember(name) or nil
+    local previousName = self.ui.rosterSelectedName
     self.ui.rosterSelectedName = member and member.name or nil
+    -- Retain the legacy alias for shared management/actions, but do not rebuild
+    -- or sort the roster list merely to change selection.
+    self.ui.selectedMember = self.ui.rosterSelectedName
     if self.ui.rosterDetails then self.ui.rosterDetails.historyOffset = 0 end
-    self:PersistRosterPosition180()
-    self:RefreshRosterPage()
+    self:RefreshRosterSelection183(previousName, self.ui.rosterSelectedName)
+    -- Selection keeps the existing management workflow and then updates the
+    -- separate cache-only companion. No display path requests fresh data.
+    if member and self.OpenGuildMemberProfile183 then
+        self:OpenGuildMemberProfile183(member.name, "roster", true)
+    end
 end
 
 function OTLGM:RefreshRosterSaveState()
@@ -1182,6 +1370,7 @@ local function CreateRosterTableRow(owner, tablePanel, index)
     row.leadershipAccent:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 2, 2)
     row.leadershipAccent:SetWidth(4)
     row.leadershipAccent:Hide()
+    row.otlEven183 = math.mod(captured, 2) == 0 and true or nil
     row.rankIcon = row:CreateTexture(nil, "ARTWORK")
     row.rankIcon:SetWidth(16)
     row.rankIcon:SetHeight(16)
@@ -1268,7 +1457,7 @@ function OTLGM:BuildGuildInviteModal180()
     modal:SetPoint("CENTER", self.ui.modalHost, "CENTER", 0, 0)
     modal.title = Label(modal, "Invite to Guild", "GameFontNormalLarge", 20, -18, 320, "LEFT")
     modal.title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
-    modal.help = Label(modal, "Enter a character name. The invite uses the normal WoW guild invitation API and your real guild-rank permission.", "GameFontNormalSmall", 20, -52, 390, "LEFT")
+    modal.help = Label(modal, "Enter a character name. The invitation uses your normal guild permissions, just like inviting through the game interface.", "GameFontNormalSmall", 20, -52, 390, "LEFT")
     modal.help:SetHeight(38)
     if modal.help.SetJustifyV then modal.help:SetJustifyV("TOP") end
     modal.name = UI:EditBox(modal, 390, 32, { placeholder = "Character name", maxLetters = 24 })
@@ -1313,7 +1502,6 @@ function OTLGM:OpenGuildInviteModal180()
     end
     modal.name:SetText("")
     self:ShowShellModal(modal)
-    modal.name:SetFocus()
 end
 
 local function BuildRoster(owner, page)
@@ -1331,9 +1519,9 @@ local function BuildRoster(owner, page)
         if arg1 == "PAGEUP" then owner:ScrollRosterShell180(-capacity)
         elseif arg1 == "PAGEDOWN" then owner:ScrollRosterShell180(capacity) end
     end)
-    owner.ui.rosterUpdate = UI:Button(page, "Update Roster", 118, 30, function()
+    owner.ui.rosterUpdate = UI:Button(page, "Refresh Roster", 118, 30, function()
         owner:RequestScan("MANUAL")
-        owner:ShowToast("Roster update requested.", "success")
+        owner:ShowToast("Roster refresh requested.", "success")
     end, "utility")
     owner.ui.rosterUpdate:SetPoint("LEFT", owner.ui.rosterSearch, "RIGHT", 8, 0)
     owner.ui.rosterInvite180 = UI:Button(page, "+ Invite", 86, 30, function() owner:OpenGuildInviteModal180() end, "primary")
@@ -1373,6 +1561,27 @@ local function BuildRoster(owner, page)
 
     owner.ui.rosterSummary = Label(page, "", "GameFontNormalSmall", 0, -84, 572, "LEFT")
     owner.ui.rosterSummary:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
+    owner.ui.rosterSummary:Hide()
+    owner.ui.rosterSummaryChips184 = {}
+    local summaryDefs184 = {
+        { key = "online", label = "Online", color = C.green },
+        { key = "leadership", label = "Leadership", color = C.gold },
+        { key = "level60", label = "Level 60", color = C.purple },
+        { key = "shown", label = "Shown", color = C.blue },
+    }
+    local summaryIndex184
+    for summaryIndex184 = 1, table.getn(summaryDefs184) do
+        local definition184 = summaryDefs184[summaryIndex184]
+        local chip184 = UI:Surface(page, "raised", 104, 20)
+        chip184.text = UI.Text(chip184, definition184.label .. " 0", "GameFontNormalSmall", "CENTER")
+        chip184.text:SetPoint("CENTER", chip184, "CENTER", 0, 0)
+        chip184.text:SetWidth(98)
+        chip184.text:SetTextColor(definition184.color[1], definition184.color[2], definition184.color[3])
+        if chip184.SetBackdropBorderColor then chip184:SetBackdropBorderColor(definition184.color[1], definition184.color[2], definition184.color[3], 0.55) end
+        chip184.otlLabel184 = definition184.label
+        chip184.otlColor184 = definition184.color
+        owner.ui.rosterSummaryChips184[definition184.key] = chip184
+    end
 
     local tablePanel = UI:Card(page, 572, 482, "")
     tablePanel:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -106)
@@ -1440,11 +1649,34 @@ local function BuildRoster(owner, page)
 
     local details = UI:DetailsPanel(page, 348, 660, "Member Details")
     details:SetPoint("TOPLEFT", page, "TOPLEFT", 584, 0)
-    details.classIcon = details:CreateTexture(nil, "ARTWORK")
-    details.classIcon:SetWidth(38) details.classIcon:SetHeight(38) details.classIcon:SetPoint("TOPLEFT", details, "TOPLEFT", 14, -34)
-    details.nameText = Label(details, "", "GameFontNormalLarge", 62, -35, 268, "LEFT")
-    details.rankText = Label(details, "", "GameFontNormalSmall", 62, -58, 268, "LEFT")
+    details.hero183 = CreateFrame("Frame", nil, details)
+    details.hero183:SetPoint("TOPLEFT", details, "TOPLEFT", 10, -28)
+    details.hero183:SetPoint("TOPRIGHT", details, "TOPRIGHT", -10, -28)
+    details.hero183:SetHeight(48)
+    details.heroBackground183 = details.hero183:CreateTexture(nil, "BACKGROUND")
+    details.heroBackground183:SetAllPoints(details.hero183)
+    details.heroBackground183:SetTexture(C.raised[1], C.raised[2], C.raised[3], 0.55)
+    details.heroAccent183 = details.hero183:CreateTexture(nil, "ARTWORK")
+    details.heroAccent183:SetPoint("TOPLEFT", details.hero183, "TOPLEFT", 0, 0)
+    details.heroAccent183:SetPoint("BOTTOMLEFT", details.hero183, "BOTTOMLEFT", 0, 0)
+    details.heroAccent183:SetWidth(3) details.heroAccent183:SetTexture(C.gold[1], C.gold[2], C.gold[3], 0.9)
+    details.classIconFrame183 = UI:Surface(details, "raised", 44, 44)
+    details.classIconFrame183:SetPoint("TOPLEFT", details, "TOPLEFT", 14, -31)
+    details.classIcon = details.classIconFrame183:CreateTexture(nil, "ARTWORK")
+    details.classIcon:SetWidth(36) details.classIcon:SetHeight(36) details.classIcon:SetPoint("CENTER", details.classIconFrame183, "CENTER", 0, 0)
+    details.nameText = Label(details, "", "GameFontNormalLarge", 66, -35, 178, "LEFT")
+    details.rankText = Label(details, "", "GameFontNormalSmall", 66, -58, 178, "LEFT")
     details.rankText:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
+    details.profile183 = UI:Button(details, "Open Profile", 96, 24, function()
+        if details.otlMember and owner.OpenGuildMemberProfile183 then
+            owner:OpenGuildMemberProfile183(details.otlMember.name, "roster-button", false)
+        elseif owner.OpenMyGuildProfile183 then
+            owner:OpenMyGuildProfile183()
+        end
+    end, "primary")
+    details.profile183:SetPoint("TOPRIGHT", details, "TOPRIGHT", -10, -7)
+    details.profile183.otlTooltipTitle = "Guild Profile"
+    details.profile183.otlTooltip = "The selected member profile normally opens automatically beside Roster. Use this button to reopen it after closing the profile."
     details.statusLabel = Label(details, "STATUS", "GameFontNormalSmall", 14, -86, 150, "LEFT")
     details.statusLabel:SetTextColor(C.goldMuted[1], C.goldMuted[2], C.goldMuted[3])
     details.statusText = Label(details, "", "GameFontNormalSmall", 14, -105, 316, "LEFT")
@@ -1452,6 +1684,11 @@ local function BuildRoster(owner, page)
     details.addonText = Label(details, "", "GameFontNormalSmall", 14, -145, 316, "LEFT")
     details.firstSeenText = Label(details, "", "GameFontNormalSmall", 14, -165, 316, "LEFT")
     details.firstSeenText:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
+    details.identityDivider183 = details:CreateTexture(nil, "ARTWORK")
+    details.identityDivider183:SetTexture(C.goldDark[1], C.goldDark[2], C.goldDark[3], 0.7)
+    details.identityDivider183:SetPoint("TOPLEFT", details, "TOPLEFT", 14, -178)
+    details.identityDivider183:SetPoint("TOPRIGHT", details, "TOPRIGHT", -14, -178)
+    details.identityDivider183:SetHeight(1)
     details.professionsLabel = Label(details, "PROFESSIONS", "GameFontNormalSmall", 14, -184, 150, "LEFT")
     details.professionsLabel:SetTextColor(C.goldMuted[1], C.goldMuted[2], C.goldMuted[3])
     details.professionsText = Label(details, "", "GameFontNormalSmall", 14, -204, 316, "LEFT")
@@ -1568,8 +1805,13 @@ end
 
 local function ClearDetails(details)
     details.otlMember = nil
+    details.otlHistory183 = nil
+    details.otlHistoryName183 = nil
     SetRosterDetailsStaticVisible180(details, false)
     details.classIcon:Hide()
+    if details.classIconFrame183 then details.classIconFrame183:Hide() end
+    if details.hero183 then details.hero183:Hide() end
+    if details.identityDivider183 then details.identityDivider183:Hide() end
     details.nameText:SetText("")
     details.rankText:SetText("")
     details.statusText:SetText("")
@@ -1583,22 +1825,30 @@ local function ClearDetails(details)
     details.whisper:Hide() details.invite:Hide() details.history:Hide() details.more:Hide()
     details.promote:Hide() details.demote:Hide() details.approveLion:Hide() details.muteGuest:Hide() details.pendingText:Hide()
     details.actionsTitle:Hide()
+    if details.profile183 then UI:SetText(details.profile183, "My Profile") details.profile183:Show() end
     details.historyTitle:Hide()
     local index
     for index = 1, table.getn(details.historyRows) do details.historyRows[index]:Hide() end
     details.empty:Show()
 end
 
-local function RefreshDetails(owner, member)
+RefreshDetails = function(owner, member)
     local details = owner.ui.rosterDetails
     if not member then ClearDetails(details) return end
     details.empty:Hide()
     SetRosterDetailsStaticVisible180(details, true)
     details.otlMember = member
+    if details.profile183 then UI:SetText(details.profile183, "Open Profile") details.profile183:Show() end
     ApplyClassIcon(details.classIcon, member.class)
+    if details.classIconFrame183 then details.classIconFrame183:Show() end
+    if details.hero183 then details.hero183:Show() end
+    if details.identityDivider183 then details.identityDivider183:Show() end
     details.classIcon:Show()
     details.nameText:SetText(owner:GetClassColor(member.class) .. tostring(member.name or "") .. owner.colors.reset)
-    details.rankText:SetText(tostring(member.rank or "Guild member") .. "  |  Level " .. tostring(member.level or 0) .. " " .. tostring(member.class or ""))
+    details.rankText:SetText("Level " .. tostring(member.level or 0) .. " " .. tostring(member.class or "") .. "  •  " .. tostring(member.rank or "Guild member"))
+    local accent = CLASS_RGB_183[tostring(member.class or "")] or C.gold
+    if details.heroAccent183 then details.heroAccent183:SetTexture(accent[1], accent[2], accent[3], 0.92) end
+    if details.classIconFrame183 and details.classIconFrame183.SetBackdropBorderColor then details.classIconFrame183:SetBackdropBorderColor(accent[1], accent[2], accent[3], 0.90) end
     ApplyRosterRankTextColor180(details.rankText, member, owner:IsLeadership(member))
     details.statusText:SetText(member.online and "Online now" or ("Last online: " .. tostring(owner:GetFreshnessText(member.lastSeen))))
     details.statusText:SetTextColor(member.online and C.green[1] or C.grey[1], member.online and C.green[2] or C.grey[2], member.online and C.green[3] or C.grey[3])
@@ -1607,7 +1857,15 @@ local function RefreshDetails(owner, member)
     local publicVersion = detection.version and owner.GetPublicVersion180 and owner:GetPublicVersion180(detection.version) or nil
     details.addonText:SetText("Addon: " .. tostring(detection.label or "Not detected") .. (publicVersion and ("  v" .. tostring(publicVersion)) or ""))
     local firstSeen = tonumber(member.joinedAt) or tonumber(member.trackedSince) or tonumber(member.firstSeenAt)
-    details.firstSeenText:SetText(firstSeen and ("First seen in guild: " .. date("%d %b %Y", firstSeen)) or "First seen in guild: no stored date")
+    local firstSeenLabel184 = firstSeen and ("First seen: " .. date("%d %b %Y", firstSeen)) or "First seen: no stored date"
+    local identityCompact184 = owner.GetCharacterIdentityCompactText184 and owner:GetCharacterIdentityCompactText184(member.name) or nil
+    if identityCompact184 and identityCompact184 ~= "" then
+        details.firstSeenText:SetText(tostring(identityCompact184) .. "  -  " .. firstSeenLabel184)
+        details.firstSeenText:SetTextColor(C.blue[1], C.blue[2], C.blue[3])
+    else
+        details.firstSeenText:SetText(firstSeenLabel184)
+        details.firstSeenText:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
+    end
     local professions = owner:GetMemberProfessionLabels(member)
     details.professionsText:SetText("Professions: " .. (table.getn(professions) > 0 and table.concat(professions, ", ") or "No shared profession data"))
 
@@ -1679,6 +1937,10 @@ local function RefreshDetails(owner, member)
     local visibleRows = math.max(0, math.min(table.getn(details.historyRows), tonumber(details.historyVisibleRows180) or table.getn(details.historyRows)))
     if visibleRows > 0 then details.historyTitle:Show() else details.historyTitle:Hide() end
     local history = owner:GetMemberRecentHistory(member.name, 40)
+    -- Reuse this already-bounded read in Guild Profile. Rapid member switching
+    -- must not walk the retained history a second time for presentation.
+    details.otlHistory183 = history
+    details.otlHistoryName183 = member.name
     local maximum = math.max(0, table.getn(history) - math.max(1, visibleRows))
     details.historyOffset = math.max(0, math.min(maximum, tonumber(details.historyOffset) or 0))
     local index
@@ -1702,6 +1964,11 @@ end
 
 function OTLGM:RefreshRosterTarget180(name)
     self.runtime = self.runtime or {}
+    -- A targeted rank/note change can affect the active sort/search without a
+    -- new full roster timestamp. Drop the short-lived sorted view explicitly.
+    self.runtime.sortedRosterView184 = nil
+    self.runtime.rosterTargetRevision184 = (tonumber(self.runtime.rosterTargetRevision184) or 0) + 1
+    self.runtime.rosterSummaryCounts184 = nil
     self.runtime.rosterMetrics180 = self.runtime.rosterMetrics180 or { fullScans = 0, targetedRefreshes = 0, reasons = {} }
     self.runtime.rosterMetrics180.targetedRefreshes = (tonumber(self.runtime.rosterMetrics180.targetedRefreshes) or 0) + 1
     self.runtime.rosterMetrics180.lastTargetedName = tostring(name or "")
@@ -1715,18 +1982,19 @@ function OTLGM:RefreshRosterTarget180(name)
         if row and row.otlMemberName and self:NormalizeName(row.otlMemberName) == self:NormalizeName(member.name) then
             ApplyRankGroupIcon(row, member)
             local leadership = self:IsLeadership(member)
-            if member.online then
-                row.onlineDot:Show()
-                row.nameText:SetText(self:GetClassColor(member.class) .. Short(member.name, 20) .. self.colors.reset)
-            else
-                row.onlineDot:Hide()
-                row.nameText:SetText(self.colors.grey .. Short(member.name, 20) .. self.colors.reset)
-            end
+            if member.online then row.onlineDot:Show() else row.onlineDot:Hide() end
+            SetRosterMemberNameR35(self, row, member)
             row.levelText:SetText(tostring(member.level or 0))
             row.classText:SetText(Short(member.class or "", 11))
             row.rankText:SetText(Short(member.rank or "", 15))
             row.zoneText:SetText(Short(member.zone or "", 17))
             row.lastText:SetText(member.online and "Online" or Short(self:GetFreshnessText(member.lastSeen), 12))
+            local detection = self:GetAddonDetection170(member.name)
+            row.addonIcon:SetAlpha(detection.state == "ACTIVE" and 1 or detection.state == "UNDETECTED" and 0.28 or 0.58)
+            if row.addonIcon.SetVertexColor then
+                if detection.state == "ACTIVE" then row.addonIcon:SetVertexColor(C.green[1], C.green[2], C.green[3])
+                else row.addonIcon:SetVertexColor(C.grey[1], C.grey[2], C.grey[3]) end
+            end
             ApplyRosterRankTextColor180(row.rankText, member, leadership)
             row.otlTooltipLines = {
                 tostring(member.name or "Guild member"),
@@ -1739,6 +2007,8 @@ function OTLGM:RefreshRosterTarget180(name)
         end
     end
     if selected and self.ui.rosterDetails then RefreshDetails(self, member) end
+    if selected and self.ui.guildProfile183 and self.ui.guildProfile183:IsVisible()
+        and self.RefreshGuildProfile183 then self:RefreshGuildProfile183("roster-target") end
     self:PersistRosterPosition180()
     return true
 end
@@ -1751,19 +2021,51 @@ function OTLGM:RefreshRosterPage()
     local search = self.ui.rosterSearch:GetText() or ""
     self.ui.rosterSearchRuntime180 = search
     local list = self:GetSortedRoster(search, filter, self.ui.rosterRankFilter, self.ui.rosterProfessionFilter)
-    local allMembers = self:GetSortedRoster("", "ALL")
+    self.ui.rosterLastListCount184 = table.getn(list)
+    self.runtime = self.runtime or {}
+    self.runtime.rosterMetrics180 = self.runtime.rosterMetrics180 or { fullScans = 0, targetedRefreshes = 0, reasons = {} }
+    self.runtime.rosterMetrics180.fullRefreshes183 = (tonumber(self.runtime.rosterMetrics180.fullRefreshes183) or 0) + 1
+    -- RC4-r9: summary chips need counts, not ordering.  The former code called
+    -- GetSortedRoster("", "ALL") here, causing a second O(n log n) sort on every
+    -- Roster repaint.  Count directly in one linear pass instead.
     local onlineCount, leadershipCount, levelSixtyCount = 0, 0, 0
-    local summaryIndex
-    for summaryIndex = 1, table.getn(allMembers) do
-        local summaryMember = allMembers[summaryIndex]
-        if summaryMember.online then onlineCount = onlineCount + 1 end
-        if self:IsLeadership(summaryMember) then leadershipCount = leadershipCount + 1 end
-        if tonumber(summaryMember.level) == 60 then levelSixtyCount = levelSixtyCount + 1 end
+    local summaryDb184 = self:GetGuildDB()
+    local summaryRoster184 = summaryDb184 and summaryDb184.roster or {}
+    local summaryRevision184 = table.concat({
+        tostring(summaryDb184 and summaryDb184.lastScan or 0), tostring(summaryDb184 and summaryDb184.lastTotal or 0),
+        tostring(summaryRoster184), tostring(tonumber(self.runtime.rosterTargetRevision184) or 0),
+        tostring(tonumber(self.runtime.rosterPresenceRevisionR59) or 0),
+    }, ":")
+    local summaryCache184 = self.runtime.rosterSummaryCounts184
+    if summaryCache184 and summaryCache184.revision == summaryRevision184 then
+        onlineCount = tonumber(summaryCache184.online) or 0
+        leadershipCount = tonumber(summaryCache184.leadership) or 0
+        levelSixtyCount = tonumber(summaryCache184.level60) or 0
+    else
+        local summaryName184, summaryMember
+        for summaryName184, summaryMember in pairs(summaryRoster184) do
+            if summaryMember.online then onlineCount = onlineCount + 1 end
+            if self:IsLeadership(summaryMember) then leadershipCount = leadershipCount + 1 end
+            if tonumber(summaryMember.level) == 60 then levelSixtyCount = levelSixtyCount + 1 end
+        end
+        self.runtime.rosterSummaryCounts184 = {
+            revision = summaryRevision184, online = onlineCount, leadership = leadershipCount, level60 = levelSixtyCount,
+        }
     end
-    self.ui.rosterSummary:SetText("Online  " .. tostring(onlineCount)
-        .. "     Leadership  " .. tostring(leadershipCount)
-        .. "     Level 60  " .. tostring(levelSixtyCount)
-        .. "     Results  " .. tostring(table.getn(list)))
+    self.ui.rosterSummary:SetText(self.colors.green .. tostring(onlineCount) .. " Online" .. self.colors.reset
+        .. self.colors.grey .. "  •  " .. self.colors.reset
+        .. self.colors.gold .. tostring(leadershipCount) .. " Leadership" .. self.colors.reset
+        .. self.colors.grey .. "  •  " .. self.colors.reset
+        .. self.colors.purple .. tostring(levelSixtyCount) .. " Level 60" .. self.colors.reset
+        .. self.colors.grey .. "  •  " .. tostring(table.getn(list)) .. " shown" .. self.colors.reset)
+    local summaryChips184 = self.ui.rosterSummaryChips184
+    if summaryChips184 then
+        local values184 = { online = onlineCount, leadership = leadershipCount, level60 = levelSixtyCount, shown = table.getn(list) }
+        local key184, chip184
+        for key184, chip184 in pairs(summaryChips184) do
+            if chip184 and chip184.text then chip184.text:SetText(tostring(chip184.otlLabel184 or key184) .. "  " .. tostring(values184[key184] or 0)) end
+        end
+    end
     local operation = self.GetOperationState156 and self:GetOperationState156("ROSTER") or { state = "IDLE" }
     if operation.state == "WORKING" or self.pendingScan then
         UI:SetText(self.ui.rosterUpdate, "Updating…")
@@ -1774,8 +2076,8 @@ function OTLGM:RefreshRosterPage()
         local age = lastScan and math.max(0, self:Now() - lastScan) or nil
         local label
         if (operation.state == "ERROR" or operation.state == "TIMEOUT") and (not age or age > 30) then label = "Update failed"
-        elseif age then label = "Updated LIVE — " .. tostring(age) .. " sec ago"
-        else label = "Update Roster" end
+        elseif age then label = "Updated  •  " .. tostring(age) .. " sec ago"
+        else label = "Update guild" end
         UI:SetText(self.ui.rosterUpdate, label)
         UI:SetEnabled(self.ui.rosterUpdate, true)
     end
@@ -1787,13 +2089,10 @@ function OTLGM:RefreshRosterPage()
     local capacity = math.max(MIN_ROW_COUNT, tonumber(self.ui.rosterVisibleCapacity180) or MIN_ROW_COUNT)
     EnsureRosterRowCapacity(self, capacity)
     local maximum = math.max(0, table.getn(list) - capacity)
+    local positionByName184 = list.otlPositionByName184 or {}
     local focusName = self.ui.rosterFocusMember180
     if focusName then
-        local focusIndex
-        local focusScanIndex
-        for focusScanIndex = 1, table.getn(list) do
-            if self:NormalizeName(list[focusScanIndex].name) == self:NormalizeName(focusName) then focusIndex = focusScanIndex break end
-        end
+        local focusIndex = positionByName184[self:NormalizeName(focusName)]
         if focusIndex then
             local desired = math.max(0, focusIndex - math.max(1, math.floor(capacity / 2)))
             offset = math.min(maximum, desired)
@@ -1802,13 +2101,37 @@ function OTLGM:RefreshRosterPage()
     end
     if offset > maximum then offset = maximum end
     self.ui.rosterOffset = offset
-    local selectedMember = self.ui.rosterSelectedName and self:GetMember(self.ui.rosterSelectedName) or nil
-    local selectedPresent = false
+    local previousSelection = self.ui.rosterSelectedName
+    local selectedMember = previousSelection and self:GetMember(previousSelection) or nil
+    local selectedPresent = selectedMember and positionByName184[self:NormalizeName(selectedMember.name)] ~= nil or false
     local scanIndex
-    for scanIndex = 1, table.getn(list) do
-        if selectedMember and self:NormalizeName(list[scanIndex].name) == self:NormalizeName(selectedMember.name) then selectedPresent = true break end
+    -- Roster is member-centric: on first entry choose a useful member so the
+    -- companion Guild Profile is immediately discoverable. Prefer the player's
+    -- own row, then the first visible member. This is presentation-only and does
+    -- not request a roster refresh or any network data.
+    if not selectedPresent and self.ui.rosterAutoProfilePending183
+        and OTLGM_DB.settings.showGuildProfileOnRoster183 ~= false and table.getn(list) > 0 then
+        local player = UnitName and UnitName("player") or ""
+        local preferred = nil
+        for scanIndex = 1, table.getn(list) do
+            if self:NormalizeName(list[scanIndex].name) == self:NormalizeName(player) then preferred = list[scanIndex] break end
+        end
+        selectedMember = preferred or list[1]
+        if selectedMember then
+            selectedPresent = true
+            self.ui.rosterSelectedName = selectedMember.name
+            self.ui.selectedMember = selectedMember.name
+        end
     end
-    if not selectedPresent then selectedMember = nil self.ui.rosterSelectedName = nil end
+    if not selectedPresent then
+        selectedMember = nil
+        self.ui.rosterSelectedName = nil
+        self.ui.selectedMember = nil
+        if previousSelection and self.ui.guildProfile183 and self.ui.guildProfile183:IsVisible()
+            and self.CloseGuildProfile183 then self:CloseGuildProfile183("roster-selection-missing") end
+    else
+        self.ui.selectedMember = selectedMember.name
+    end
     local index
     for index = 1, table.getn(self.ui.rosterTable.rows) do
         local row = self.ui.rosterTable.rows[index]
@@ -1827,19 +2150,18 @@ function OTLGM:RefreshRosterPage()
             row:SetAlpha(1)
             if member.online then
                 row.onlineDot:Show()
-                row.nameText:SetText(self:GetClassColor(member.class) .. Short(member.name, 20) .. self.colors.reset)
                 row.levelText:SetTextColor(C.white[1], C.white[2], C.white[3])
                 row.classText:SetTextColor(C.white[1], C.white[2], C.white[3])
                 row.zoneText:SetTextColor(C.white[1], C.white[2], C.white[3])
                 row.lastText:SetTextColor(C.green[1], C.green[2], C.green[3])
             else
                 row.onlineDot:Hide()
-                row.nameText:SetText(self.colors.grey .. Short(member.name, 20) .. self.colors.reset)
                 row.levelText:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
                 row.classText:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
                 row.zoneText:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
                 row.lastText:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
             end
+            SetRosterMemberNameR35(self, row, member)
             ApplyRosterRankTextColor180(row.rankText, member, leadership)
             row.levelText:SetText(tostring(member.level or 0))
             row.classText:SetText(Short(member.class or "", 11))
@@ -1914,6 +2236,12 @@ function OTLGM:RefreshRosterPage()
         if headers[index] then UI:SetSelected(self.ui.rosterTable.headers[index], sortKey == headers[index]) end
     end
     RefreshDetails(self, selectedMember)
+    if self.ui.rosterAutoProfilePending183 and selectedMember then
+        self.ui.rosterAutoProfilePending183 = nil
+        if OTLGM_DB.settings.showGuildProfileOnRoster183 ~= false and self.OpenGuildMemberProfile183 then
+            self:OpenGuildMemberProfile183(selectedMember.name, "roster-open", true)
+        end
+    end
     self:PersistRosterPosition180()
 end
 
@@ -1993,7 +2321,7 @@ local function LayoutRosterDetails180(details, detailsWidth, detailsHeight)
     if not details then return end
     local inner = math.max(210, detailsWidth - 28)
     local textWidth = math.max(160, inner)
-    local titleWidth = math.max(120, detailsWidth - 76)
+    local titleWidth = math.max(120, detailsWidth - 154)
     local controlHeight = 28
 
     details.classIcon:ClearAllPoints()
@@ -2004,6 +2332,12 @@ local function LayoutRosterDetails180(details, detailsWidth, detailsHeight)
     details.rankText:ClearAllPoints()
     details.rankText:SetPoint("TOPLEFT", details, "TOPLEFT", 62, -58)
     details.rankText:SetWidth(titleWidth)
+    if details.profile183 then
+        details.profile183:ClearAllPoints()
+        details.profile183:SetPoint("TOPRIGHT", details, "TOPRIGHT", -10, -7)
+        details.profile183:SetWidth(math.max(70, math.min(82, detailsWidth * 0.24)))
+        if details.profile183.text then details.profile183.text:SetWidth(math.max(48, details.profile183:GetWidth() - 8)) end
+    end
 
     details.statusLabel:ClearAllPoints()
     details.statusLabel:SetPoint("TOPLEFT", details, "TOPLEFT", 14, -82)
@@ -2200,6 +2534,21 @@ local function LayoutRoster(owner, page, width, height)
     owner.ui.rosterSummary:ClearAllPoints()
     owner.ui.rosterSummary:SetPoint("TOPLEFT", page, "TOPLEFT", 0, summaryY)
     owner.ui.rosterSummary:SetWidth(tableWidth)
+    if owner.ui.rosterSummaryChips184 then
+        local summaryOrder184 = { "online", "leadership", "level60", "shown" }
+        local chipGap184 = 6
+        local chipWidth184 = math.floor((tableWidth - (chipGap184 * 3)) / 4)
+        for index = 1, table.getn(summaryOrder184) do
+            local chip184 = owner.ui.rosterSummaryChips184[summaryOrder184[index]]
+            if chip184 then
+                chip184:ClearAllPoints()
+                chip184:SetPoint("TOPLEFT", page, "TOPLEFT", (index - 1) * (chipWidth184 + chipGap184), summaryY + 2)
+                chip184:SetWidth(chipWidth184)
+                if chip184.text then chip184.text:SetWidth(math.max(36, chipWidth184 - 6)) end
+                chip184:Show()
+            end
+        end
+    end
     owner.ui.rosterTable:ClearAllPoints()
     owner.ui.rosterTable:SetPoint("TOPLEFT", page, "TOPLEFT", 0, tableY)
     owner.ui.rosterTable:SetWidth(tableWidth)
@@ -2221,6 +2570,9 @@ local function LayoutRoster(owner, page, width, height)
         if index > capacity then row:Hide() end
     end
     LayoutRosterDetails180(owner.ui.rosterDetails, detailsWidth, math.max(500, height - 8))
+    if owner.ui.guildProfile183 and owner.ui.guildProfile183:IsVisible() and owner.PositionGuildProfile183 then
+        owner:PositionGuildProfile183("roster-layout")
+    end
 
     owner.ui.rosterTable.empty:SetWidth(math.max(260, tableWidth - 70))
     owner.ui.rosterTable.previous:Hide()
@@ -2241,17 +2593,34 @@ local function LayoutRoster(owner, page, width, height)
     end
 end
 
-OTLGM:CreateShellPageModule180("roster", BuildRoster,
+local rosterModule183 = OTLGM:CreateShellPageModule180("roster", BuildRoster,
     function(owner) owner:RefreshRosterPage() end,
     LayoutRoster, { "search", "filters", "saved-views" }, { width = 760, height = 520 })
 
+if rosterModule183 then
+    local BaseRosterShow183 = rosterModule183.OnShow
+    function rosterModule183:OnShow(context)
+        if BaseRosterShow183 then BaseRosterShow183(self, context) end
+        if self.owner and self.owner.ui then
+            self.owner.ui.rosterAutoProfilePending183 = OTLGM_DB.settings.showGuildProfileOnRoster183 ~= false and true or nil
+        end
+    end
+    local BaseRosterHide183 = rosterModule183.OnHide
+    function rosterModule183:OnHide()
+        if BaseRosterHide183 then BaseRosterHide183(self) end
+        if self.owner and self.owner.ui then self.owner.ui.rosterAutoProfilePending183 = nil end
+        if self.owner and self.owner.CloseGuildProfile183 then self.owner:CloseGuildProfile183("roster-hidden") end
+    end
+end
+
 OTLGM:RegisterModule("RosterPage180", {
     stage = "B",
-    revision = 10,
+    revision = 12,
     lazy = true,
     migrated = true,
     nativeContentHost = true,
     pageContract = true,
     savedViews = true,
+    selectionOnlyRefresh183 = true,
     noOnUpdate = true,
 })

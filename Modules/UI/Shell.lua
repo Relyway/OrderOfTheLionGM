@@ -1,13 +1,14 @@
--- Order of the Lion Guild Manager 1.8.0 native shell.
+-- Order of the Lion Guild Manager 1.8.3 native shell.
 -- The final shell deliberately never calls the legacy full BuildUI.
 -- Vanilla / OctoWoW / Lua 5.0 compatible. This module adds no permanent OnUpdate;
 -- drag and resize own a temporary script only while the mouse is held.
 
 if not OTLGM or not OTLGM.UI then return end
 
-OTLGM.version = "1.8.0"
-OTLGM.build = "final-public-20260808"
-OTLGM.shellVersion = 9
+-- Runtime version/build are owned exclusively by Core/Bootstrap.lua.
+-- Keeping shell presentation code from rewriting release identity prevents
+-- load-order drift between TOC metadata, support reports and network presence.
+OTLGM.shellVersion = 10
 OTLGM.shellPageBuilders = OTLGM.shellPageBuilders or {}
 OTLGM.shellPageRefreshers = OTLGM.shellPageRefreshers or {}
 OTLGM.shellPageModules = OTLGM.shellPageModules or {}
@@ -55,6 +56,8 @@ local PAGE_DEFS = {
     { key = "treasury", label = "Treasury", icon = "Interface\\Icons\\INV_Misc_Coin_01", group = "guild" },
     { key = "activity", label = "Activity", icon = "Interface\\Icons\\INV_Misc_PocketWatch_01", group = "guild" },
     { key = "overview", label = "Overview", icon = "Interface\\Icons\\INV_Misc_Map_01", group = "officer", officer = true },
+    { key = "guildadmin", label = "Guild Admin", icon = "Interface\\Icons\\INV_Misc_Key_14", group = "officer", officer = true },
+    { key = "cases", label = "Officer Cases", icon = "Interface\\Icons\\INV_Misc_Note_05", group = "officer", officer = true },
     { key = "recruitment", label = "Recruitment", icon = "Interface\\Icons\\INV_Misc_Horn_02", group = "officer", officer = true },
     { key = "history", label = "History", icon = "Interface\\Icons\\INV_Misc_Book_11", group = "officer", officer = true },
     { key = "inactive", label = "Inactive", icon = "Interface\\Icons\\Spell_Shadow_Cripple", group = "officer", officer = true },
@@ -73,6 +76,8 @@ local PAGE_TITLES = {
     treasury = { "Treasury", "Guild goals and contribution history" },
     activity = { "Activity", "Useful recent guild activity" },
     overview = { "Officer Overview", "Management summary for guild leadership" },
+    guildadmin = { "Guild Administration", "Message, ranks, permissions and member controls" },
+    cases = { "Officer Cases", "Private report queue, decisions and troubleshooting" },
     recruitment = { "Recruitment", "Approved recruitment messages and timing" },
     history = { "History", "Roster and officer audit history" },
     inactive = { "Inactive Members", "Review and manage inactive members" },
@@ -243,13 +248,13 @@ function OTLGM:OpenGuildObject180(objectType, objectId, options)
 
     if objectType == "CHAT_MESSAGE" then
         if self.OpenGuildChatMention174 then
-            self:OpenGuildChatMention174({
+            local opened = self:OpenGuildChatMention174({
                 mentionChannel = options.messageChannel or options.section,
                 mentionTs = options.messageTs,
                 mentionSender = options.messageSender,
                 mentionText = options.messageText,
             })
-            return true
+            return opened ~= false
         end
         self:ShowPage("guildchat")
         return true
@@ -397,6 +402,13 @@ function OTLGM:CloseShellContextMenus()
     if self.ui.playerMenu then self.ui.playerMenu:Hide() end
     if self.ui.playerOfficerMenu then self.ui.playerOfficerMenu:Hide() end
     if self.ui.contextMenuCatcher then self.ui.contextMenuCatcher:Hide() end
+    -- 1.7 compatibility menus own full-page mouse shields. They are outside the
+    -- shell context-menu catcher, so close them as part of every shell transient
+    -- reset or an old shield can survive a programmatic page/deep-link route.
+    if self.CloseChatNameMenu157 then self:CloseChatNameMenu157()
+    elseif self.ui.chatMenuShield157 then self.ui.chatMenuShield157:Hide() end
+    if self.CloseCrafterMenu157 then self:CloseCrafterMenu157()
+    elseif self.ui.crafterShield157 then self.ui.crafterShield157:Hide() end
 end
 
 function OTLGM:CloseShellDrawer()
@@ -488,8 +500,50 @@ function OTLGM:CloseShellModal()
     return self:CloseModal180(nil, "shell-close")
 end
 
+function OTLGM:CloseAllShellModals180(reason, force)
+    if not self.ui or not self.ui.modalHost then return true end
+    local guard = 0
+    while guard < 32 do
+        local stack = self.ui.modalStack180 or {}
+        local target = self.ui.activeModal or stack[table.getn(stack)]
+        if not target then break end
+        guard = guard + 1
+        if force then target.otlForceClose180 = true end
+        if not self:CloseModal180(target, reason or "shell-transient") then
+            self:RefreshShellModalState180()
+            return false
+        end
+    end
+    -- A hidden parent can make IsVisible() false before an OnHide callback runs,
+    -- and older/legacy code can occasionally leave a shown direct child outside
+    -- modalStack180. Once the tracked stack has closed successfully there is no
+    -- valid reason for any child of the dedicated modal host to stay shown. Hide
+    -- all direct children even on an ordinary page transition so an orphan cannot
+    -- reappear and become an invisible input shield the next time the host opens.
+    if self.ui.modalHost.GetChildren then
+        local children = { self.ui.modalHost:GetChildren() }
+        local index, child
+        for index = 1, table.getn(children) do
+            child = children[index]
+            if child and child.Hide then
+                child.otlClosing180 = true
+                child:Hide()
+                child.otlClosing180 = nil
+            end
+        end
+        self.ui.modalStack180 = {}
+        self.ui.activeModal = nil
+    end
+    self:RefreshShellModalState180()
+    return not self.ui.activeModal
+end
+
 function OTLGM:CloseTopShellTransient180()
     if not self.ui then return false end
+    if self.ui.quickDockPopover182 and self.CloseQuickDockPopover182 then
+        self:CloseQuickDockPopover182()
+        return true
+    end
     if self.ui.activeModal then self:CloseShellModal() return true end
     if self.ui.activeDrawer then self:CloseShellDrawer() return true end
     if self.ui.contextMenuCatcher and self.ui.contextMenuCatcher.IsVisible and self.ui.contextMenuCatcher:IsVisible() then
@@ -499,23 +553,43 @@ function OTLGM:CloseTopShellTransient180()
     return false
 end
 
-function OTLGM:CloseShellTransient(includeToast)
+function OTLGM:CloseShellTransient(includeToast, reason, force)
     self:CloseShellContextMenus()
     self:CloseShellDrawer()
-    self:CloseShellModal()
+    local closed = self:CloseAllShellModals180(reason or "shell-transient", force and true or false)
+    if not closed and not force then return false end
     if self.ui and self.ui.modalStack154 then
         local index
         for index = 1, table.getn(self.ui.modalStack154) do
             local frame = self.ui.modalStack154[index]
             if frame and frame.Hide then frame:Hide() end
         end
+        self.ui.modalStack154 = {}
     end
+    if self.ui and self.ui.modalOverlay152 then self.ui.modalOverlay152:Hide() end
+
+    -- Older Action Inbox/Highlights/exclusive-modal surfaces predate modalHost
+    -- and own independent mouse-catching overlays. Deep links can call ShowPage
+    -- without clicking those overlays first, so a page transition must retire
+    -- them explicitly as part of the same atomic transient reset.
+    if self.CloseInbox170 then self:CloseInbox170()
+    elseif self.ui and self.ui.inboxOverlay170 then self.ui.inboxOverlay170:Hide() end
+    if self.ui and self.ui.chatHighlights170 then self.ui.chatHighlights170:Hide() end
+    if self.CloseGroupFinderComposer170 then self:CloseGroupFinderComposer170(false)
+    elseif self.ui and self.ui.pveGroupFormShield170 then self.ui.pveGroupFormShield170:Hide() end
+    if self.ui and self.ui.exclusiveModalR5 then
+        if self.ui.exclusiveModalR5.Hide then self.ui.exclusiveModalR5:Hide() end
+        self.ui.exclusiveModalR5 = nil
+    end
+    if self.ui and self.ui.exclusiveModalOverlayR5 then self.ui.exclusiveModalOverlayR5:Hide() end
+
     if includeToast and self.ui and self.ui.shellToast then self.ui.shellToast:Hide() end
+    return true
 end
 
 function OTLGM:ShowShellDrawer(drawer)
     if not drawer or not self.ui or not self.ui.drawerHost then return false end
-    self:CloseShellModal()
+    if self.ui.activeModal and not self:CloseAllShellModals180("drawer-open", false) then return false end
     self:CloseShellContextMenus()
     if self.ui.activeDrawer and self.ui.activeDrawer ~= drawer then self.ui.activeDrawer:Hide() end
     self.ui.activeDrawer = drawer
@@ -718,6 +792,19 @@ function OTLGM:SetStatus(text, duration, context)
         if context.source == "crafting" and not (context.manual and self.ui and self.ui.main and self.ui.main:IsVisible() and self.ui.currentPage == "professions") then
             self.runtime.lastBackgroundStatus180 = Short(text, 130)
             self.runtime.lastBackgroundStatusSource180 = "crafting"
+            return false
+        end
+        if context.source == "pve" and not (context.manual and self.ui and self.ui.main and self.ui.main:IsVisible() and (self.ui.currentPage == "pve" or self.ui.currentPage == "settings")) then
+            -- A manual request can finish many seconds after the player has left
+            -- PvE Hub; an automatic request can originate from login/guild state.
+            -- Keep either result local unless the user is actually viewing PvE.
+            self.runtime.lastBackgroundStatus180 = Short(text, 130)
+            self.runtime.lastBackgroundStatusSource180 = "pve"
+            return false
+        end
+        if context.source == "roster" and not (context.manual and self.ui and self.ui.main and self.ui.main:IsVisible() and (self.ui.currentPage == "roster" or self.ui.currentPage == "settings")) then
+            self.runtime.lastBackgroundStatus180 = Short(text, 130)
+            self.runtime.lastBackgroundStatusSource180 = "roster"
             return false
         end
     end
@@ -951,6 +1038,8 @@ function OTLGM:GetActionCenterEntries180(mode)
             end
         end
     end
+    local supportEntryR59 = self.GetSupportIncidentActionEntryR59 and self:GetSupportIncidentActionEntryR59() or nil
+    if supportEntryR59 then table.insert(grouped, 1, supportEntryR59) end
     for index = 1, table.getn(grouped) do
         local group = grouped[index]
         if group.targetType then
@@ -966,6 +1055,7 @@ function OTLGM:GetActionCenterEntries180(mode)
     for index = 1, table.getn(grouped) do
         entry = grouped[index]
         if mode == "ALL" or (mode == "UNREAD" and not entry.read)
+            or (mode == "ACTION" and entry.supportIncidentR59)
             or (mode == "ACTION" and self.IsInboxEntryActionable180 and self:IsInboxEntryActionable180(entry)) then
             table.insert(result, entry)
         end
@@ -990,6 +1080,14 @@ end
 
 function OTLGM:OpenActionCenterEntry180(entry)
     if not entry then return false end
+    if entry.supportIncidentR59 then
+        if self.AcknowledgeSupportIncidentR59 then self:AcknowledgeSupportIncidentR59() end
+        self:CloseShellDrawer()
+        if self.OpenSupportCenterR59 then return self:OpenSupportCenterR59(true) end
+        self:ShowPage("settings")
+        if self.SetSettingsShellTab then self:SetSettingsShellTab("SUPPORT") end
+        return true
+    end
     local idIndex
     for idIndex = 1, table.getn(entry.ids or {}) do
         if self.MarkInboxRead170 then self:MarkInboxRead170(entry.ids[idIndex]) end
@@ -1040,7 +1138,7 @@ function OTLGM:BuildActionCenterDrawer()
         drawer.modeButtons[captured] = button
     end
     drawer.rows = {}
-    drawer.visibleRowCount = 8
+    drawer.visibleRowCount = 7
     drawer.rowPoolCount180 = 12
     for index = 1, drawer.rowPoolCount180 do
         local captured = index
@@ -1078,6 +1176,14 @@ function OTLGM:BuildActionCenterDrawer()
     drawer.empty = UI:EmptyState(drawer, 350, 112, "All caught up", "Important guild actions will appear here.")
     drawer.empty:SetPoint("TOPLEFT", drawer, "TOPLEFT", 34, -116)
     drawer.empty:Hide()
+    drawer.supportR59 = UI:Button(drawer, "Report Issue", 132, 28, function()
+        OTLGM:CloseShellDrawer()
+        if OTLGM.OpenSupportCenterR59 then OTLGM:OpenSupportCenterR59(false)
+        else OTLGM:ShowPage("settings") if OTLGM.SetSettingsShellTab then OTLGM:SetSettingsShellTab("SUPPORT") end end
+    end, "utility")
+    drawer.supportR59:SetPoint("BOTTOMLEFT", drawer, "BOTTOMLEFT", 18, 14)
+    drawer.supportHintR59 = MakeLabel(drawer, "Problem with the addon? Prepare one diagnostic report.", "GameFontNormalSmall", 160, -541, 236, "LEFT")
+    drawer.supportHintR59:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
     self.ui.actionCenterMode = "ALL"
     self.ui.actionCenterOffset = 0
     self.ui.actionCenterDrawer = drawer
@@ -1110,6 +1216,9 @@ function OTLGM:RefreshActionCenter()
         local entry = index <= drawer.visibleRowCount and entries[offset + index] or nil
         if entry then
             row.otlEntry = entry
+            if entry.supportSeverityR59 == "ERROR" then row.marker:SetTexture(C.red[1], C.red[2], C.red[3], 1)
+            elseif entry.supportSeverityR59 == "ATTENTION" then row.marker:SetTexture(C.orange[1], C.orange[2], C.orange[3], 1)
+            else row.marker:SetTexture(C.gold[1], C.gold[2], C.gold[3], 1) end
             row.titleText:SetText(Short(entry.title or "Guild activity", 54))
             row.bodyText:SetText(Short(entry.body or "", 64))
             if entry.read then
@@ -1137,6 +1246,16 @@ function OTLGM:RefreshActionCenter()
     if self.ui.actionCenterBadge then
         if unread > 0 then self.ui.actionCenterBadge.text:SetText(tostring(unread)) self.ui.actionCenterBadge:Show()
         else self.ui.actionCenterBadge:Hide() end
+    end
+    local incidentR59 = self.runtime and self.runtime.supportIncidentR59 or nil
+    if self.ui.actionCenterButton and self.ui.actionCenterButton.SetBackdropBorderColor then
+        if incidentR59 and not incidentR59.acknowledged and incidentR59.severity == "ERROR" then
+            self.ui.actionCenterButton:SetBackdropBorderColor(C.red[1], C.red[2], C.red[3], 1)
+        elseif incidentR59 and not incidentR59.acknowledged then
+            self.ui.actionCenterButton:SetBackdropBorderColor(C.orange[1], C.orange[2], C.orange[3], 1)
+        else
+            self.ui.actionCenterButton:SetBackdropBorderColor(C.goldDark[1], C.goldDark[2], C.goldDark[3], 1)
+        end
     end
 end
 
@@ -1176,13 +1295,13 @@ function OTLGM:BuildAddonUsersDrawer()
     drawer:SetPoint("TOPRIGHT", self.ui.drawerHost, "TOPRIGHT", -10, -10)
     drawer.otlUsesSharedDrawerHost = true
     drawer.otlScrollable = true
-    drawer.title = MakeLabel(drawer, "Addon Users", "GameFontNormalLarge", 18, -18, 320, "LEFT")
+    drawer.title = MakeLabel(drawer, "Sharing Status", "GameFontNormalLarge", 18, -18, 320, "LEFT")
     drawer.title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
     drawer.close = UI:IconButton(drawer, "Interface\\Buttons\\UI-Panel-MinimizeButton-Up", 28, 28, function()
         OTLGM:CloseShellDrawer()
     end, "Close", "utility")
     drawer.close:SetPoint("TOPRIGHT", drawer, "TOPRIGHT", -12, -12)
-    drawer.subtitle = MakeLabel(drawer, "Online and recent presence from addon handshakes.", "GameFontNormalSmall", 18, -48, 286, "LEFT")
+    drawer.subtitle = MakeLabel(drawer, "Guild members using the addon now or recently.", "GameFontNormalSmall", 18, -48, 286, "LEFT")
     drawer.subtitle:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
     drawer.refresh = UI:Button(drawer, "Check now", 104, 26, function() OTLGM:StartAddonUsersCheck180() end, "inline")
     drawer.refresh:SetPoint("TOPRIGHT", drawer, "TOPRIGHT", -18, -44)
@@ -1254,7 +1373,7 @@ function OTLGM:BuildAddonUsersDrawer()
         OTLGM:RefreshAddonUsersDrawer()
     end)
     drawer.scroll:SetPoint("TOPRIGHT", drawer, "TOPRIGHT", -14, -166)
-    drawer.copy = UI:Button(drawer, "Copy Update List", 160, 26, function()
+    drawer.copy = UI:Button(drawer, "Copy Outdated List", 160, 26, function()
         local records = OTLGM:GetAddonUsersCategorized180()
         local lines = {}
         local itemIndex
@@ -1262,10 +1381,10 @@ function OTLGM:BuildAddonUsersDrawer()
             local info = records.outdated[itemIndex]
             table.insert(lines, tostring(info.name or "Unknown") .. "  " .. AddonVersionLabel(info))
         end
-        OTLGM:ShowCopyDialog("Outdated Addon Users",
+        OTLGM:ShowCopyDialog("Players Using Older Versions",
             table.getn(lines) > 0 and table.concat(lines, "\n") or "No outdated addon users detected.")
     end, "utility")
-    drawer.copy.otlTooltipTitle = "Copy Update List"
+    drawer.copy.otlTooltipTitle = "Copy Outdated List"
     drawer.copy.otlTooltip = "Copies the players detected with an outdated addon version so leadership can remind them to update."
     drawer.copy:SetPoint("BOTTOMLEFT", drawer, "BOTTOMLEFT", 18, 14)
     drawer:EnableMouseWheel(true)
@@ -1431,7 +1550,7 @@ function OTLGM:RefreshAddonUsersDrawer()
         and self:Now() < self.runtime.shellAddonCheckingUntil
     local hiddenLow = tonumber(data.hiddenLowLevelOffline) or 0
     local hiddenSuffix = hiddenLow > 0 and ("  •  " .. tostring(hiddenLow) .. " low-level older offline hidden") or ""
-    drawer.subtitle:SetText((checking and "Checking addon presence…" or "Online and recent presence from addon handshakes.") .. hiddenSuffix)
+    drawer.subtitle:SetText((checking and "Checking addon presence…" or "Guild members using the addon now or recently.") .. hiddenSuffix)
     UI:SetText(drawer.refresh, "Check now")
     UI:SetEnabled(drawer.refresh, not checking, "A presence check is already in progress.")
 
@@ -1497,14 +1616,14 @@ function OTLGM:BuildPlayerMenus()
     catcher:SetFrameStrata("TOOLTIP")
     catcher:SetFrameLevel(180)
     catcher:EnableMouse(true)
-    catcher:EnableKeyboard(true)
+    -- Mouse catchers must never own the keyboard. In Vanilla clients a visible
+    -- keyboard-enabled full-screen Button can swallow movement keys (WASD,
+    -- jump) even though the addon is only being viewed while travelling.
+    catcher:EnableKeyboard(false)
     catcher:SetScript("OnClick", function() OTLGM:CloseShellContextMenus() end)
-    catcher:SetScript("OnKeyDown", function()
-        if arg1 == "ESCAPE" then OTLGM:CloseShellContextMenus() end
-    end)
     catcher:Hide()
     self.ui.contextMenuCatcher = catcher
-    local menu = UI:ContextMenu(UIParent, 190, 198)
+    local menu = UI:ContextMenu(UIParent, 190, 234)
     menu:SetFrameLevel(catcher:GetFrameLevel() + 2)
     local entries = {
         { label = "Whisper", icon = "Interface\\Icons\\INV_Letter_15", action = function(name) OTLGM:WhisperMember(name) end },
@@ -1513,9 +1632,17 @@ function OTLGM:BuildPlayerMenus()
             OTLGM:ShowPage("guildchat")
             if OTLGM.InsertGuildChatName then OTLGM:InsertGuildChatName(name) end
         end },
-        { label = "Open Roster Card", icon = "Interface\\Icons\\INV_Misc_Book_09", action = function(name)
+        { label = "Open Guild Profile", icon = "Interface\\Icons\\INV_Misc_Book_09", action = function(name)
             OTLGM:ShowPage("roster")
             OTLGM:SelectRosterMember(name)
+            local profile184 = OTLGM.ui and OTLGM.ui.guildProfile183 or nil
+            local same184 = profile184 and profile184.IsVisible and profile184:IsVisible() and OTLGM.NormalizeName
+                and OTLGM:NormalizeName(profile184.otlMemberName183) == OTLGM:NormalizeName(name)
+            if not same184 and OTLGM.OpenGuildMemberProfile183 then OTLGM:OpenGuildMemberProfile183(name, "player-menu", false) end
+        end },
+        { label = "Main / Alt", icon = "Interface\\Icons\\INV_Misc_GroupLooking", action = function(name)
+            if OTLGM.OpenCharacterIdentityForMember184 then OTLGM:OpenCharacterIdentityForMember184(name)
+            elseif OTLGM.OpenGuildMemberProfile183 then OTLGM:OpenGuildMemberProfile183(name, "player-menu-characters", false) end
         end },
         { label = "More", icon = "Interface\\Icons\\INV_Misc_EngGizmos_17", more = true },
     }
@@ -1656,11 +1783,23 @@ end
 function OTLGM:LayoutShellPage180(pageKey, reason)
     local module = self.shellPageModules and self.shellPageModules[pageKey]
     if not module or not module.root or not self.ui or not self.ui.contentHost then return false end
+    local width = tonumber(self.ui.contentHost:GetWidth()) or 0
+    local height = tonumber(self.ui.contentHost:GetHeight()) or 0
+    local revision = self.runtime and self.runtime.layoutRevision180 or 0
+    local signatureR26 = tostring(math.floor((width * 10) + 0.5)) .. ":" .. tostring(math.floor((height * 10) + 0.5)) .. ":" .. tostring(revision)
+    local repeatSafeR26 = reason == "show" or reason == "chrome"
+    if repeatSafeR26 and module.layoutSignatureR26 == signatureR26 then
+        self.runtime = self.runtime or {}
+        self.runtime.layoutSkipsR26 = (tonumber(self.runtime.layoutSkipsR26) or 0) + 1
+        module.lastLayoutReason = tostring(reason or "layout") .. ":cached"
+        return true
+    end
     local started = BeginShellPerformance180(self)
     module.lastLayoutReason = reason
-    local ok, problem = pcall(module.Layout, module, self.ui.contentHost:GetWidth(), self.ui.contentHost:GetHeight())
+    local ok, problem = pcall(module.Layout, module, width, height)
     EndShellPerformance180(self, "layout passes", started)
     if not ok then error(problem) end
+    module.layoutSignatureR26 = signatureR26
     return true
 end
 
@@ -1680,6 +1819,15 @@ function OTLGM:LayoutAllShellPages180(reason)
     end
 end
 
+function OTLGM:MarkPageDirty180(pageKey)
+    pageKey = tostring(pageKey or "")
+    if pageKey == "" then return false end
+    self.runtime = self.runtime or {}
+    self.runtime.pageDirtyR5 = self.runtime.pageDirtyR5 or {}
+    self.runtime.pageDirtyR5[pageKey] = true
+    return true
+end
+
 function OTLGM:CanRefreshShellPage180(pageKey)
     if not self.ui or not self.ui.main then return true end
     if self.ui.main:IsVisible() and self.ui.currentPage == pageKey then
@@ -1693,6 +1841,46 @@ function OTLGM:CanRefreshShellPage180(pageKey)
         self.release176r5.hiddenRefreshesSkipped = (tonumber(self.release176r5.hiddenRefreshesSkipped) or 0) + 1
     end
     return false
+end
+
+function OTLGM:RefreshHeaderOnlineIndicator183()
+    local indicator = self.ui and self.ui.headerOnline183
+    if not indicator or not indicator.text then return false end
+    local db = self.GetGuildDB and self:GetGuildDB() or nil
+    local scanned = tonumber(db and db.lastScan) or 0
+    if scanned <= 0 then
+        indicator.text:SetText("— Online")
+        if indicator.dot then indicator.dot:SetTexture(0.42, 0.42, 0.42, 1) end
+        indicator.otlCached183 = true
+        indicator.otlSnapshotAge183 = nil
+        return true
+    end
+    local online = math.max(0, tonumber(db and db.lastOnline) or 0)
+    local presenceAtR59 = tonumber(self.runtime and self.runtime.rosterPresenceLastAtR59) or 0
+    local onlineFreshAtR59 = math.max(scanned, presenceAtR59)
+    local age = math.max(0, self:Now() - onlineFreshAtR59)
+    local interval = math.max(600, tonumber(OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.scanInterval) or 1200)
+    local stale = age > math.max(3600, interval * 3)
+    indicator.text:SetText(tostring(online) .. " Online")
+    if indicator.dot then
+        if stale then indicator.dot:SetTexture(0.56, 0.56, 0.56, 1)
+        else indicator.dot:SetTexture(0.34, 0.86, 0.42, 1) end
+    end
+    indicator.otlCached183 = stale and true or nil
+    indicator.otlSnapshotAge183 = age
+    return true
+end
+
+function OTLGM:GetHeaderOnlineSupportSummary183()
+    local db = self.GetGuildDB and self:GetGuildDB() or nil
+    local scanned = tonumber(db and db.lastScan) or 0
+    if scanned <= 0 then return "Header online: unknown / no successful saved roster update" end
+    local presenceAtR59 = tonumber(self.runtime and self.runtime.rosterPresenceLastAtR59) or 0
+    local age = math.max(0, self:Now() - math.max(scanned, presenceAtR59))
+    local sourceR59 = presenceAtR59 > scanned and "presence" or "full-scan"
+    return "Header online: " .. tostring(tonumber(db and db.lastOnline) or 0)
+        .. "/" .. tostring(tonumber(db and db.lastTotal) or 0)
+        .. " / online age " .. tostring(math.floor(age)) .. "s / " .. sourceR59
 end
 
 function OTLGM:RefreshShellPage(pageKey, reason)
@@ -1714,7 +1902,15 @@ function OTLGM:RefreshShellPage(pageKey, reason)
         metrics.lastAt = self:Now()
         local started = BeginShellPerformance180(self)
         local refreshOk, refreshProblem = pcall(module.Refresh, module, reason or "refresh")
-        EndShellPerformance180(self, pageKey == "activity" and "Activity processing" or "visible-page refresh", started)
+        local perfLabelR26
+        if pageKey == "activity" then
+            perfLabelR26 = "Activity processing"
+        elseif pageKey == "settings" then
+            perfLabelR26 = "visible-page refresh:settings-" .. string.lower(tostring(self.ui and self.ui.settingsShellTab or "interface"))
+        else
+            perfLabelR26 = "visible-page refresh:" .. tostring(pageKey)
+        end
+        EndShellPerformance180(self, perfLabelR26, started)
         if not refreshOk then error(refreshProblem) end
         return true
     end
@@ -1727,6 +1923,7 @@ function OTLGM:RefreshNavigation()
     local officerAllowed = self.IsOfficerMode and self:IsOfficerMode() or false
     local currentDefinition = self:GetShellPageDefinition(self.ui.currentPage)
     if currentDefinition and currentDefinition.officer and not officerAllowed then
+        if self.RefreshQuickDockPermissions182 then self:RefreshQuickDockPermissions182(officerAllowed) end
         self:ShowPage("home")
         return
     end
@@ -1743,6 +1940,23 @@ function OTLGM:RefreshNavigation()
     end
     UI:SetSelected(self.ui.navGuildButton, navMode == "GUILD")
     UI:SetSelected(self.ui.navOfficerButton, navMode == "OFFICER")
+
+    -- r42: Build the unread snapshot once per navigation refresh.
+    -- GetShellUnreadCount180 historically rebuilt Action Center entries for
+    -- every navigation button, which made roster-post-commit-small scale with
+    -- the number of pages instead of with one inbox pass.
+    local unreadEntriesR42 = self:GetActionCenterEntries180("UNREAD")
+    local unreadByPageR42 = {}
+    local unreadTotalR42 = 0
+    local unreadIndexR42
+    for unreadIndexR42 = 1, table.getn(unreadEntriesR42 or {}) do
+        local unreadEntryR42 = unreadEntriesR42[unreadIndexR42]
+        local unreadPageR42 = unreadEntryR42 and unreadEntryR42.targetPage or nil
+        unreadTotalR42 = unreadTotalR42 + 1
+        if unreadPageR42 then
+            unreadByPageR42[unreadPageR42] = (tonumber(unreadByPageR42[unreadPageR42]) or 0) + 1
+        end
+    end
 
     local y = -76
     local index
@@ -1763,7 +1977,7 @@ function OTLGM:RefreshNavigation()
                 button:Hide()
             end
             UI:SetSelected(button, self.ui.currentPage == definition.key)
-            local pageUnread = self:GetShellUnreadCount180(definition.key)
+            local pageUnread = tonumber(unreadByPageR42[definition.key]) or 0
             if button.unreadBadge then
                 if pageUnread > 0 then button.unreadBadge.text:SetText(tostring(pageUnread)) button.unreadBadge:Show()
                 else button.unreadBadge:Hide() end
@@ -1771,13 +1985,15 @@ function OTLGM:RefreshNavigation()
         end
     end
     UI:SetSelected(self.ui.settingsButton, self.ui.currentPage == "settings")
-    local unread = self:GetShellUnreadCount180()
+    local unread = unreadTotalR42
     if self.ui.actionCenterBadge then
         if unread > 0 then self.ui.actionCenterBadge.text:SetText(tostring(unread)) self.ui.actionCenterBadge:Show()
         else self.ui.actionCenterBadge:Hide() end
     end
-    if self.ui.headerDate then self.ui.headerDate:SetText("ST " .. (self.FormatServerClock180 and self:FormatServerClock180(self:Now(), true) or date("%H:%M  %d %b"))) end
+    if self.ui.headerDate then self.ui.headerDate:SetText("Server Time (ST) " .. (self.FormatServerClock180 and self:FormatServerClock180(self:Now(), true) or date("%H:%M  %d %b"))) end
+    if self.RefreshHeaderOnlineIndicator183 then self:RefreshHeaderOnlineIndicator183() end
     self:RefreshAddonUsersIndicator()
+    if self.RefreshQuickDockPermissions182 then self:RefreshQuickDockPermissions182(officerAllowed) end
 end
 
 function OTLGM:SetShellNavMode180(nextMode)
@@ -1818,11 +2034,142 @@ function OTLGM:RequestStaleRosterOnOpen180(pageKey)
     local eventDirty = self.runtime.rosterDataDirty180 and true or false
     if (tonumber(self.runtime.rosterAutoRetryAfterRC3) or 0) > now then return false end
     if (not eventDirty and age < interval) or self.pendingScan or self.runtime.rosterRead180 then return false end
+    local pressureState = self.GetClientPressure181 and self:GetClientPressure181() or nil
+    if (pressureState and tonumber(pressureState.level) >= 2) or self.runtime.transitionActive176 or (self.IsPerformanceGuardActive181 and self:IsPerformanceGuardActive181()) then
+        self.runtime.rosterOpenPressureDeferrals181 = (tonumber(self.runtime.rosterOpenPressureDeferrals181) or 0) + 1
+        self.runtime.rosterOpenPressureStarted181 = tonumber(self.runtime.rosterOpenPressureStarted181) or now
+        if self.ScheduleAfter180 and now - self.runtime.rosterOpenPressureStarted181 < 30 then
+            local capturedPage = pageKey
+            self:ScheduleAfter180("roster-open-deferred-scan", 3, function(owner)
+                if owner and owner.RequestStaleRosterOnOpen180 then owner:RequestStaleRosterOnOpen180(capturedPage) end
+            end, 25)
+        else
+            -- Allow a later explicit page open to start one new bounded retry
+            -- window without keeping this one alive permanently.
+            self.runtime.rosterOpenPressureStarted181 = nil
+        end
+        return false
+    end
+    self.runtime.rosterOpenPressureStarted181 = nil
     if self.runtime.lastStaleRosterOpen180 and now - self.runtime.lastStaleRosterOpen180 < 15 then return false end
     self.runtime.lastStaleRosterOpen180 = now
     self.runtime.rosterOpenScanRequests180 = (tonumber(self.runtime.rosterOpenScanRequests180) or 0) + 1
     self:RequestScan(eventDirty and "GUILD_EVENT_OPEN" or "STALE_OPEN")
     return self.pendingScan and true or false
+end
+
+local function SupportIssueFingerprintR59(source, message)
+    local cleanSource = tostring(source or "Addon")
+    local cleanMessage = tostring(message or "Unknown error")
+    cleanMessage = string.gsub(cleanMessage, "[%c]+", " ")
+    cleanMessage = string.sub(cleanMessage, 1, 180)
+    return cleanSource .. "|" .. cleanMessage
+end
+
+function OTLGM:CaptureSupportIncidentSnapshotR59(source, message)
+    self.runtime = self.runtime or {}
+    local fps = nil
+    if GetFramerate then local ok, value = pcall(GetFramerate) if ok then fps = tonumber(value) end end
+    local queue = 0
+    if self.GetNetworkQueueDepth then local ok, value = pcall(self.GetNetworkQueueDepth, self) if ok then queue = tonumber(value) or 0 end end
+    local zone = GetRealZoneText and GetRealZoneText() or (GetZoneText and GetZoneText() or "unknown")
+    local subzone = GetSubZoneText and GetSubZoneText() or ""
+    return {
+        ts = self:Now(), source = tostring(source or "Addon"), message = tostring(message or "Unknown error"),
+        page = tostring(self.ui and self.ui.currentPage or "closed"), zone = tostring(zone or "unknown"), subzone = tostring(subzone or ""),
+        combat = self.InCombat and self:InCombat() and true or false, fps = fps, queue = queue,
+    }
+end
+
+function OTLGM:RaiseSupportIncidentR59(severity, source, message)
+    self.runtime = self.runtime or {}
+    severity = severity == "ERROR" and "ERROR" or "ATTENTION"
+    local now = self:Now()
+    local signature = SupportIssueFingerprintR59(source, message)
+    self.runtime.supportIssueTrackerR59 = self.runtime.supportIssueTrackerR59 or {}
+    self.runtime.supportAcknowledgedR59 = self.runtime.supportAcknowledgedR59 or {}
+
+    -- Keep this diagnostic-only tracker bounded for pathological error strings.
+    -- It is runtime-only, but a broken third-party interaction should still not
+    -- be able to grow a table for the whole play session.
+    local trackerCountR59 = 0
+    local trackerKeyR59, trackerValueR59
+    for trackerKeyR59, trackerValueR59 in pairs(self.runtime.supportIssueTrackerR59) do
+        if now - (tonumber(trackerValueR59 and trackerValueR59.lastAt) or 0) > 900 then
+            self.runtime.supportIssueTrackerR59[trackerKeyR59] = nil
+        else
+            trackerCountR59 = trackerCountR59 + 1
+        end
+    end
+    if trackerCountR59 > 48 then
+        local oldestKeyR59, oldestAtR59 = nil, now
+        for trackerKeyR59, trackerValueR59 in pairs(self.runtime.supportIssueTrackerR59) do
+            local candidateAtR59 = tonumber(trackerValueR59 and trackerValueR59.lastAt) or 0
+            if candidateAtR59 <= oldestAtR59 then oldestKeyR59, oldestAtR59 = trackerKeyR59, candidateAtR59 end
+        end
+        if oldestKeyR59 and oldestKeyR59 ~= signature then self.runtime.supportIssueTrackerR59[oldestKeyR59] = nil end
+    end
+
+    local tracker = self.runtime.supportIssueTrackerR59[signature]
+    if not tracker or now - (tonumber(tracker.lastAt) or 0) > 90 then
+        tracker = { count = 0, firstAt = now, lastAt = now, snapshot = self:CaptureSupportIncidentSnapshotR59(source, message) }
+        self.runtime.supportIssueTrackerR59[signature] = tracker
+    end
+    tracker.count = (tonumber(tracker.count) or 0) + 1
+    tracker.lastAt = now
+    tracker.source = tostring(source or "Addon")
+    tracker.message = tostring(message or "Unknown error")
+    if self.runtime.supportAcknowledgedR59[signature] then return false end
+
+    -- Anti-nag gate: routine caught/transient issues stay diagnostic-only until
+    -- the same signature repeats three times in a short window. Explicit hard
+    -- failures (for example a blocked page refresh) may opt into ERROR and are
+    -- surfaced once immediately. No popup or automatic Support opening occurs.
+    if severity ~= "ERROR" and tracker.count < 3 then return false end
+    local existing = self.runtime.supportIncidentR59
+    if existing and existing.signature == signature then
+        existing.count = math.max(tonumber(existing.count) or 1, tracker.count)
+        existing.lastAt = now
+        if severity == "ERROR" then existing.severity = "ERROR" end
+        return true
+    end
+    -- Never let a later amber/repeated issue hide an unacknowledged hard error.
+    -- The amber event remains in errorHistoryRC3 and its tracker, but the one
+    -- prominent Action Center slot keeps the more important report selected.
+    if existing and not existing.acknowledged and existing.severity == "ERROR" and severity ~= "ERROR" then return false end
+    self.runtime.supportIncidentR59 = {
+        signature = signature, severity = severity, source = tracker.source, message = tracker.message,
+        count = tracker.count, firstAt = tracker.firstAt, lastAt = now,
+        snapshot = tracker.snapshot or self:CaptureSupportIncidentSnapshotR59(source, message), acknowledged = false,
+    }
+    if self.RefreshActionCenter then pcall(self.RefreshActionCenter, self) end
+    return true
+end
+
+function OTLGM:AcknowledgeSupportIncidentR59()
+    self.runtime = self.runtime or {}
+    local incident = self.runtime.supportIncidentR59
+    if not incident then return false end
+    self.runtime.supportAcknowledgedR59 = self.runtime.supportAcknowledgedR59 or {}
+    self.runtime.supportAcknowledgedR59[tostring(incident.signature or "")] = true
+    incident.acknowledged = true
+    if self.RefreshActionCenter then pcall(self.RefreshActionCenter, self) end
+    return true
+end
+
+function OTLGM:GetSupportIncidentActionEntryR59()
+    local incident = self.runtime and self.runtime.supportIncidentR59 or nil
+    if not incident or incident.acknowledged then return nil end
+    local hard = incident.severity == "ERROR"
+    local count = math.max(1, tonumber(incident.count) or 1)
+    return {
+        id = "SUPPORT:R59", ids = {}, ts = tonumber(incident.lastAt) or self:Now(), read = false,
+        category = "support", priority = "ACTION", targetPage = "settings", section = "SUPPORT",
+        title = hard and "Addon problem detected" or "Repeated addon issue detected",
+        body = tostring(incident.source or "Addon") .. (count > 1 and (" • x" .. tostring(count)) or "") .. " • diagnostic report ready",
+        tooltip = "Open Support & Report. The addon will not send anything automatically.",
+        supportIncidentR59 = true, supportSeverityR59 = hard and "ERROR" or "ATTENTION",
+    }
 end
 
 function OTLGM:RecordInternalIssueRC3(source, message)
@@ -1834,10 +2181,12 @@ function OTLGM:RecordInternalIssueRC3(source, message)
     if latest and latest.source == tostring(source or "Addon") and latest.message == text and now - (tonumber(latest.ts) or 0) < 2 then
         latest.ts = now
         latest.count = (tonumber(latest.count) or 1) + 1
+        if self.RaiseSupportIncidentR59 then self:RaiseSupportIncidentR59("ATTENTION", source, text) end
         return
     end
     table.insert(self.runtime.errorHistoryRC3, 1, { ts = now, source = tostring(source or "Addon"), message = text, count = 1 })
     while table.getn(self.runtime.errorHistoryRC3) > 10 do table.remove(self.runtime.errorHistoryRC3) end
+    if self.RaiseSupportIncidentR59 then self:RaiseSupportIncidentR59("ATTENTION", source, text) end
 end
 
 local function EstimateValueRC3(value, state, depth)
@@ -1936,7 +2285,7 @@ function OTLGM:GetLocalMaintenancePreviewRC4()
     for _, record in pairs(pve and pve.requests or {}) do if not record.expires or record.expires <= now then expiredPve = expiredPve + 1 end end
     for _, record in pairs(pve and pve.applications or {}) do if not record.expires or record.expires <= now then expiredPve = expiredPve + 1 end end
     for _, record in pairs(pve and pve.board or {}) do if not record.expires or record.expires <= now then expiredPve = expiredPve + 1 end end
-    return { stalePresence = stalePresence, expiredPve = expiredPve, summary = "Stale addon-presence entries: " .. tostring(stalePresence) .. ". Expired PvE/cache candidates: " .. tostring(expiredPve) .. ". Crafting cleanup removes stale caches/details only; known recipes are preserved." }
+    return { stalePresence = stalePresence, expiredPve = expiredPve, summary = "Old addon-user records: " .. tostring(stalePresence) .. ". Expired PvE entries: " .. tostring(expiredPve) .. ". Long-offline guild crafters stay stored but are de-prioritized; recipe data is removed only after the character is no longer in the guild or normal bounded cache limits apply." }
 end
 
 function OTLGM:RunLocalMaintenanceRC3()
@@ -1947,6 +2296,15 @@ function OTLGM:RunLocalMaintenanceRC3()
         local name, info
         for name, info in pairs(db.detectedVersions) do
             if type(info) ~= "table" or now - (tonumber(info.ts) or 0) > (30 * 86400) then db.detectedVersions[name] = nil result.presence = result.presence + 1 end
+        end
+        -- RC4-r9: maintenance can mutate the presence table in place.  Drop the
+        -- normalized compatibility index only when that actually happened so a
+        -- removed old peer cannot survive inside the Roster's cached Addon view.
+        if result.presence > 0 then
+            self.runtime = self.runtime or {}
+            self.runtime.addonDetectionRevision184 = (tonumber(self.runtime.addonDetectionRevision184) or 0) + 1
+            self.runtime.addonDetectionIndex184 = nil
+            self.runtime.sortedRosterView184 = nil
         end
     end
     if self.CleanupDuplicateNotifications175 then self:CleanupDuplicateNotifications175() end
@@ -1989,7 +2347,7 @@ function OTLGM:GetAddonCompatibilityWarningRC4()
         end
     end
     if outdatedRecent > 0 then
-        return tostring(outdatedOnline) .. " outdated online / " .. tostring(outdatedRecent) .. " outdated seen in 24h; advanced Raid/Treasury/Crafting sync uses compatible 1.8 peers only."
+        return tostring(outdatedOnline) .. " outdated online / " .. tostring(outdatedRecent) .. " outdated seen in 24h; advanced Raid/Treasury/Crafting sharing requires compatible 1.8 addon users."
     end
     if unknownRecent > 0 then return tostring(unknownRecent) .. " recent addon user(s) have not reported a version yet." end
     return nil
@@ -1997,12 +2355,21 @@ end
 
 function OTLGM:GetSystemHealthRC4()
     local scheduler = self.GetSchedulerDiagnostics180 and self:GetSchedulerDiagnostics180() or {}
-    local total = 0
-    if self.GetNetworkQueueDepth then total = self:GetNetworkQueueDepth() end
+    local total, critical, normal, bulk = 0, 0, 0, 0
+    if self.GetNetworkQueueDepth then total, critical, normal, bulk = self:GetNetworkQueueDepth() end
     if (tonumber(scheduler.errors) or 0) > 0 then return "Needs attention", "Scheduler error recorded" end
-    if self.pendingScan then return "Sync pending", "Roster validation in progress" end
-    if tonumber(total) and tonumber(total) > 80 then return "Network backlog", tostring(total) .. " queued messages" end
-    if self.pveSyncPending180 then return "Sync pending", "PvE peer confirmation pending" end
+    if self.IsPerformanceGuardActive181 and self:IsPerformanceGuardActive181() then
+        local guard = self.GetPerformanceGuardState181 and self:GetPerformanceGuardState181() or {}
+        return "Protected", "Adaptive stutter guard active" .. (guard.reason and (": " .. tostring(guard.reason)) or "")
+    end
+    if self.pendingScan then return "Updating", "Checking the guild roster" end
+    if tonumber(total) and tonumber(total) > 80 then
+        if (tonumber(critical) or 0) <= 0 and (tonumber(normal) or 0) <= 0 and (tonumber(bulk) or 0) > 0 then
+            return "Syncing", tostring(bulk) .. " background messages queued"
+        end
+        return "Network backlog", tostring(total) .. " queued messages (" .. tostring(critical or 0) .. "/" .. tostring(normal or 0) .. "/" .. tostring(bulk or 0) .. ")"
+    end
+    if self.pveSyncPending180 then return "Updating", "Waiting for guild updates" end
     return "Healthy", "Background scheduler sleeps when no work is queued"
 end
 
@@ -2047,6 +2414,14 @@ function OTLGM:ScheduleVisiblePageClock180(pageKey)
     -- other pages update at most twice per minute while visible.
     local delay = (pageKey == "recruitment" or pageKey == "guildchat") and 2
         or pageKey == "professions" and 12 or pageKey == "treasury" and 15 or 30
+    local settings = OTLGM_DB and OTLGM_DB.settings or {}
+    local profile = settings.performanceProfile181 or "AUTO"
+    local pressure = self.GetClientPressure181 and self:GetClientPressure181() or nil
+    local fps = pressure and tonumber(pressure.fps) or nil
+    if not fps and GetFramerate then local ok, value = pcall(GetFramerate) if ok then fps = tonumber(value) end end
+    local guardActive = pressure and pressure.guard and true or (self.IsPerformanceGuardActive181 and self:IsPerformanceGuardActive181() or false)
+    if profile == "SMOOTH" then delay = math.min(60, delay * 1.5) end
+    if guardActive or (fps and fps < 30) then delay = math.min(60, math.max(4, delay * 2)) end
     self:ScheduleAfter180("page-clock", delay, function(owner)
         if not owner.ui or not owner.ui.main or not owner.ui.main:IsVisible() or owner.ui.currentPage ~= pageKey then return end
         -- The page clock is a foreground recovery pulse. One page-specific
@@ -2059,7 +2434,7 @@ function OTLGM:ScheduleVisiblePageClock180(pageKey)
         owner.runtime = owner.runtime or {}
         owner.runtime.visiblePagePulse180 = owner.runtime.visiblePagePulse180 or {}
         local pulse = owner.runtime.visiblePagePulse180
-        if owner.ui.headerDate then owner.ui.headerDate:SetText("ST " .. (owner.FormatServerClock180 and owner:FormatServerClock180(owner:Now(), true) or date("%H:%M  %d %b"))) end
+        if owner.ui.headerDate then owner.ui.headerDate:SetText("Server Time (ST) " .. (owner.FormatServerClock180 and owner:FormatServerClock180(owner:Now(), true) or date("%H:%M  %d %b"))) end
         if pageKey == "recruitment" and owner.RefreshWorldRecruitmentIndicator then
             -- Tiny elapsed-time label only; does not rebuild the page.
             owner:RefreshWorldRecruitmentIndicator()
@@ -2088,7 +2463,9 @@ function OTLGM:ScheduleVisiblePageClock180(pageKey)
             end
             -- Recovery sync is intentionally rare. Real profession-window scans
             -- and change manifests remain immediate, so new recipes are not delayed.
-            if (tonumber(pulse.craftingSyncAt) or 0) + 180 <= now and owner.RequestCraftingSync then
+            local pressureState = owner.GetClientPressure181 and owner:GetClientPressure181() or nil
+            local pressure = (pressureState and tonumber(pressureState.level) >= 2) or (owner.runtime and owner.runtime.transitionActive176) or (owner.IsPerformanceGuardActive181 and owner:IsPerformanceGuardActive181()) or (owner.InCombat and owner:InCombat())
+            if not pressure and (tonumber(pulse.craftingSyncAt) or 0) + 600 <= now and owner.RequestCraftingSync then
                 pulse.craftingSyncAt = now
                 owner:RequestCraftingSync(false, false)
             end
@@ -2099,7 +2476,9 @@ function OTLGM:ScheduleVisiblePageClock180(pageKey)
                 pulse.treasuryRevisionRC3 = revision
                 if owner.RefreshTreasuryPage170 then owner:RefreshTreasuryPage170() end
             end
-            if (tonumber(pulse.treasurySyncAt) or 0) + 180 <= now and owner.RequestTreasurySync170 then
+            local pressureState = owner.GetClientPressure181 and owner:GetClientPressure181() or nil
+            local pressure = (pressureState and tonumber(pressureState.level) >= 2) or (owner.runtime and owner.runtime.transitionActive176) or (owner.IsPerformanceGuardActive181 and owner:IsPerformanceGuardActive181()) or (owner.InCombat and owner:InCombat())
+            if not pressure and (tonumber(pulse.treasurySyncAt) or 0) + 180 <= now and owner.RequestTreasurySync170 then
                 pulse.treasurySyncAt = now
                 owner:RequestTreasurySync170(false)
             end
@@ -2116,7 +2495,8 @@ function OTLGM:ScheduleVisiblePageClock180(pageKey)
     end, -1)
 end
 
-function OTLGM:ShowPage(pageKey)
+function OTLGM:ShowPage(pageKey, options183)
+    options183 = type(options183) == "table" and options183 or {}
     if not self.ui or not self.ui.main then self:BuildUI() end
     local definition = self:GetShellPageDefinition(pageKey)
     if not definition then return false end
@@ -2125,7 +2505,7 @@ function OTLGM:ShowPage(pageKey)
         pageKey = "home"
         definition = self:GetShellPageDefinition(pageKey)
     end
-    self:CloseShellTransient(true)
+    if not self:CloseShellTransient(true, "page-change", false) then return false end
     local previousKey = self.ui.currentPage
     local previousModule = previousKey and self.shellPageModules[previousKey]
     if previousKey ~= pageKey and previousModule and previousModule.root then previousModule:OnHide() end
@@ -2142,11 +2522,29 @@ function OTLGM:ShowPage(pageKey)
     end
     self.ui.currentPage = pageKey
     OTLGM_DB.settings.lastPage = pageKey
+    -- Page-scoped operation feedback must not travel with the player after
+    -- navigation.  This also cleans up a toast created by an older path just
+    -- before the page changed.
+    if self.runtime and self.runtime.lastVisibleStatusSource180 then
+        local source = tostring(self.runtime.lastVisibleStatusSource180)
+        local keep = (source == "pve" and (pageKey == "pve" or pageKey == "settings"))
+            or (source == "crafting" and pageKey == "professions")
+            or (source == "roster" and (pageKey == "roster" or pageKey == "settings"))
+        if (source == "pve" or source == "crafting" or source == "roster") and not keep then
+            self.runtime.shellToastUntil = nil
+            self.runtime.lastVisibleStatusSource180 = nil
+            if self.ui.shellToast then self.ui.shellToast:Hide() end
+        end
+    end
     self:ScheduleVisiblePageClock180(pageKey)
-    self:RequestStaleRosterOnOpen180(pageKey)
+    if not options183.suppressRosterScan183 then self:RequestStaleRosterOnOpen180(pageKey) end
     local title = PAGE_TITLES[pageKey] or { definition.label, "" }
     self.ui.pageTitle:SetText(title[1])
     self.ui.pageSubtitle:SetText(title[2])
+    if self.ui.pageIcon184 then
+        self.ui.pageIcon184:SetTexture(definition.icon or "Interface\\Icons\\INV_Misc_Book_09")
+        if self.ui.pageIcon184.SetTexCoord then self.ui.pageIcon184:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
+    end
     self.ui.pageHeader:Show()
     self:RefreshNavigation()
     if pageKey == "professions" then
@@ -2244,7 +2642,7 @@ function OTLGM:RefreshAddonUsersIndicator()
     if not self.ui or not self.ui.addonUsersButton then return end
     local count, latest, online = 0, nil, 0
     if self.GetDetectedAddonUsers then count, latest, online = self:GetDetectedAddonUsers(86400) end
-    UI:SetText(self.ui.addonUsersButton, "Addon Users  " .. tostring(online or count or 0))
+    UI:SetText(self.ui.addonUsersButton, "Sharing  •  " .. tostring(online or count or 0) .. " online")
     if self.ui.addonUsersDrawer and self.ui.activeDrawer == self.ui.addonUsersDrawer then
         self:RefreshAddonUsersDrawer()
     end
@@ -2351,6 +2749,10 @@ function OTLGM:RebaseUIParentGeometry180(reason, force)
     self:RestoreWindowPosition180("world")
     self:SaveWindowGeometry180(reason or "parent-rebase")
     self:RestoreParkPosition180("world")
+    if self.ui and self.ui.guildProfile183 and self.ui.guildProfile183:IsVisible()
+        and self.PositionGuildProfile183 and not self.ui.guildProfile183.otlDetached183 then
+        self:PositionGuildProfile183("parent-rebase")
+    end
     self:RememberUIParentMetrics180()
     return true
 end
@@ -2490,6 +2892,19 @@ function OTLGM:SetWindowSizePreset180(preset, options)
     return true
 end
 
+function OTLGM:SnapWindowGeometryToPixels183(x, y, width, height, scale)
+    scale = math.max(0.01, tonumber(scale) or 1)
+    local function snap(value)
+        value = tonumber(value) or 0
+        if value >= 0 then return math.floor((value * scale) + 0.5) / scale end
+        return math.ceil((value * scale) - 0.5) / scale
+    end
+    x, y = snap(x), snap(y)
+    if width then width = math.max(1, snap(width)) end
+    if height then height = math.max(1, snap(height)) end
+    return x, y, width, height
+end
+
 function OTLGM:BeginWindowInteraction180(mode)
     if not self.ui or not self.ui.main or not UIParent then return false end
     if mode == "DRAG" and OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.windowLocked then return false end
@@ -2534,12 +2949,24 @@ function OTLGM:UpdateWindowInteraction180(force)
         self:EndWindowInteraction180(state.mode == "RESIZE" and "resize-release" or "drag-release")
         return true
     end
-    -- Resize causes a page reflow, so cap only that expensive path to roughly
-    -- 40 Hz. Dragging itself stays frame-smooth because it only changes the
-    -- owned CENTER anchor. EndWindowInteraction180 forces one final sample.
+    -- Resize causes a full responsive reflow while dragging only changes one
+    -- anchor. Keep normal resizing fluid, but RC4-r9 lowers the reflow cadence
+    -- automatically when the adaptive pressure detector already sees low FPS,
+    -- combat/transition pressure or Smooth mode. This prevents a resize gesture
+    -- from amplifying an existing frame-time spike on weaker clients. The final
+    -- mouse-up sample is always forced, so geometry remains exact.
     if state.mode == "RESIZE" and not force and GetTime then
+        local resizeInterval184 = 0.025
+        if self.GetClientPressure181 then
+            local pressure184 = self:GetClientPressure181()
+            if pressure184 then
+                local pressureLevel184 = tonumber(pressure184.level) or 0
+                if pressureLevel184 >= 2 then resizeInterval184 = 0.060
+                elseif pressureLevel184 >= 1 then resizeInterval184 = 0.040 end
+            end
+        end
         local preciseNow = GetTime()
-        if state.lastResizeUpdate180 and preciseNow - state.lastResizeUpdate180 < 0.025 then return true end
+        if state.lastResizeUpdate180 and preciseNow - state.lastResizeUpdate180 < resizeInterval184 then return true end
         state.lastResizeUpdate180 = preciseNow
     end
     local cursorX, cursorY = GetCursorPosition()
@@ -2550,10 +2977,14 @@ function OTLGM:UpdateWindowInteraction180(force)
     local strict = OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.keepWindowInsideScreen180 and true or false
     if state.mode == "DRAG" then
         local x, y = state.startX + dx, state.startY + dy
+        local visualScale = self:GetFrameScaleRelativeToUIParent180(frame)
         if strict then
             x, y = self:GetSoftClampedWindowOffset180(x, y, parentWidth, parentHeight,
-                frame:GetWidth(), frame:GetHeight(), self:GetFrameScaleRelativeToUIParent180(frame), true)
+                frame:GetWidth(), frame:GetHeight(), visualScale, true)
         end
+        -- Keep the frame on physical-pixel boundaries. Fractional CENTER
+        -- offsets make thin border textures shimmer while the window moves.
+        x, y = self:SnapWindowGeometryToPixels183(x, y, nil, nil, parentScale)
         frame:ClearAllPoints()
         frame:SetPoint("CENTER", UIParent, "CENTER", x, y)
     elseif state.mode == "RESIZE" then
@@ -2562,6 +2993,11 @@ function OTLGM:UpdateWindowInteraction180(force)
         local height = state.startHeight - (dy / relativeScale)
         width = math.max(tonumber(frame.otlMinWidth180) or 1000, math.min(tonumber(frame.otlMaxWidth180) or 2400, width))
         height = math.max(tonumber(frame.otlMinHeight180) or 700, math.min(tonumber(frame.otlMaxHeight180) or 1600, height))
+        -- Round dimensions to whole rendered pixels before reflow. This avoids
+        -- alternating half-pixel borders during drag-resize and keeps Fit
+        -- geometry stable across UI scale changes.
+        local ignoreX, ignoreY
+        ignoreX, ignoreY, width, height = self:SnapWindowGeometryToPixels183(0, 0, width, height, relativeScale)
         local visualWidthChange = (width - state.startWidth) * relativeScale
         local visualHeightChange = (height - state.startHeight) * relativeScale
         local x = state.startX + (visualWidthChange / 2)
@@ -2569,6 +3005,7 @@ function OTLGM:UpdateWindowInteraction180(force)
         if strict then
             x, y = self:GetSoftClampedWindowOffset180(x, y, parentWidth, parentHeight, width, height, relativeScale, true)
         end
+        x, y = self:SnapWindowGeometryToPixels183(x, y, nil, nil, parentScale)
         -- Set both dimensions as one geometry transaction. Without this guard
         -- SetWidth and SetHeight each fire OnSizeChanged and duplicate the full
         -- page layout for the same cursor sample.
@@ -2615,6 +3052,10 @@ function OTLGM:EndWindowInteraction180(reason)
         -- is sufficient and avoids a needless all-page layout on mouse-up.
         self:SaveWindowGeometry180(reason or "drag-stop")
     end
+    if self.ui and self.ui.guildProfile183 and self.ui.guildProfile183:IsVisible()
+        and self.PositionGuildProfile183 and not self.ui.guildProfile183.otlDetached183 then
+        self:PositionGuildProfile183(reason or "main-geometry")
+    end
     if self.ui and self.ui.currentPage == "settings" and self.RefreshSettingsPage then self:RefreshSettingsPage() end
     return true
 end
@@ -2655,6 +3096,10 @@ function OTLGM:ApplyUIScale(requested)
     self:UpdateWindowResizeBounds180()
     self:RestoreWindowPosition180("scale")
     self:LayoutShellChrome180("scale")
+    if self.ui and self.ui.guildProfile183 and self.ui.guildProfile183:IsVisible()
+        and self.PositionGuildProfile183 and not self.ui.guildProfile183.otlDetached183 then
+        self:PositionGuildProfile183("scale")
+    end
     return effective
 end
 
@@ -2875,7 +3320,7 @@ end
 function OTLGM:RestoreWindowPosition180(reason)
     if not self.ui or not self.ui.main or not UIParent or not OTLGM_DB or not OTLGM_DB.settings then return false end
     local frame = self.ui.main
-    local parentWidth, parentHeight = self:GetPositionViewportMetrics180()
+    local parentWidth, parentHeight, parentScale = self:GetPositionViewportMetrics180()
     local frameWidth = frame.GetWidth and frame:GetWidth() or 1160
     local frameHeight = frame.GetHeight and frame:GetHeight() or 740
     local scale = self:GetFrameScaleRelativeToUIParent180(frame)
@@ -2897,6 +3342,7 @@ function OTLGM:RestoreWindowPosition180(reason)
     elseif reason == "build" or reason == "show" or reason == "world" or reason == "recovery" then
         x, y = self:GetRecoverableWindowOffset180(x, y, parentWidth, parentHeight, frameWidth, frameHeight, scale)
     end
+    x, y = self:SnapWindowGeometryToPixels183(x, y, nil, nil, parentScale)
     OTLGM_DB.settings.windowX, OTLGM_DB.settings.windowY = x, y
     OTLGM_DB.settings.windowNX180, OTLGM_DB.settings.windowNY180 = x / parentWidth, y / parentHeight
     frame:ClearAllPoints()
@@ -2911,6 +3357,9 @@ end
 function OTLGM:GetParkCenterOffset180()
     local button = self.ui and self.ui.shellParkTab
     if not button or not UIParent then return 0, 0 end
+    if button.otlParkAnchorX182 ~= nil and button.otlParkAnchorY182 ~= nil then
+        return tonumber(button.otlParkAnchorX182) or 0, tonumber(button.otlParkAnchorY182) or 0
+    end
     local parentWidth = self:GetPositionViewportMetrics180()
     if button.GetPoint then
         local point, relativeTo, relativePoint, x, y = button:GetPoint(1)
@@ -2923,6 +3372,9 @@ function OTLGM:GetParkCenterOffset180()
 end
 
 function OTLGM:GetClampedParkOffset180(x, y)
+    if self.GetClampedQuickDockAnchor182 and self.ui and self.ui.quickDockLion182 then
+        return self:GetClampedQuickDockAnchor182(x, y)
+    end
     local parentWidth, parentHeight = self:GetPositionViewportMetrics180()
     local button = self.ui and self.ui.shellParkTab
     local scale = button and self:GetFrameScaleRelativeToUIParent180(button) or 1
@@ -2962,8 +3414,12 @@ function OTLGM:RestoreParkPosition180(reason)
     x, y = self:GetClampedParkOffset180(x, y)
     OTLGM_DB.settings.parkX180, OTLGM_DB.settings.parkY180 = x, y
     OTLGM_DB.settings.parkNX180, OTLGM_DB.settings.parkNY180 = x / parentWidth, y / parentHeight
-    self.ui.shellParkTab:ClearAllPoints()
-    self.ui.shellParkTab:SetPoint("CENTER", UIParent, "CENTER", x, y)
+    if self.PositionQuickDock182 and self.ui.quickDockLion182 then
+        self:PositionQuickDock182(x, y)
+    else
+        self.ui.shellParkTab:ClearAllPoints()
+        self.ui.shellParkTab:SetPoint("CENTER", UIParent, "CENTER", x, y)
+    end
     return true
 end
 
@@ -2994,8 +3450,12 @@ function OTLGM:BeginParkDrag180()
             local dx, dy = cx - activeButton.otlParkDrag180.cursorX, cy - activeButton.otlParkDrag180.cursorY
             if math.abs(dx) > 1 or math.abs(dy) > 1 then activeButton.otlParkDrag180.moved = true end
             local x, y = OTLGM:GetClampedParkOffset180(activeButton.otlParkDrag180.startX + dx, activeButton.otlParkDrag180.startY + dy)
-            activeButton:ClearAllPoints()
-            activeButton:SetPoint("CENTER", UIParent, "CENTER", x, y)
+            if OTLGM.PositionQuickDock182 and OTLGM.ui and OTLGM.ui.quickDockLion182 then
+                OTLGM:PositionQuickDock182(x, y)
+            else
+                activeButton:ClearAllPoints()
+                activeButton:SetPoint("CENTER", UIParent, "CENTER", x, y)
+            end
         end)
         if not ok then
             activeButton:SetScript("OnUpdate", nil)
@@ -3020,9 +3480,198 @@ function OTLGM:EndParkDrag180()
     return true
 end
 
+function OTLGM:ShowQuickDockAfterImplicitHide183(reason)
+    if not self.ui or not self.ui.shellBuilt or not self.ui.shellParkTab then return false end
+    local settings = OTLGM_DB and OTLGM_DB.settings or {}
+    if settings.closeToQuickDock183 == false then return false end
+    if self.runtime and self.runtime.suppressQuickDockOnMainHide183 then return false end
+    self:RestoreParkPosition180(reason or "escape")
+    self.ui.shellParkTab:Show()
+    self.runtime = self.runtime or {}
+    self.runtime.lastImplicitPark183 = tostring(reason or "implicit-hide")
+    return true
+end
+
+function OTLGM:ReleaseBlizzardSocialPanel183(reason)
+    local released = false
+    local frames = {}
+    if FriendsFrame then table.insert(frames, FriendsFrame) end
+    if GuildFrame and GuildFrame ~= FriendsFrame then table.insert(frames, GuildFrame) end
+    local seen = {}
+    local index, frame
+    for index = 1, table.getn(frames) do
+        frame = frames[index]
+        if frame and not seen[frame] then
+            seen[frame] = true
+            local shown = frame.IsShown and frame:IsShown()
+            if shown then
+                -- Friends/Guild are managed UIPanels on 1.12-derived clients.
+                -- Hiding them with Frame:Hide() leaves UIParent's panel slot
+                -- occupied on some clients: the next profession/trade window is
+                -- shifted right and Escape can keep closing a "phantom" panel.
+                local usedManager = false
+                if HideUIPanel then
+                    local ok = pcall(HideUIPanel, frame)
+                    usedManager = ok and true or false
+                end
+                if frame.IsShown and frame:IsShown() and frame.Hide then frame:Hide() end
+                released = true
+                self.runtime = self.runtime or {}
+                self.runtime.lastSocialPanelRelease183 = tostring(reason or "guild-shortcut")
+                self.runtime.socialPanelReleaseUsedManager183 = usedManager
+            end
+        end
+    end
+    if released then
+        if UpdateUIPanelPositions then pcall(UpdateUIPanelPositions)
+        elseif UIParent_ManageFramePositions then pcall(UIParent_ManageFramePositions) end
+    end
+    return released
+end
+
+function OTLGM:ResetBlizzardSocialTab183(reason)
+    -- Explicit Guild clicks are routed into the addon, but Blizzard remembers
+    -- the last Social tab. If we leave selectedTab=3 behind, opening Social
+    -- later can immediately revisit Guild before the player can reach Friends /
+    -- Who / Raid. Reset only Blizzard's remembered tab state; the Social frame
+    -- is about to close, so this does not create a visible tab flash.
+    if not FriendsFrame then return false end
+    local changed = false
+    if PanelTemplates_SetTab then
+        local ok = pcall(PanelTemplates_SetTab, FriendsFrame, 1)
+        if ok then changed = true end
+    end
+    if tonumber(FriendsFrame.selectedTab) ~= 1 then
+        FriendsFrame.selectedTab = 1
+        changed = true
+    end
+    self.runtime = self.runtime or {}
+    self.runtime.socialGuildLastSelected183 = nil
+    self.runtime.lastSocialTabReset183 = tostring(reason or "guild-redirect")
+    return changed
+end
+
+function OTLGM:OpenOnlineRosterFromSocial183()
+    if OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.socialGuildOpensRoster183 == false then return false end
+    if not self.ui or not self.ui.main then self:BuildUI() end
+    if not self.ui or not self.ui.main then return false end
+    self.runtime = self.runtime or {}
+    self.runtime.socialGuildLastSelected183 = true
+    self:ResetBlizzardSocialTab183("social-guild-open")
+    self:ReleaseBlizzardSocialPanel183("social-guild-open")
+    if self.ui.shellParkTab then self.ui.shellParkTab:Hide() end
+    if not self.ui.main:IsVisible() then
+        if self.RebaseUIParentGeometry180 then self:RebaseUIParentGeometry180("social-guild", false) end
+        self:RestoreWindowPosition180("show")
+        self.ui.main:Show()
+    end
+    if not self:ShowPage("roster") then return false end
+    local settings = OTLGM_DB and OTLGM_DB.settings or {}
+    settings.rosterSearch = ""
+    settings.rosterFilter = "ONLINE"
+    settings.rosterRankFilter = ""
+    settings.rosterProfessionFilter = ""
+    self.ui.rosterFilter = "ONLINE"
+    self.ui.rosterRankFilter = nil
+    self.ui.rosterProfessionFilter = nil
+    self.ui.rosterOffset = 0
+    if self.ui.rosterSearch and UI.SetSearchText then UI:SetSearchText(self.ui.rosterSearch, "") end
+    if self.RefreshRosterPage then self:RefreshRosterPage("social-guild") end
+    if self.ScheduleVisiblePageClock180 then self:ScheduleVisiblePageClock180("roster") end
+    self.runtime = self.runtime or {}
+    self.runtime.socialGuildShortcut183 = (tonumber(self.runtime.socialGuildShortcut183) or 0) + 1
+    return true
+end
+
+function OTLGM:IsNativeGuildSocialTabSelected183()
+    if self.runtime and self.runtime.socialGuildLastSelected183 then return true end
+    local selected
+    if FriendsFrame and PanelTemplates_GetSelectedTab then
+        local ok, value = pcall(PanelTemplates_GetSelectedTab, FriendsFrame)
+        if ok then selected = tonumber(value) end
+    end
+    if not selected and FriendsFrame then selected = tonumber(FriendsFrame.selectedTab) end
+    -- The classic Social frame uses tab 3 for Guild. Keep this only as a
+    -- fallback; the click hook below is the authoritative signal.
+    return selected == 3 and FriendsFrameTab3 and true or false
+end
+
+function OTLGM:InstallSocialGuildHook183()
+    self.runtime = self.runtime or {}
+    local candidates = { FriendsFrameTab3, FriendsFrameGuildButton, GuildFrameTab }
+    local hooked, index = 0, nil
+    for index = 1, table.getn(candidates) do
+        local button = candidates[index]
+        if button and button.GetScript and button.SetScript and not button.otlGuildRosterHook183 then
+            local previous = button:GetScript("OnClick")
+            button.otlGuildRosterHook183 = true
+            button:SetScript("OnClick", function()
+                if OTLGM and OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.socialGuildOpensRoster183 ~= false then
+                    -- Do not run the Blizzard Guild-tab click first. Doing so
+                    -- briefly registers/shows a managed UIPanel and then hiding
+                    -- it directly can leave a phantom left panel behind.
+                    OTLGM.runtime = OTLGM.runtime or {}
+                    OTLGM.runtime.socialGuildLastSelected183 = true
+                    OTLGM:OpenOnlineRosterFromSocial183()
+                    return
+                end
+                if previous then previous(this, arg1) end
+            end)
+            hooked = hooked + 1
+        elseif button and button.otlGuildRosterHook183 then
+            hooked = hooked + 1
+        end
+    end
+
+    -- Never redirect merely because Blizzard Social remembers Guild as its
+    -- previous tab. Also repair an already-stale selectedTab=3 left by an older
+    -- addon build: opening Social should land on Friends, not re-enter Guild.
+    -- The explicit Guild-tab OnClick hook above remains the only redirect.
+    if FriendsFrame and FriendsFrame.GetScript and FriendsFrame.SetScript and not FriendsFrame.otlGuildRosterOnShow183 then
+        local previousShow = FriendsFrame:GetScript("OnShow")
+        FriendsFrame.otlGuildRosterOnShow183 = true
+        FriendsFrame:SetScript("OnShow", function()
+            if OTLGM and not (OTLGM.runtime and OTLGM.runtime.allowNativeGuildOnce185)
+                and tonumber(FriendsFrame and FriendsFrame.selectedTab) == 3
+                and OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.socialGuildOpensRoster183 ~= false then
+                OTLGM:ResetBlizzardSocialTab183("social-open-stale-guild")
+            end
+            if previousShow then previousShow() end
+            if OTLGM then
+                OTLGM.runtime = OTLGM.runtime or {}
+                OTLGM.runtime.socialGuildLastSelected183 = nil
+            end
+        end)
+    end
+
+    -- Clear the remembered Guild intent when the player explicitly selects a
+    -- different Social tab. This keeps Friends/Who/Raid usable normally.
+    local otherTabs = { FriendsFrameTab1, FriendsFrameTab2, FriendsFrameTab4, FriendsFrameTab5 }
+    for index = 1, table.getn(otherTabs) do
+        local button = otherTabs[index]
+        local isGuildButton = false
+        local candidateIndex
+        for candidateIndex = 1, table.getn(candidates) do if candidates[candidateIndex] == button then isGuildButton = true break end end
+        if button and not isGuildButton and button.GetScript and button.SetScript and not button.otlGuildRosterOtherTab183 then
+            local previous = button:GetScript("OnClick")
+            button.otlGuildRosterOtherTab183 = true
+            button:SetScript("OnClick", function()
+                if OTLGM then
+                    OTLGM.runtime = OTLGM.runtime or {}
+                    OTLGM.runtime.socialGuildLastSelected183 = nil
+                end
+                if previous then previous(this, arg1) end
+            end)
+        end
+    end
+
+    self.runtime.socialGuildHooks183 = hooked
+    return hooked > 0
+end
+
 function OTLGM:ParkWindow176()
     if not self.ui or not self.ui.main then return false end
-    self:CloseShellTransient(true)
+    if not self:CloseShellTransient(true, "park", false) then return false end
     self:SaveWindowGeometry180("park")
     if self.ui.windowParkTab176 then self.ui.windowParkTab176:Hide() end
     if OTLGM_DB and OTLGM_DB.settings then OTLGM_DB.settings.windowParked176 = nil end
@@ -3030,6 +3679,39 @@ function OTLGM:ParkWindow176()
     self:RestoreParkPosition180("show")
     self.ui.shellParkTab:Show()
     return true
+end
+
+-- Explicit hard-hide paths remain separate from Park. This keeps the main X
+-- configurable while still giving a parked user an unambiguous way to put the
+-- whole addon UI to sleep without changing any background data policy.
+function OTLGM:HideQuickDock183(reason)
+    if not self.ui or not self.ui.shellParkTab then return false end
+    if self.CloseQuickDockPopover182 then self:CloseQuickDockPopover182() end
+    if self.CancelQuickDockRecruitClock182 then self:CancelQuickDockRecruitClock182() end
+    if self.ui.shellParkTab.otlParkDrag180 then self:EndParkDrag180() end
+    self.ui.shellParkTab:Hide()
+    if OTLGM_DB and OTLGM_DB.settings then OTLGM_DB.settings.windowParked176 = nil end
+    self.runtime = self.runtime or {}
+    self.runtime.lastQuickDockHide183 = tostring(reason or "explicit")
+    return true
+end
+
+function OTLGM:HideMainWindow183(reason)
+    if not self.ui or not self.ui.main then return false end
+    if not self:CloseShellTransient(true, reason or "main-close", false) then return false end
+    self:HideQuickDock183(reason or "main-close")
+    if self.ui.windowParkTab176 then self.ui.windowParkTab176:Hide() end
+    self.runtime = self.runtime or {}
+    self.runtime.suppressQuickDockOnMainHide183 = true
+    self.ui.main:Hide()
+    self.runtime.suppressQuickDockOnMainHide183 = nil
+    return true
+end
+
+function OTLGM:HandleMainClose183()
+    local settings = OTLGM_DB and OTLGM_DB.settings or {}
+    if settings.closeToQuickDock183 ~= false then return self:ParkWindow176() end
+    return self:HideMainWindow183("main-x")
 end
 
 function OTLGM:UnparkWindow176()
@@ -3068,10 +3750,10 @@ function OTLGM:ToggleUI()
     if not self.ui or not self.ui.main then self:BuildUI() end
     if not self.ui or not self.ui.main then return end
     if self.ui.main:IsVisible() then
-        self:CloseShellTransient(true)
-        self.ui.shellParkTab:Hide()
-        if self.ui.windowParkTab176 then self.ui.windowParkTab176:Hide() end
-        self.ui.main:Hide()
+        -- Minimap/slash toggle follows the same close policy as the main X.
+        -- By default this leaves Quick Dock visible; the Settings toggle can
+        -- still opt into a complete hard hide.
+        self:HandleMainClose183()
     else
         self.ui.shellParkTab:Hide()
         if self.RebaseUIParentGeometry180 then self:RebaseUIParentGeometry180("show", false) end
@@ -3121,15 +3803,46 @@ function OTLGM:BuildUI()
     frame:SetScript("OnHide", function()
         if OTLGM then
             if OTLGM.runtime and OTLGM.runtime.windowInteraction180 then OTLGM:EndWindowInteraction180("hide") end
-            OTLGM:CloseShellTransient(true)
+            OTLGM:CloseShellTransient(true, "main-hidden", true)
+            -- Companion/special frames live on UIParent rather than under the
+            -- main shell. Hide them explicitly so a child that is technically
+            -- still IsShown() cannot consume another Escape after the addon is
+            -- already gone.
+            if OTLGM.CloseGuildProfile183 then OTLGM:CloseGuildProfile183("main-hidden") end
+            if OTLGM.CloseQuickDockPopover182 then OTLGM:CloseQuickDockPopover182() end
+            if OTLGM.ui and OTLGM.ui.raidTeamSelectionCatcher180 and OTLGM.ui.raidTeamSelectionCatcher180.Hide then
+                OTLGM.ui.raidTeamSelectionCatcherProgrammatic180 = true
+                OTLGM.ui.raidTeamSelectionCatcher180:Hide()
+                OTLGM.ui.raidTeamSelectionCatcherProgrammatic180 = nil
+            end
             local module = OTLGM.ui and OTLGM.ui.currentPage and OTLGM.shellPageModules[OTLGM.ui.currentPage]
             if module then module:OnHide() end
             if OTLGM.CancelTask180 then OTLGM:CancelTask180("page-clock") end
             if OTLGM.UpdateSchedulerState180 then OTLGM:UpdateSchedulerState180("ui-hidden") end
+            -- UISpecialFrames hides the main window directly when Escape is pressed.
+            -- Treat that implicit hide like Park, while explicit hard-hide paths set
+            -- suppressQuickDockOnMainHide183 around their own Hide() call.
+            OTLGM:ShowQuickDockAfterImplicitHide183("escape-or-specialframe")
         end
     end)
     frame:Hide()
     self.ui.main = frame
+    -- Quiet chrome polish: a narrow gold cap and two short corner strokes make
+    -- the window read as one deliberate frame without adding animation or any
+    -- per-frame work. They move/scale with the window automatically.
+    frame.topAccent184 = frame:CreateTexture(nil, "ARTWORK")
+    frame.topAccent184:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -2)
+    frame.topAccent184:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -12, -2)
+    frame.topAccent184:SetHeight(1)
+    frame.topAccent184:SetTexture(C.gold[1], C.gold[2], C.gold[3], 0.44)
+    frame.topCornerLeft184 = frame:CreateTexture(nil, "ARTWORK")
+    frame.topCornerLeft184:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -2)
+    frame.topCornerLeft184:SetWidth(54) frame.topCornerLeft184:SetHeight(2)
+    frame.topCornerLeft184:SetTexture(C.gold[1], C.gold[2], C.gold[3], 0.82)
+    frame.topCornerRight184 = frame:CreateTexture(nil, "ARTWORK")
+    frame.topCornerRight184:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -12, -2)
+    frame.topCornerRight184:SetWidth(54) frame.topCornerRight184:SetHeight(2)
+    frame.topCornerRight184:SetTexture(C.gold[1], C.gold[2], C.gold[3], 0.82)
     self:UpdateWindowResizeBounds180()
     frame:SetScript("OnSizeChanged", function()
         if not OTLGM or not OTLGM.ui or not OTLGM.ui.shellBuilt then return end
@@ -3154,6 +3867,7 @@ function OTLGM:BuildUI()
     resizeGrip.otlResizeGrip180 = true
     self.ui.resizeGrip180 = resizeGrip
     self.ui.shellBuilt = true
+    if self.InstallSocialGuildHook183 then self:InstallSocialGuildHook183() end
     self.ui.v15Built = true
     self.ui152Loaded = true
     self.fullUILoaded = true
@@ -3176,7 +3890,7 @@ function OTLGM:BuildUI()
     guildTitle:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
     local motto = MakeLabel(header, "Together We Grow Stronger", "GameFontNormalSmall", 58, -29, 300, "LEFT")
     motto:SetTextColor(C.white[1], C.white[2], C.white[3])
-    self.ui.headerDate = MakeLabel(header, "", "GameFontNormalSmall", 470, -18, 180, "CENTER")
+    self.ui.headerDate = MakeLabel(header, "", "GameFontNormalSmall", 452, -18, 236, "CENTER")
     self.ui.headerDate:SetTextColor(C.white[1], C.white[2], C.white[3])
     self.ui.actionCenterButton = UI:Button(header, "Action Center", 150, 30, function() OTLGM:ToggleActionCenter() end, "utility")
     self.ui.actionCenterButton:SetPoint("TOPRIGHT", header, "TOPRIGHT", -48, -11)
@@ -3186,7 +3900,7 @@ function OTLGM:BuildUI()
     self.ui.actionCenterBadge = UI:Badge(self.ui.actionCenterButton, 24, 16)
     self.ui.actionCenterBadge:SetPoint("RIGHT", self.ui.actionCenterButton, "RIGHT", -7, 0)
     self.ui.parkButton = UI:Button(header, "Park", 70, 30, function() OTLGM:ParkWindow176() end, "utility")
-    self.ui.parkButton.otlTooltip = "Hide the window and show one LionCrest restore button."
+    self.ui.parkButton.otlTooltip = "Hide the full window and show the lightweight Quick Dock. Disable Quick Dock in Interface settings for crest-only parking."
     self.ui.parkButton.otlTooltipTitle = "Park window"
     self.ui.parkButton.icon = self.ui.parkButton:CreateTexture(nil, "ARTWORK")
     self.ui.parkButton.icon:SetTexture("Interface\\AddOns\\OrderOfTheLionGM\\Assets\\LionCrest")
@@ -3197,13 +3911,55 @@ function OTLGM:BuildUI()
     self.ui.parkButton.text:SetPoint("LEFT", self.ui.parkButton, "LEFT", 28, 0)
     self.ui.parkButton.text:SetWidth(36)
     self.ui.parkButton:SetPoint("RIGHT", self.ui.actionCenterButton, "LEFT", -8, 0)
+    local onlineIndicator = UI:Surface(header, "surface", 126, 26)
+    onlineIndicator:SetPoint("RIGHT", self.ui.parkButton, "LEFT", -8, 0)
+    onlineIndicator:EnableMouse(true)
+    -- Do not use a Unicode bullet here. The stock 1.12 fonts used by OctoWoW
+    -- can silently omit that glyph, which made the promised green online dot
+    -- disappear even though the text itself was refreshed correctly. A real
+    -- texture marker is deterministic on every supported client/font.
+    onlineIndicator.dot = onlineIndicator:CreateTexture(nil, "ARTWORK")
+    onlineIndicator.dot:SetWidth(7) onlineIndicator.dot:SetHeight(7)
+    onlineIndicator.dot:SetPoint("LEFT", onlineIndicator, "LEFT", 13, 0)
+    onlineIndicator.dot:SetTexture(0.42, 0.42, 0.42, 1)
+    onlineIndicator.text = UI.Text(onlineIndicator, "— Online", "GameFontNormalSmall", "LEFT")
+    onlineIndicator.text:SetPoint("LEFT", onlineIndicator.dot, "RIGHT", 7, 0)
+    onlineIndicator.text:SetWidth(94)
+    onlineIndicator:SetScript("OnEnter", function()
+        if not OTLGM or not GameTooltip then return end
+        local db = OTLGM.GetGuildDB and OTLGM:GetGuildDB() or nil
+        local total = tonumber(db and db.lastTotal) or 0
+        local online = tonumber(db and db.lastOnline) or 0
+        local scanned = tonumber(db and db.lastScan) or 0
+        GameTooltip:SetOwner(this, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("Guild roster status", 1, 0.82, 0.35)
+        if scanned > 0 then
+            local age = math.max(0, OTLGM:Now() - scanned)
+            local ageText
+            if age < 60 then ageText = "less than a minute ago"
+            elseif age < 3600 then ageText = tostring(math.floor(age / 60)) .. " min ago"
+            elseif age < 86400 then ageText = tostring(math.floor(age / 3600)) .. " h ago"
+            else ageText = tostring(math.floor(age / 86400)) .. " d ago" end
+            GameTooltip:AddDoubleLine("Online / total", tostring(online) .. " / " .. tostring(total), 0.80, 0.80, 0.80, 0.45, 1, 0.45)
+            GameTooltip:AddDoubleLine("Last full roster scan", ageText, 0.80, 0.80, 0.80, 1, 1, 1)
+            local presenceAtR59 = tonumber(OTLGM.runtime and OTLGM.runtime.rosterPresenceLastAtR59) or 0
+            if presenceAtR59 > scanned then
+                local presenceAge = math.max(0, OTLGM:Now() - presenceAtR59)
+                GameTooltip:AddDoubleLine("Online presence refreshed", tostring(math.floor(presenceAge)) .. "s ago", 0.80, 0.80, 0.80, 0.45, 1, 0.45)
+            end
+        else
+            GameTooltip:AddLine("Roster information is not available yet. Use Refresh Roster when you want to update it.", 0.75, 0.75, 0.75, true)
+        end
+        GameTooltip:AddLine("This indicator only shows the latest roster information already available to the addon.", 0.55, 0.72, 1, true)
+        GameTooltip:Show()
+    end)
+    onlineIndicator:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    self.ui.headerOnline183 = onlineIndicator
     self.ui.closeButton = UI:IconButton(header, "Interface\\Buttons\\UI-Panel-MinimizeButton-Up", 30, 30, function()
-        OTLGM:CloseShellTransient(true)
-        OTLGM.ui.shellParkTab:Hide()
-        if OTLGM.ui.windowParkTab176 then OTLGM.ui.windowParkTab176:Hide() end
-        OTLGM.ui.main:Hide()
+        OTLGM:HandleMainClose183()
     end, "Close", "danger")
     self.ui.closeButton:SetPoint("TOPRIGHT", header, "TOPRIGHT", -10, -11)
+    self:RefreshHeaderOnlineIndicator183()
 
     -- Sidebar and owned page header/content host.
     local sidebar = UI:Surface(frame, "surface", 188, 652)
@@ -3261,7 +4017,7 @@ function OTLGM:BuildUI()
     self.ui.settingsButton.icon:SetWidth(16)
     self.ui.settingsButton.icon:SetHeight(16)
     self.ui.settingsButton.icon:SetPoint("LEFT", self.ui.settingsButton, "LEFT", 8, 0)
-    self.ui.addonUsersButton = UI:Button(sidebar, "Addon Users", 164, 28, function() OTLGM:ToggleAddonUsersDrawer() end, "utility")
+    self.ui.addonUsersButton = UI:Button(sidebar, "Sharing", 164, 28, function() OTLGM:ToggleAddonUsersDrawer() end, "utility")
     self.ui.addonUsersButton:SetPoint("BOTTOMLEFT", sidebar, "BOTTOMLEFT", 12, 12)
     self.ui.addonUsersButton.icon = self.ui.addonUsersButton:CreateTexture(nil, "ARTWORK")
     self.ui.addonUsersButton.icon:SetTexture("Interface\\Icons\\INV_Misc_Rune_01")
@@ -3281,7 +4037,20 @@ function OTLGM:BuildUI()
     local pageHeader = UI:Surface(frame, "raised", 936, 46)
     pageHeader:SetPoint("TOPLEFT", frame, "TOPLEFT", 212, -76)
     self.ui.pageHeader = pageHeader
-    self.ui.pageTitle = MakeLabel(pageHeader, "", "GameFontNormalLarge", 14, -7, 360, "LEFT")
+    -- Small icon plate: enough visual identity to separate pages at a glance,
+    -- but deliberately static/texture-only so it has no interaction or update cost.
+    self.ui.pageIconPlate184 = pageHeader:CreateTexture(nil, "BACKGROUND")
+    self.ui.pageIconPlate184:SetWidth(30)
+    self.ui.pageIconPlate184:SetHeight(30)
+    self.ui.pageIconPlate184:SetPoint("LEFT", pageHeader, "LEFT", 9, 0)
+    self.ui.pageIconPlate184:SetTexture(0.105, 0.070, 0.025, 1)
+    self.ui.pageIcon184 = pageHeader:CreateTexture(nil, "ARTWORK")
+    self.ui.pageIcon184:SetWidth(22)
+    self.ui.pageIcon184:SetHeight(22)
+    self.ui.pageIcon184:SetPoint("LEFT", pageHeader, "LEFT", 13, 0)
+    if self.ui.pageIcon184.SetTexCoord then self.ui.pageIcon184:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
+    self.ui.pageIcon184:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
+    self.ui.pageTitle = MakeLabel(pageHeader, "", "GameFontNormalLarge", 43, -7, 330, "LEFT")
     self.ui.pageTitle:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
     self.ui.pageSubtitle = MakeLabel(pageHeader, "", "GameFontNormalSmall", 390, -15, 528, "RIGHT")
     self.ui.pageSubtitle:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
@@ -3313,16 +4082,15 @@ function OTLGM:BuildUI()
     drawerHost:SetFrameStrata("DIALOG")
     drawerHost:SetFrameLevel(frame:GetFrameLevel() + 60)
     drawerHost:EnableMouse(true)
-    drawerHost:EnableKeyboard(true)
+    -- Keep character movement available while drawers are open. Escape is
+    -- handled by the main shell / UISpecialFrames cleanup path instead.
+    drawerHost:EnableKeyboard(false)
     local drawerShade = drawerHost:CreateTexture(nil, "BACKGROUND")
     drawerShade:SetTexture(0, 0, 0, 0.15)
     drawerShade:SetAllPoints(drawerHost)
     drawerHost.otlShadeAlpha = 0.15
     self.ui.drawerShade = drawerShade
     drawerHost:SetScript("OnClick", function() OTLGM:CloseShellDrawer() end)
-    drawerHost:SetScript("OnKeyDown", function()
-        if arg1 == "ESCAPE" then OTLGM:CloseShellDrawer() end
-    end)
     drawerHost:SetScript("OnHide", function()
         if OTLGM and OTLGM.ui and OTLGM.ui.activeDrawer then OTLGM.ui.activeDrawer:Hide() end
         if OTLGM and OTLGM.ui then OTLGM.ui.activeDrawer = nil end
@@ -3337,23 +4105,22 @@ function OTLGM:BuildUI()
     modalHost:SetFrameStrata("FULLSCREEN_DIALOG")
     modalHost:SetFrameLevel(frame:GetFrameLevel() + 100)
     modalHost:EnableMouse(true)
-    modalHost:EnableKeyboard(true)
+    -- The shade blocks addon clicks behind a modal but deliberately does not
+    -- capture keyboard input, so opening a form never stops normal movement.
+    modalHost:EnableKeyboard(false)
     local modalShade = modalHost:CreateTexture(nil, "BACKGROUND")
     modalShade:SetTexture(0, 0, 0, 0.18)
     modalShade:SetAllPoints(modalHost)
     modalHost.otlShadeAlpha = 0.18
     self.ui.modalShade = modalShade
     modalHost:SetScript("OnClick", function() end)
-    modalHost:SetScript("OnKeyDown", function()
-        if arg1 == "ESCAPE" then OTLGM:CloseModal180(nil, "escape") end
-    end)
     modalHost:SetScript("OnHide", function()
         if not OTLGM or not OTLGM.ui or OTLGM.ui.modalHostClosing180 then return end
         local stack = OTLGM.ui.modalStack180 or {}
         local index
         for index = table.getn(stack), 1, -1 do
             local frame = stack[index]
-            if frame and frame.IsVisible and frame:IsVisible() then
+            if frame and frame.Hide then
                 frame.otlClosing180 = true
                 frame:Hide()
                 frame.otlClosing180 = nil
@@ -3382,32 +4149,9 @@ function OTLGM:BuildUI()
     self.ui.shellToast:SetPoint("TOP", frame, "TOP", 0, -72)
     self.ui.shellToast:SetFrameLevel(frame:GetFrameLevel() + 50)
 
-    local parkTab = UI:IconButton(UIParent, "Interface\\AddOns\\OrderOfTheLionGM\\Assets\\LionCrest", 44, 44, function() end, "Restore Order of the Lion", "primary")
-    parkTab:SetFrameStrata("DIALOG")
-    parkTab:SetFrameLevel(60)
-    parkTab:SetMovable(true)
-    if parkTab.SetClampedToScreen then parkTab:SetClampedToScreen(false) end
-    parkTab:RegisterForDrag("LeftButton")
-    parkTab.otlTooltip = "Click to restore. Drag to move this parked crest."
-    parkTab.otlTooltipTitle = "Order of the Lion"
-    parkTab:SetScript("OnDragStart", function()
-        if OTLGM then OTLGM:BeginParkDrag180() end
-    end)
-    parkTab:SetScript("OnDragStop", function()
-        if OTLGM then OTLGM:EndParkDrag180() end
-    end)
-    parkTab:SetScript("OnHide", function()
-        if this.otlParkDrag180 and OTLGM then OTLGM:EndParkDrag180() end
-    end)
-    parkTab:SetScript("OnClick", function()
-        local suppressUntil = tonumber(this.otlSuppressClickUntil180)
-        if suppressUntil and GetTime and GetTime() <= suppressUntil then return end
-        this.otlSuppressClickUntil180 = nil
-        if OTLGM then OTLGM:UnparkWindow176() end
-    end)
-    parkTab:Hide()
-    self.ui.shellParkTab = parkTab
+    local parkTab = self:BuildQuickDock182()
     self:RestoreParkPosition180("build")
+    if self.InstallSocialGuildHook183 then self:InstallSocialGuildHook183() end
 
     self.ui.pages = {}
     for index = 1, table.getn(PAGE_DEFS) do

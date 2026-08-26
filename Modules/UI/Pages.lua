@@ -227,7 +227,9 @@ local function NEdit(parent, name, x, y, width, height, multiline)
             local text = this:GetText() or ""
             if text ~= "" then this:SetText("") return end
             if this:HasFocus() then this:ClearFocus() return end
-            if OTLGM and OTLGM.HandleEscape then OTLGM:HandleEscape() end
+            if OTLGM and OTLGM.CloseTopShellTransient180 and OTLGM:CloseTopShellTransient180() then return end
+            if OTLGM and OTLGM.CloseTopModal152 and OTLGM:CloseTopModal152() then return end
+            if OTLGM and OTLGM.ui and OTLGM.ui.main then OTLGM.ui.main:Hide() end
         end)
     end
     return edit
@@ -451,10 +453,10 @@ function OTLGM.__impl180.Stage_UINext_BuildNextProfessionsPage_1__impl1(self, pa
     NIcon(self.ui.craftingTabButtons.REQUESTS, "Interface\\Icons\\INV_Letter_15", 16)
     self.ui.craftingNetworkText = NText(page, "GameFontNormalSmall", "Network: checking", 442, -65, 158, "RIGHT")
     self.ui.craftingNetworkText:SetTextColor(0.58, 0.58, 0.58)
-    self.ui.craftingSyncButton = NButton(page, "Sync Now", 614, -58, 104, 30, function()
+    self.ui.craftingSyncButton = NButton(page, "Check Updates", 606, -58, 112, 30, function()
         OTLGM:RequestAddonUserPing()
         OTLGM:RequestCraftingSync(true, true)
-        OTLGM:SetStatus("Requesting current crafting data from online addon users...", nil, { source = "crafting", manual = true })
+        OTLGM:SetStatus("Checking for current profession updates from online guildmates...", nil, { source = "crafting", manual = true })
     end, "utility")
 
     self.ui.craftingPanels = {}
@@ -606,13 +608,13 @@ function OTLGM.__impl180.Stage_UINext_BuildRecipesPanel_1__impl1(self, page)
         local result = OTLGM.ui.craftingSelectedRecipeData
         local link = result and OTLGM:GetCraftingItemLink154(result.recipe)
         if link then OTLGM:OpenGuildChatWithLink154(link)
-        else OTLGM:ShowNotice("Item Link", "The item link is not cached yet. Open or inspect the item once, then try again.") end
+        else OTLGM:ShowNotice("Item Link", "The item link is not available yet. Open or inspect the item once, then try again.") end
     end, "utility")
     self.ui.craftingRecipeLinkButton152 = NButton(crafters, "Link Recipe", 138, -354, 72, 26, function()
         local result = OTLGM.ui.craftingSelectedRecipeData
         local link = result and OTLGM:GetCraftingRecipeLink154(result.recipe)
         if link then OTLGM:OpenGuildChatWithLink154(link)
-        else OTLGM:ShowNotice("Recipe Link", "This recipe link was not included in the scan. Ask the crafter to reopen the profession window with the latest addon.") end
+        else OTLGM:ShowNotice("Recipe Link", "This recipe link is not available yet. Ask the crafter to reopen the profession window with the latest addon.") end
     end, "utility")
     self.ui.craftingRequestButton = NButton(crafters, "Request This Craft", 10, -386, 200, 26, function()
         local result = OTLGM.ui.craftingSelectedRecipeData
@@ -645,7 +647,7 @@ function OTLGM.__impl180.ProcessUIDebounce__impl1(self, elapsed)
             self:RefreshProfessionsPage()
         end
     end
-    if self.ui.currentPage == "achievements" and self.ui.achievementSearchDirty180 then
+    if self.ui.currentPage == "achievements" and self.ui.achievementSearchDirty180 and not self.ui.achievementProgrammaticFocus180 then
         self.ui.achievementSearchElapsed180 = (self.ui.achievementSearchElapsed180 or 0) + elapsed
         if self.ui.achievementSearchElapsed180 >= 0.25 then
             self.ui.achievementSearchDirty180 = nil
@@ -824,7 +826,6 @@ function OTLGM:OpenCraftingRequestDialog(item, template)
     dialog.noteEdit:SetText("")
     self:ShowModal152(dialog)
     self:RefreshCraftingRequestDialog()
-    dialog.itemEdit:SetFocus()
 end
 
 function OTLGM:RefreshCraftingRequestDialog()
@@ -862,10 +863,10 @@ function OTLGM.__impl180.RefreshProfessionsPage__impl1(self)
     local craft = self:EnsureCraftingDB()
     local syncState = craft and craft.syncState or nil
     if syncState and syncState.active then
-        self.ui.craftingNetworkText:SetText(self.colors.gold .. "Syncing: " .. tostring(syncState.received or 0) .. " snapshot(s)" .. self.colors.reset)
-        NSetEnabled(self.ui.craftingSyncButton, false, "Crafting data is already being synchronized.")
+        self.ui.craftingNetworkText:SetText(self.colors.gold .. "Updating shared recipes… " .. tostring(syncState.received or 0) .. " received" .. self.colors.reset)
+        NSetEnabled(self.ui.craftingSyncButton, false, "Shared recipe data is already updating.")
     else
-        self.ui.craftingNetworkText:SetText(self.colors.green .. "Network: " .. tostring(online) .. " online" .. self.colors.reset)
+        self.ui.craftingNetworkText:SetText(self.colors.green .. "Sharing: " .. tostring(online) .. " online" .. self.colors.reset)
         NSetEnabled(self.ui.craftingSyncButton, true)
     end
     NSetButtonText(self.ui.craftingTabButtons.RECIPES, "Recipes" .. (self:GetCraftingUnread("RECIPES") > 0 and (" (" .. tostring(self:GetCraftingUnread("RECIPES")) .. ")") or ""))
@@ -1000,14 +1001,14 @@ function OTLGM.__impl180.Stage_UINext_RefreshCraftingRecipesPanel_1__impl1(self,
             row.nameText:SetText(self:GetClassColor(crafter.class) .. NShort(crafter.name, 16) .. self.colors.reset)
             row.statusText:SetText(crafter.online and (self.colors.green .. "ONLINE" .. self.colors.reset) or self.colors.grey .. "OFFLINE" .. self.colors.reset)
             local age = math.max(0, self:Now() - (tonumber(crafter.ts) or 0))
-            local freshness = age < 86400 and "Scanned today" or (age < 30 * 86400 and ("Scanned " .. NAge(self, crafter.ts)) or "Data may be outdated")
+            local freshness = age < 86400 and "Updated today" or (age < 30 * 86400 and ("Updated " .. NAge(self, crafter.ts)) or "Information may be outdated")
             row.ageText:SetText((specialization and (specialization .. "  |  ") or "") .. freshness)
             NSetSelected(row, selectedCrafter and selectedCrafter.name == crafter.name)
             row:Show()
         else row.crafterData = nil row:Hide() end
     end
     NSetEnabled(self.ui.craftingWhisperButton, selectedCrafter ~= nil, "Select a guild crafter first.")
-    NSetEnabled(self.ui.craftingLinkButton, selected and self:GetCraftingItemLink154(selected.recipe) ~= nil, "The item link is not cached yet.")
+    NSetEnabled(self.ui.craftingLinkButton, selected and self:GetCraftingItemLink154(selected.recipe) ~= nil, "The item link is not available yet.")
     NSetEnabled(self.ui.craftingRecipeLinkButton152, selected and self:GetCraftingRecipeLink154(selected.recipe) ~= nil, "The crafter must rescan this profession with the current addon version to share its recipe link.")
     NSetEnabled(self.ui.craftingRequestButton, selected ~= nil or query ~= "", "Select a recipe or enter what you need.")
 end
@@ -1227,9 +1228,14 @@ function OTLGM:BuildNextHeaderAndFooter()
     self:RefreshDateIndicator(true)
 
     self.ui.updateWarning = NButton(frame, "UPDATE AVAILABLE", 0, 0, 150, 22, function()
-        OTLGM:ShowPage("settings")
-        if OTLGM.ShowSettingsSection then OTLGM:ShowSettingsSection("DATA") end
-    end, "danger")
+        if OTLGM.OpenVersionDetailsR47 then OTLGM:OpenVersionDetailsR47()
+        else
+            OTLGM:ShowPage("settings")
+            if OTLGM.SetSettingsShellTab then OTLGM:SetSettingsShellTab("ABOUT")
+            elseif OTLGM.ShowSettingsSection then OTLGM:ShowSettingsSection("ABOUT") end
+        end
+    end, "primary")
+    self.ui.updateWarning.otlTooltip = "A newer addon version has been confirmed by guild clients. Click for version details."
     self.ui.updateWarning:ClearAllPoints()
     self.ui.updateWarning:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -24, -78)
     self.ui.updateWarning:SetFrameLevel(frame:GetFrameLevel() + 20)
@@ -1291,9 +1297,13 @@ function OTLGM:BuildNextSettingsEnhancements()
     local data = self.ui.settingsPanels and self.ui.settingsPanels.DATA
     if not data then return end
     local page = data:GetParent()
-    self.ui.copyDiagnosticsButton = NButton(data, "Copy Diagnostic Report", 14, -348, 180, 30, function()
-        OTLGM:ShowCopyDialog("OTLGM Diagnostic Report", OTLGM:GetDiagnosticsText())
-    end, "utility")
+    self.ui.copyDiagnosticsButton = NButton(data, "Report Issue", 14, -348, 180, 30, function()
+        if OTLGM.OpenSupportCenterR59 then OTLGM:OpenSupportCenterR59(false)
+        else
+            if OTLGM.ShowPage then OTLGM:ShowPage("settings") end
+            if OTLGM.SetSettingsShellTab then OTLGM:SetSettingsShellTab("SUPPORT") end
+        end
+    end, "danger")
     self.ui.cleanCraftingButton = NButton(data, "Clean Expired Data", 204, -348, 160, 30, function()
         OTLGM:PurgePveData(true)
         OTLGM:PurgeCraftingData(true)
@@ -1463,9 +1473,18 @@ end
 
 function OTLGM:RefreshUpdateWarning()
     if not self.ui or not self.ui.updateWarning then return end
-    local _, latest = self:GetDetectedAddonUsers(86400)
+    local latest = nil
+    if self.GetTrustedUpdateVersionR47 then
+        latest = self:GetTrustedUpdateVersionR47()
+    else
+        local _, legacyLatest = self:GetDetectedAddonUsers(86400)
+        if legacyLatest and self:IsVersionNewer(legacyLatest, self.version) then latest = legacyLatest end
+    end
     if latest and self:IsVersionNewer(latest, self.version) then
-        NSetButtonText(self.ui.updateWarning, "UPDATE  v" .. tostring(latest))
+        local label = self.GetFriendlyVersionLabelR47 and self:GetFriendlyVersionLabelR47(latest) or tostring(latest)
+        NSetButtonText(self.ui.updateWarning, "UPDATE  " .. tostring(label))
+        self.ui.updateWarning.actionStyle = "primary"
+        if self.ApplyButtonSkin then self:ApplyButtonSkin(self.ui.updateWarning) end
         self.ui.updateWarning:Show()
     else self.ui.updateWarning:Hide() end
 end
@@ -1542,7 +1561,7 @@ function OTLGM.__impl180.RefreshNavigation__impl1(self)
         self.ui.officerSectionButton:Show()
         cursor = cursor - 22
         if officerOpen then
-            local officerKeys = { "overview", "recruitment", "history", "inactive" }
+            local officerKeys = { "overview", "guildadmin", "recruitment", "history", "inactive" }
             local i
             for i = 1, table.getn(officerKeys) do cursor = PlaceNavigationButton(officerKeys[i], middleChild, 0, cursor, 22) end
         end
@@ -1611,7 +1630,7 @@ function OTLGM.__impl180.RefreshNavigation__impl1(self)
     local visibleSelection = self.ui.currentPage == "guildinfo" and "home" or self.ui.currentPage
     for key, button in pairs(self.ui.navButtons or {}) do NSetSelected(button, key == visibleSelection) end
     NSetSelected(self.ui.guildSectionButton, visibleSelection == "roster" or visibleSelection == "professions" or visibleSelection == "activity" or visibleSelection == "achievements" or visibleSelection == "treasury")
-    NSetSelected(self.ui.officerSectionButton, visibleSelection == "overview" or visibleSelection == "recruitment" or visibleSelection == "history" or visibleSelection == "inactive")
+    NSetSelected(self.ui.officerSectionButton, visibleSelection == "overview" or visibleSelection == "guildadmin" or visibleSelection == "recruitment" or visibleSelection == "history" or visibleSelection == "inactive")
     self:RefreshUpdateWarning()
     if self.RefreshExperienceNavigation170 then self:RefreshExperienceNavigation170() end
 end
@@ -1664,7 +1683,7 @@ function OTLGM.__impl180.RefreshOverviewPage__impl1(self)
         self.ui.overviewFreshness:SetText("Joined " .. tostring(comparison.joins) .. "  |  Left " .. tostring(comparison.leaves) .. "  |  Compared with " .. date("%d %b", comparison.previous.ts or self:Now()))
     else
         self.ui.overviewGrowth:SetText("WEEKLY COMPARISON")
-        self.ui.overviewChanges:SetText("A reliable comparison will appear after the addon stores a roster snapshot close to seven days old.")
+        self.ui.overviewChanges:SetText("A reliable comparison will appear after the addon has about a week of guild history.")
         self.ui.overviewFreshness:SetText("Current week: " .. tostring(comparison.current.total or 0) .. " members, " .. tostring(comparison.current.level60 or 0) .. " level 60.")
     end
 end
@@ -1982,7 +2001,7 @@ function OTLGM.__impl180.Stage_UINext_GetCraftingSearchResults_2__impl1(self, qu
     local onlineOnly = OTLGM_DB.settings.craftingOnlineOnly153 and true or false
     local favoritesOnly = OTLGM_DB.settings.craftingFavoritesOnly170 and true or false
     local filtered = {}
-    local i, result, quality, requiredLevel, itemLevel, itemType, itemSubType, equipLoc, requiredSkill, levelValue, hasOnline, favorite, j
+    local i, result, quality, requiredLevel, itemLevel, itemType, itemSubType, equipLoc, requiredSkill, levelValue, hasOnline, favorite, j, totalCraftersR46, recentCraftersR46
     for i = 1, table.getn(results) do
         result = results[i]
         quality, requiredLevel, itemLevel, itemType, itemSubType, equipLoc, requiredSkill = NGetItemMeta153(result.recipe)
@@ -1991,6 +2010,9 @@ function OTLGM.__impl180.Stage_UINext_GetCraftingSearchResults_2__impl1(self, qu
         else levelValue = itemLevel end
         hasOnline = false
         for j = 1, table.getn(result.crafters or {}) do if result.crafters[j].online then hasOnline = true break end end
+        totalCraftersR46 = table.getn(result.crafters or {})
+        recentCraftersR46 = tonumber(result.recentCrafterCountR46)
+        if recentCraftersR46 == nil then recentCraftersR46 = totalCraftersR46 end
         favorite = self.IsCraftingFavorite170 and self:IsCraftingFavorite170(result) or false
         if (category == "ALL" or self:GetCraftingCategory153(result) == category) and NMatchesLevel153(levelValue, levelFilter) and NMatchesRarity153(quality, rarityFilter) and (not onlineOnly or hasOnline) and (not favoritesOnly or favorite) then
             result.filterQuality153 = quality
@@ -2000,13 +2022,19 @@ function OTLGM.__impl180.Stage_UINext_GetCraftingSearchResults_2__impl1(self, qu
             result.filterLevel170 = levelValue
             result.filterHasOnline153 = hasOnline
             result.filterFavorite170 = favorite
+            result.filterRecentCraftersR46 = recentCraftersR46
+            result.filterOlderOnlyR46 = totalCraftersR46 > 0 and recentCraftersR46 <= 0
             table.insert(filtered, result)
         end
     end
     local sortKey = OTLGM_DB.settings.craftingSort153 or "ONLINE"
     table.sort(filtered, function(a, b)
         if a.filterFavorite170 ~= b.filterFavorite170 then return a.filterFavorite170 and true or false end
-        if sortKey == "ONLINE" and a.filterHasOnline153 ~= b.filterHasOnline153 then return a.filterHasOnline153 and true or false end
+        if sortKey == "ONLINE" then
+            if a.filterHasOnline153 ~= b.filterHasOnline153 then return a.filterHasOnline153 and true or false end
+            if a.filterOlderOnlyR46 ~= b.filterOlderOnlyR46 then return not a.filterOlderOnlyR46 end
+            if (a.filterRecentCraftersR46 or 0) ~= (b.filterRecentCraftersR46 or 0) then return (a.filterRecentCraftersR46 or 0) > (b.filterRecentCraftersR46 or 0) end
+        end
         if sortKey == "LEVEL" and (a.filterLevel170 or 0) ~= (b.filterLevel170 or 0) then return (a.filterLevel170 or 0) > (b.filterLevel170 or 0) end
         if sortKey == "RARITY" and (a.filterQuality153 or 0) ~= (b.filterQuality153 or 0) then return (a.filterQuality153 or 0) > (b.filterQuality153 or 0) end
         if sortKey == "RECENT" then
@@ -2014,7 +2042,10 @@ function OTLGM.__impl180.Stage_UINext_GetCraftingSearchResults_2__impl1(self, qu
             local bt = b.crafters and b.crafters[1] and b.crafters[1].ts or 0
             if at ~= bt then return at > bt end
         end
-        if sortKey == "CRAFTERS" and table.getn(a.crafters or {}) ~= table.getn(b.crafters or {}) then return table.getn(a.crafters or {}) > table.getn(b.crafters or {}) end
+        if sortKey == "CRAFTERS" then
+            if (a.filterRecentCraftersR46 or 0) ~= (b.filterRecentCraftersR46 or 0) then return (a.filterRecentCraftersR46 or 0) > (b.filterRecentCraftersR46 or 0) end
+            if table.getn(a.crafters or {}) ~= table.getn(b.crafters or {}) then return table.getn(a.crafters or {}) > table.getn(b.crafters or {}) end
+        end
         return string.lower(a.recipe and a.recipe.name or "") < string.lower(b.recipe and b.recipe.name or "")
     end)
     return filtered

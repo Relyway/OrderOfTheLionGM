@@ -7,7 +7,7 @@ local PreviousGetCraftingProfessionCounts160 = OTLGM.__impl180.Stage_Crafting_Ge
 local PreviousOnCraftingDataChanged160 = OTLGM.__impl180.Stage_Systems152_OnCraftingDataChanged_2__impl1
 
 local CACHE_LIMIT = 12
-local CACHE_AGE = 10
+local CACHE_AGE = 45
 
 local function EnsureSearchCache(self)
     self.runtime = self.runtime or {}
@@ -19,14 +19,15 @@ end
 
 local function CacheKey(self, query, professionFilter)
     local settings = OTLGM_DB and OTLGM_DB.settings or {}
-    local db = self:GetGuildDB()
+    local activityTokenR46 = self.GetCraftingRosterActivityTokenR46 and self:GetCraftingRosterActivityTokenR46() or "legacy"
     return table.concat({
         self:NormalizeText(query or ""), tostring(professionFilter or "ALL"),
         self.craftingFilterContext153 and "FILTERED" or "BASE",
         tostring(settings.craftingCategory153 or "ALL"), tostring(settings.craftingLevelFilter153 or "ANY"),
         tostring(settings.craftingLevelBasis170 or "ITEM"), tostring(settings.craftingRarityFilter153 or "ANY"),
         tostring(settings.craftingSort153 or "ONLINE"), settings.craftingOnlineOnly153 and "ONLINE" or "ANY",
-        settings.craftingFavoritesOnly170 and "FAVORITES" or "ALL_RECIPES", tostring(db and db.lastScan or 0),
+        settings.craftingFavoritesOnly170 and "FAVORITES" or "ALL_RECIPES",
+        tostring(self.ui and self.ui.craftingCrafterFilterR42 or ""), tostring(activityTokenR46),
     }, "\031")
 end
 
@@ -46,6 +47,24 @@ function OTLGM:InvalidateCraftingSearchCache()
     cache.order = {}
 end
 
+local function FilterByCrafterR42(self, results)
+    local wanted = self.ui and self.ui.craftingCrafterFilterR42 or nil
+    wanted = wanted and self:NormalizeText(wanted) or ""
+    if wanted == "" then return results end
+    local filtered, index, crafterIndex, result, crafter = {}
+    for index = 1, table.getn(results or {}) do
+        result = results[index]
+        for crafterIndex = 1, table.getn(result and result.crafters or {}) do
+            crafter = result.crafters[crafterIndex]
+            if self:NormalizeText(crafter and crafter.name or "") == wanted then
+                table.insert(filtered, result)
+                break
+            end
+        end
+    end
+    return filtered
+end
+
 function OTLGM:GetCraftingSearchResults(query, professionFilter)
     local cache = EnsureSearchCache(self)
     local key = CacheKey(self, query, professionFilter)
@@ -55,7 +74,7 @@ function OTLGM:GetCraftingSearchResults(query, professionFilter)
         cache.hits = cache.hits + 1
         return entry.value
     end
-    local results = PreviousGetCraftingSearchResults160(self, query, professionFilter)
+    local results = FilterByCrafterR42(self, PreviousGetCraftingSearchResults160(self, query, professionFilter))
     cache.builds = cache.builds + 1
     Put(cache, key, results, now)
     return results
@@ -70,17 +89,35 @@ function OTLGM:GetCraftingProfessionCounts(query)
         cache.hits = cache.hits + 1
         return entry.value
     end
-    local counts = PreviousGetCraftingProfessionCounts160(self, query)
+    local counts
+    if self.ui and self.ui.craftingCrafterFilterR42 then
+        counts = {}
+        local results = self:GetCraftingSearchResults(query, "ALL")
+        local index, result
+        for index = 1, table.getn(results or {}) do
+            result = results[index]
+            counts[result.professionKey] = (tonumber(counts[result.professionKey]) or 0) + 1
+            counts.ALL = (tonumber(counts.ALL) or 0) + 1
+        end
+    else
+        counts = PreviousGetCraftingProfessionCounts160(self, query)
+    end
     cache.builds = cache.builds + 1
     Put(cache, key, counts, now)
     return counts
 end
 
 function OTLGM:OnCraftingDataChanged(section, remote)
-    self.runtime = self.runtime or {}
-    self.runtime.craftingDataRevisionRC3 = (tonumber(self.runtime.craftingDataRevisionRC3) or 0) + 1
-    self.runtime.craftingLastChangeAtRC3 = self:Now()
-    self:InvalidateCraftingSearchCache()
+    if self.InvalidateCraftingDerivedCachesR46 then
+        self:InvalidateCraftingDerivedCachesR46(section or "data", true)
+    else
+        self.runtime = self.runtime or {}
+        self.runtime.craftingDataRevisionRC3 = (tonumber(self.runtime.craftingDataRevisionRC3) or 0) + 1
+        self.runtime.craftingLastChangeAtRC3 = self:Now()
+        if self.InvalidateCraftingAggregateIndexR30 then self:InvalidateCraftingAggregateIndexR30(section or "data") end
+        self:InvalidateCraftingSearchCache()
+        if self.InvalidateGlobalSearchCache185 then self:InvalidateGlobalSearchCache185("crafting") end
+    end
     return PreviousOnCraftingDataChanged160(self, section, remote)
 end
 

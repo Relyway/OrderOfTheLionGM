@@ -7,8 +7,8 @@ OTLGM.__impl180 = OTLGM.__impl180 or {}
 
 OTLGM.name = "Order of the Lion Guild Manager"
 OTLGM.addonName = "OrderOfTheLionGM"
-OTLGM.version = "1.8.0"
-OTLGM.build = "final-public-20260808"
+OTLGM.version = "1.8.3"
+OTLGM.build = "release-1.8.3-20260827"
 OTLGM.hotfix = nil
 OTLGM.schemaVersion = 15
 OTLGM.protocolVersion = 3

@@ -497,6 +497,7 @@ local function SnapshotOldIcons157(profession)
             icon = recipe.icon, quality = recipe.quality, itemLevel = recipe.itemLevel, requiredLevel = recipe.requiredLevel,
             itemType = recipe.itemType, itemSubType = recipe.itemSubType, equipLoc = recipe.equipLoc,
             itemLink = recipe.itemLink, recipeLink = recipe.recipeLink, effectText = recipe.effectText,
+            effectSource183 = recipe.effectSource183, effectChecked = recipe.effectChecked,
             requiredSkill = recipe.requiredSkill, requirementText = recipe.requirementText,
             requirementChecked = recipe.requirementChecked, detailKey = recipe.detailKey, detailHash = recipe.detailHash,
             materialsStatus = recipe.materialsStatus, materialsAvailable = recipe.materialsAvailable,
@@ -617,7 +618,19 @@ function OTLGM.__impl180.ScanCurrentProfession__impl1(self, mode, attempt)
                 if (not recipe.equipLoc or recipe.equipLoc == "") and stored.equipLoc and stored.equipLoc ~= "" then recipe.equipLoc = stored.equipLoc restored = true end
                 if (not recipe.itemLink or recipe.itemLink == "") and stored.itemLink and stored.itemLink ~= "" then recipe.itemLink = stored.itemLink restored = true end
                 if (not recipe.recipeLink or recipe.recipeLink == "") and stored.recipeLink and stored.recipeLink ~= "" then recipe.recipeLink = stored.recipeLink restored = true end
-                if (not recipe.effectText or recipe.effectText == "") and stored.effectText and stored.effectText ~= "" then recipe.effectText = stored.effectText restored = true end
+                if (not recipe.effectText or recipe.effectText == "") and stored.effectText and stored.effectText ~= "" then
+                    local derivedStoredEffectR24 = self.IsDerivedEnchantEffect183 and self:IsDerivedEnchantEffect183(recipe, stored.effectText)
+                    local restoredEffectSourceR24 = tostring(stored.effectSource183 or recipe.effectSource183 or "")
+                    if restoredEffectSourceR24 == "" then restoredEffectSourceR24 = "LEGACY_NATIVE" end
+                    if self.NormalizeEnchantEffectSourceR24 then restoredEffectSourceR24 = self:NormalizeEnchantEffectSourceR24(restoredEffectSourceR24) end
+                    local trustedStoredEffectR24 = self.IsTrustedEnchantEffectSourceR24 and self:IsTrustedEnchantEffectSourceR24(restoredEffectSourceR24)
+                    if not derivedStoredEffectR24 and trustedStoredEffectR24 then
+                        recipe.effectText = stored.effectText
+                        recipe.effectSource183 = restoredEffectSourceR24
+                        recipe.effectChecked = stored.effectChecked and true or recipe.effectChecked
+                        restored = true
+                    end
+                end
                 if (not recipe.requirementText or recipe.requirementText == "") and stored.requirementText and stored.requirementText ~= "" then recipe.requirementText = stored.requirementText restored = true end
                 if stored.requirementChecked then recipe.requirementChecked = true end
                 if stored.detailKey then recipe.detailKey = stored.detailKey end
@@ -653,8 +666,25 @@ function OTLGM.__impl180.ScanCurrentProfession__impl1(self, mode, attempt)
             if detail then
                 if (tonumber(recipe.requiredSkill) or 0) <= 0 and (tonumber(detail.requiredSkill) or 0) > 0 then recipe.requiredSkill = detail.requiredSkill restored = true end
                 if (not recipe.requirementText or recipe.requirementText == "") and detail.requirementText and detail.requirementText ~= "" then recipe.requirementText = detail.requirementText restored = true end
-                if (not recipe.effectText or recipe.effectText == "") and detail.effectText and detail.effectText ~= "" then recipe.effectText = detail.effectText restored = true end
+                if (not recipe.effectText or recipe.effectText == "") and detail.effectText and detail.effectText ~= "" then
+                    local derivedEffect = self.IsDerivedEnchantEffect183 and self:IsDerivedEnchantEffect183(recipe, detail.effectText)
+                    local detailEffectSourceR24 = tostring(detail.effectSource183 or recipe.effectSource183 or "")
+                    if detailEffectSourceR24 == "" then detailEffectSourceR24 = "LEGACY_NATIVE" end
+                    if self.NormalizeEnchantEffectSourceR24 then detailEffectSourceR24 = self:NormalizeEnchantEffectSourceR24(detailEffectSourceR24) end
+                    local trustedDetailEffectR24 = self.IsTrustedEnchantEffectSourceR24 and self:IsTrustedEnchantEffectSourceR24(detailEffectSourceR24)
+                    if not derivedEffect and trustedDetailEffectR24 then
+                        recipe.effectText = detail.effectText
+                        recipe.effectSource183 = detailEffectSourceR24
+                        recipe.effectChecked = detail.effectChecked and true or recipe.effectChecked
+                        restored = true
+                    end
+                end
                 if detail.requirementChecked then recipe.requirementChecked = true end
+                if detail.personalOnlyR27 then
+                    recipe.personalOnlyR27 = true
+                    recipe.personalReasonR27 = detail.personalReasonR27 or "BOP_OUTPUT"
+                    restored = true
+                end
                 recipe.detailKey = detail.key or recipe.detailKey
                 recipe.detailHash = detail.detailHash or recipe.detailHash
             end
@@ -669,6 +699,10 @@ function OTLGM.__impl180.ScanCurrentProfession__impl1(self, mode, attempt)
             self:QueueCraftingProfessionShare(player, professionKey)
         end
         if self.QueueOpenProfessionDetails then self:QueueOpenProfessionDetails(mode, profession) end
+        if mode ~= "CRAFT" and self.InstallEnchantingSelectionCaptureR24 then self:InstallEnchantingSelectionCaptureR24() end
+        if professionKey == "ENCHANTING" and self.ScheduleSelectedTradeSkillNativeProbeR24 then
+            self:ScheduleSelectedTradeSkillNativeProbeR24("profession-scan")
+        end
     end
     return ok, changed
 end
@@ -677,12 +711,22 @@ function OTLGM:QueueCraftingProfessionShare(ownerName, professionKey, target)
     local craft = PreviousEnsureCraftingDB157(self)
     local character = craft and craft.characters and craft.characters[ownerName]
     local profession = character and character.professions and character.professions[professionKey]
-    if profession then
-        self:HydrateProfessionIcons157(profession, 12)
-        self:QueueCraftingIconHydration180(ownerName, professionKey, profession, "SHARE")
+    if not character or not profession then return false end
+    local localOwner = character.localOwner or profession.localOwner
+    if character.localOwner and not profession.localOwner then profession.localOwner = true localOwner = true end
+    if target and not localOwner then
+        -- R26: do not relay another player's cached full profession. Relaying
+        -- cached guild state made four SYNC peers multiply into dozens of
+        -- transfers/chunks. The actual owner (including this account's offline
+        -- alts, which remain localOwner) is authoritative for full snapshots.
+        self.runtime = self.runtime or {}
+        self.runtime.craftingRemoteRelayBlockedR26 = (tonumber(self.runtime.craftingRemoteRelayBlockedR26) or 0) + 1
+        return false
     end
+    self:HydrateProfessionIcons157(profession, 6)
+    self:QueueCraftingIconHydration180(ownerName, professionKey, profession, "SHARE")
     if not target then return self:QueueCraftingChangeManifest157(ownerName, professionKey) end
-    return PreviousQueueCraftingProfessionShare157(self, ownerName, professionKey, target, true)
+    return PreviousQueueCraftingProfessionShare157(self, ownerName, professionKey, target, false)
 end
 
 function OTLGM:ApplyRemoteRecipeSnapshot155(fields, sender, channel)
@@ -717,18 +761,21 @@ end
 
 -- ---------------------------------------------------------------------------
 -- Manifest-based crafting sync. Only changed professions transfer full data.
--- Cached professions may be relayed so late/offline owners do not fragment the DB.
+-- R26 manifests/full snapshots are authoritative local-owner data only; cached
+-- remote professions remain useful for display but are not re-broadcast as owners.
 -- ---------------------------------------------------------------------------
 
 local function ProfessionCompleteness157(profession)
     local recipeCount, iconCount, materialCount = 0, 0, 0
     local key, recipe, i, allIcons
     for key, recipe in pairs(profession and profession.recipes or {}) do
-        recipeCount = recipeCount + 1
-        if ValidTexture157(recipe.icon) then iconCount = iconCount + 1 end
-        allIcons = true
-        for i = 1, table.getn(recipe.reagents or {}) do if not ValidTexture157(recipe.reagents[i].icon) then allIcons = false break end end
-        if (recipe.materialsStatus == "COMPLETE" or recipe.materialsAvailable) and allIcons then materialCount = materialCount + 1 end
+        if not (OTLGM.IsShareableCraftingRecipeR27 and not OTLGM:IsShareableCraftingRecipeR27(recipe)) then
+            recipeCount = recipeCount + 1
+            if ValidTexture157(recipe.icon) then iconCount = iconCount + 1 end
+            allIcons = true
+            for i = 1, table.getn(recipe.reagents or {}) do if not ValidTexture157(recipe.reagents[i].icon) then allIcons = false break end end
+            if (recipe.materialsStatus == "COMPLETE" or recipe.materialsAvailable) and allIcons then materialCount = materialCount + 1 end
+        end
     end
     return recipeCount, iconCount, materialCount
 end
@@ -740,6 +787,10 @@ function OTLGM:QueueCraftingChangeManifest157(ownerName, professionKey)
     if not profession or not profession.localOwner then return false end
     local now = self:Now()
     if profession.lastSharedAt and now - profession.lastSharedAt < self.craftingShareCooldown then return false end
+    if profession.hashDirty184 and self.RehashCraftingProfession then
+        self:RehashCraftingProfession(profession)
+        profession.hashDirty184 = nil
+    end
     local count, iconCount, materialCount = ProfessionCompleteness157(profession)
     local entry = table.concat({
         Escape157(ownerName, 36), Escape157(professionKey, 20), tostring(tonumber(profession.ts) or now),
@@ -757,13 +808,20 @@ function OTLGM:QueueCraftingManifest157(target)
     local entries = {}
     local owner, character, professionKey, profession
     for owner, character in pairs(craft.characters or {}) do
-        for professionKey, profession in pairs(character.professions or {}) do
-            local count, iconCount, materialCount = ProfessionCompleteness157(profession)
-            if count > 0 then
-                table.insert(entries, table.concat({ Escape157(owner, 36), Escape157(professionKey, 20), tostring(tonumber(profession.ts) or 0), tostring(count), Escape157(profession.hash or "0", 20), tostring(iconCount), tostring(materialCount) }, ","))
+        if type(character) == "table" then
+            for professionKey, profession in pairs(character.professions or {}) do
+                if character.localOwner or (type(profession) == "table" and profession.localOwner) then
+                    if character.localOwner and not profession.localOwner then profession.localOwner = true end
+                    local count, iconCount, materialCount = ProfessionCompleteness157(profession)
+                    if count > 0 then
+                        table.insert(entries, table.concat({ Escape157(owner, 36), Escape157(professionKey, 20), tostring(tonumber(profession.ts) or 0), tostring(count), Escape157(profession.hash or "0", 20), tostring(iconCount), tostring(materialCount) }, ","))
+                    end
+                end
             end
         end
     end
+    self.runtime = self.runtime or {}
+    self.runtime.craftingLocalManifestEntriesR26 = table.getn(entries)
     table.sort(entries)
     local packet = ""
     local i, candidate
@@ -891,6 +949,45 @@ function OTLGM:ScheduleCraftingManifest157(target)
     return true
 end
 
+local function OrderedCraftingPeersR26(self, peers)
+    local ordered = {}
+    local count = table.getn(peers or {})
+    if count <= 0 then return ordered end
+    self.runtime = self.runtime or {}
+    local cursor = tonumber(self.runtime.craftingPeerCursorR26) or 0
+    local start = math.mod(cursor, count) + 1
+    local offset, index
+    for offset = 0, count - 1 do
+        index = math.mod((start - 1) + offset, count) + 1
+        table.insert(ordered, peers[index])
+    end
+    return ordered
+end
+
+local function QueueNextCraftingPeerR26(self, craft, now)
+    local state = craft and craft.syncState
+    if not state or not state.active then return false end
+    local candidates = state.peerCandidatesR26 or {}
+    local limit = math.min(tonumber(state.peerLimitR26) or 1, table.getn(candidates))
+    local index = (tonumber(state.peerIndexR26) or 0) + 1
+    if index > limit then return false end
+    local target = candidates[index]
+    if not target or target == "" then return false end
+    if not self:QueueCommunityPayload("C1^SYNC157^" .. tostring(self.version), "WHISPER", target, 2, "crafting:manifest-sync:" .. N157(target)) then
+        return false
+    end
+    state.peerIndexR26 = index
+    state.peerAttemptsR26 = (tonumber(state.peerAttemptsR26) or 0) + 1
+    state.lastPeerAttemptAtR26 = now
+    state.currentPeerR26 = target
+    state.peerAttemptedKeysR26 = state.peerAttemptedKeysR26 or {}
+    state.peerAttemptedKeysR26[N157(target)] = true
+    self.runtime = self.runtime or {}
+    self.runtime.craftingSyncPeerAttemptsR26 = (tonumber(self.runtime.craftingSyncPeerAttemptsR26) or 0) + 1
+    self.runtime.craftingPeerCursorR26 = math.mod((tonumber(self.runtime.craftingPeerCursorR26) or 0) + 1, math.max(1, table.getn(candidates)))
+    return true
+end
+
 function OTLGM.__impl180.RequestCraftingSync__impl1(self, force, manual)
     local craft = PreviousEnsureCraftingDB157(self)
     if not craft or not SendAddonMessage or not GetGuildInfo("player") then return false end
@@ -901,26 +998,36 @@ function OTLGM.__impl180.RequestCraftingSync__impl1(self, force, manual)
         self.runtime.craftingSyncCoalesced180 = (tonumber(self.runtime.craftingSyncCoalesced180) or 0) + 1
         return false
     end
-    if not force and craft.lastSync and now - craft.lastSync < 90 then return false end
+    -- R26: passive/page-open recovery is deliberately coarse. Live CCHG
+    -- broadcasts remain immediate, while repeated full recovery scans no longer
+    -- re-fan-out every 90/180 seconds. Manual force still bypasses this gate.
+    if not force and craft.lastSync and now - craft.lastSync < 300 then return false end
     local peers = self.GetCompatibleSyncPeersR2 and self:GetCompatibleSyncPeersR2(360) or {}
     if table.getn(peers) == 0 then
         self.runtime.craftingNoCompatiblePeerR2 = (tonumber(self.runtime.craftingNoCompatiblePeerR2) or 0) + 1
-        if manual and self.SetStatus then self:SetStatus("No compatible 1.8 profession peer is online yet. Cached recipes were kept.", nil, { source = "crafting", manual = true }) end
+        if manual and self.SetStatus then self:SetStatus("No compatible guildmate with profession sharing is online yet. Saved recipes were kept.", nil, { source = "crafting", manual = true }) end
         return false
     end
-    local queued = 0
-    local index, target
-    for index = 1, math.min(4, table.getn(peers)) do
-        target = peers[index]
-        if self:QueueCommunityPayload("C1^SYNC157^" .. tostring(self.version), "WHISPER", target, 2, "crafting:manifest-sync:" .. N157(target)) then queued = queued + 1 end
+    local ordered = OrderedCraftingPeersR26(self, peers)
+    local peerLimit = manual and math.min(3, table.getn(ordered)) or math.min(2, table.getn(ordered))
+    craft.syncState = {
+        active = true, started = now, received = 0, manifests157 = 0, requested157 = 0,
+        wanted157 = {}, deferred157 = {}, legacyFallback157 = false, manual180 = manual,
+        compatiblePeersR2 = table.getn(ordered), peerCandidatesR26 = ordered, peerLimitR26 = peerLimit,
+        peerIndexR26 = 0, peerAttemptsR26 = 0, lastPeerAttemptAtR26 = 0, peerAttemptedKeysR26 = {},
+    }
+    if not QueueNextCraftingPeerR26(self, craft, now) then
+        craft.syncState.active = false
+        return false
     end
-    if queued == 0 then return false end
     craft.lastSync = now
     self.lastCraftingSyncRequestAt = now
-    craft.syncState = { active = true, started = now, received = 0, manifests157 = 0, requested157 = 0, wanted157 = {}, deferred157 = {}, legacyFallback157 = false, manual180 = manual, compatiblePeersR2 = queued }
-    self.runtime.craftingSyncContext180 = manual and "manual" or "background"
-    if self.SetOperationState156 then self:SetOperationState156("CRAFTING", "WORKING", "Waiting for profession manifests", nil, { source = "crafting", manual = manual }) end
-    if manual and self.SetStatus then self:SetStatus("Requesting current profession manifests from compatible 1.8 addon users...", nil, { source = "crafting", manual = true }) end
+    local reason = manual and "manual" or (force and "forced-background" or "background")
+    self.runtime.craftingSyncContext180 = reason
+    self.runtime.craftingSyncReasonsR26 = self.runtime.craftingSyncReasonsR26 or {}
+    self.runtime.craftingSyncReasonsR26[reason] = (tonumber(self.runtime.craftingSyncReasonsR26[reason]) or 0) + 1
+    if self.SetOperationState156 then self:SetOperationState156("CRAFTING", "WORKING", "Waiting for profession updates", nil, { source = "crafting", manual = manual }) end
+    if manual and self.SetStatus then self:SetStatus("Checking for newer profession information from online guild members...", nil, { source = "crafting", manual = true }) end
     return true
 end
 
@@ -938,6 +1045,7 @@ function OTLGM:HandleCraftingManifest157(payload, sender)
     craft.syncState.wanted157 = craft.syncState.wanted157 or {}
     craft.syncState.manifests157 = (tonumber(craft.syncState.manifests157) or 0) + 1
     craft.syncState.lastManifestAt157 = self:Now()
+    craft.syncState.respondedPeerR26 = sender
     local entries = Split157(payload or "", "~")
     local i, fields, owner, professionKey, timestamp, count, hash, localProfession, key
     for i = 1, table.getn(entries) do
@@ -994,7 +1102,17 @@ function OTLGM:HandleCommunityAddonMessage(message, channel, sender)
             return self:HandleCraftingManifest157(fields[3] or "", sender)
         elseif kind == "CMEND" then
             local craft = PreviousEnsureCraftingDB157(self)
-            if craft and craft.syncState then craft.syncState.manifestComplete157 = true end
+            if craft and craft.syncState then
+                craft.syncState.manifestComplete157 = true
+                craft.syncState.lastManifestAt157 = self:Now()
+                craft.syncState.respondedPeerR26 = sender
+                if (tonumber(craft.syncState.manifests157) or 0) == 0 then
+                    -- A compatible peer with no local professions still replied;
+                    -- do not fan out to another peer just because CMAN was empty.
+                    craft.syncState.manifests157 = 1
+                    craft.syncState.emptyManifestR26 = true
+                end
+            end
             return true
         elseif kind == "CWANT" then
             local owner = Unescape157(fields[3] or "")
@@ -1035,7 +1153,16 @@ function OTLGM:HandleCommunityAddonMessage(message, channel, sender)
     return PreviousHandleCommunityAddonMessage157(self, message, channel, sender)
 end
 
-function OTLGM.__impl180.ProcessCraftingTimers__impl1(self)
+function OTLGM.__impl180.ProcessCraftingTimers__impl1(self, stageR26)
+    -- R26 lets the shared scheduler preempt between independent crafting
+    -- domains. Calls without a stage preserve the historical aggregate API.
+    if stageR26 == "BASE" then
+        PreviousProcessCraftingTimers157(self, 2)
+        return
+    elseif stageR26 == "DETAIL" then
+        if not (self.InCombat and self:InCombat()) and self.ProcessCraftingDetailQueue then self:ProcessCraftingDetailQueue(1) end
+        return
+    end
     local craft = PreviousEnsureCraftingDB157(self)
     local now = self:Now()
     local manifestKey, manifestPending
@@ -1047,18 +1174,26 @@ function OTLGM.__impl180.ProcessCraftingTimers__impl1(self)
         end
     end
     if craft and craft.syncState and craft.syncState.active then
-        local elapsed = now - (craft.syncState.started or now)
         -- Do not leave the UI in Syncing forever when no current addon peer
         -- replies. Existing cached professions remain intact; a later manual
         -- request can try again after the normal cooldown.
-        if elapsed >= 15 and (tonumber(craft.syncState.manifests157) or 0) == 0 then
-            local received = tonumber(craft.syncState.received) or 0
-            craft.syncState.active = false
-            craft.syncState.completed = now
-            if self.SetOperationState156 then self:SetOperationState156("CRAFTING", "DONE", received > 0 and ("Received " .. tostring(received) .. " legacy snapshots") or "No current profession manifest received", 4, { source = "crafting", manual = craft.syncState.manual180 }) end
-            if craft.syncState.manual180 and self.SetStatus and self.ui and self.ui.currentPage == "professions" then
-                if received > 0 then self:SetStatus("Crafting sync finished: received " .. tostring(received) .. " profession snapshot(s).", nil, { source = "crafting", manual = true })
-                else self:SetStatus("No compatible profession manifest replied; existing recipes were kept.", nil, { source = "crafting", manual = true }) end
+        if (tonumber(craft.syncState.manifests157) or 0) == 0 then
+            local lastAttempt = tonumber(craft.syncState.lastPeerAttemptAtR26) or tonumber(craft.syncState.started) or now
+            local tried = tonumber(craft.syncState.peerIndexR26) or 0
+            local limit = math.min(tonumber(craft.syncState.peerLimitR26) or 1, table.getn(craft.syncState.peerCandidatesR26 or {}))
+            if now - lastAttempt >= 8 and tried < limit then
+                -- Controlled fallback: exactly one additional peer is asked at a
+                -- time. We never fan out four identical recovery requests.
+                QueueNextCraftingPeerR26(self, craft, now)
+            elseif now - lastAttempt >= 10 and tried >= limit then
+                local received = tonumber(craft.syncState.received) or 0
+                craft.syncState.active = false
+                craft.syncState.completed = now
+                if self.SetOperationState156 then self:SetOperationState156("CRAFTING", "DONE", received > 0 and ("Received " .. tostring(received) .. " older profession update(s)") or "No profession update received", 4, { source = "crafting", manual = craft.syncState.manual180 }) end
+                if craft.syncState.manual180 and self.SetStatus and self.ui and self.ui.currentPage == "professions" then
+                    if received > 0 then self:SetStatus("Crafting update finished: received " .. tostring(received) .. " profession update(s).", nil, { source = "crafting", manual = true })
+                    else self:SetStatus("No compatible guild member shared profession data; existing recipes were kept.", nil, { source = "crafting", manual = true }) end
+                end
             end
         end
         local key, wanted
@@ -1087,15 +1222,16 @@ function OTLGM.__impl180.ProcessCraftingTimers__impl1(self)
         if outstanding == 0 and quiet >= 5 then
             craft.syncState.active = false
             craft.syncState.completed = now
-            if self.SetOperationState156 then self:SetOperationState156("CRAFTING", "DONE", "Received " .. tostring(craft.syncState.received or 0) .. " snapshots", 4, { source = "crafting", manual = craft.syncState.manual180 }) end
+            if self.SetOperationState156 then self:SetOperationState156("CRAFTING", "DONE", "Received " .. tostring(craft.syncState.received or 0) .. " profession update(s)", 4, { source = "crafting", manual = craft.syncState.manual180 }) end
             if craft.syncState.manual180 and self.SetStatus and self.ui and self.ui.currentPage == "professions" then
-                if (tonumber(craft.syncState.received) or 0) > 0 then self:SetStatus("Crafting sync complete: " .. tostring(craft.syncState.received) .. " updated profession snapshot(s).", nil, { source = "crafting", manual = true })
-                else self:SetStatus("Crafting sync complete: shared recipe database is already up to date.", nil, { source = "crafting", manual = true }) end
+                if (tonumber(craft.syncState.received) or 0) > 0 then self:SetStatus("Crafting update complete: " .. tostring(craft.syncState.received) .. " profession update(s) received.", nil, { source = "crafting", manual = true })
+                else self:SetStatus("Crafting update complete: shared recipes are already up to date.", nil, { source = "crafting", manual = true }) end
             end
         end
     end
-    PreviousProcessCraftingTimers157(self)
-    if not (self.InCombat and self:InCombat()) and self.ProcessCraftingDetailQueue then self:ProcessCraftingDetailQueue(4) end
+    if stageR26 == "SYNC" then return end
+    PreviousProcessCraftingTimers157(self, 2)
+    if not (self.InCombat and self:InCombat()) and self.ProcessCraftingDetailQueue then self:ProcessCraftingDetailQueue(1) end
 end
 
 -- ---------------------------------------------------------------------------
@@ -1280,7 +1416,7 @@ function OTLGM.__impl180.PublishPveRaidEvent156__impl1(self, data, existingId)
         self:QueueRaidMeta157(record)
         if self.ApplyRaidRosterSourceAfterPublish180 then
             local rosterOk, rosterError = self:ApplyRaidRosterSourceAfterPublish180(record, data, existingId)
-            if not rosterOk then return false, rosterError or "The raid roster snapshot could not be created." end
+            if not rosterOk then return false, rosterError or "The raid roster could not be prepared." end
         end
     end
     return ok, record
@@ -1453,7 +1589,6 @@ function OTLGM:OpenAnnouncementComposer152(id)
         dialog.pinned = false
         if OTLGM_DB and OTLGM_DB.settings then OTLGM_DB.settings.announcementDraftTitle153 = "" OTLGM_DB.settings.announcementDraftBody153 = "" end
         if self.RefreshAnnouncementComposer152 then self:RefreshAnnouncementComposer152() end
-        dialog.titleEdit:SetFocus()
     end
 end
 
@@ -1657,7 +1792,7 @@ function OTLGM.__impl180.GetDiagnosticsText__impl1(self)
         "\nCrafting manifest received/requested: " .. tostring(craft and craft.syncState and craft.syncState.manifests157 or 0) .. "/" .. tostring(craft and craft.syncState and craft.syncState.requested157 or 0) ..
         "\nRaid metadata cache: " .. tostring(Count157(pve and pve.raidMeta157)) ..
         "\nNetwork sent/retried/dropped/rejected: " .. tostring(metrics.sent or 0) .. "/" .. tostring(metrics.retried or 0) .. "/" .. tostring(metrics.dropped or 0) .. "/" .. tostring(metrics.rejected or 0) ..
-        "\nTargeted routed/received/skipped (non-recipient packets are normal): " .. tostring(metrics.targetedRouted or 0) .. "/" .. tostring(metrics.targetedReceived or 0) .. "/" .. tostring(metrics.targetedSkipped or metrics.targetedIgnored or 0) ..
+        "\nTargeted routed/received/skipped (non-recipient packets are normal): " .. tostring(metrics.targetedRouted or 0) .. "/" .. tostring(metrics.targetedReceived or 0) .. "/" .. tostring(metrics.targetedSkipped or metrics.targetedIgnored or 0) .. " (fast " .. tostring(metrics.targetedFastSkippedR44 or 0) .. ", self echo " .. tostring(metrics.selfEchoFastSkippedR44 or 0) .. ")" ..
         "\nTargeted display payloads shortened safely: " .. tostring(metrics.targetedTrimmed or 0) ..
         "\nOutbound payloads sanitized for chat compatibility: " .. tostring(metrics.outboundSanitized172 or 0) ..
         "\nRecovered network errors: " .. tostring(metrics.recovered or 0) ..

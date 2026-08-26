@@ -50,6 +50,15 @@ local function SafeH1(value, maximum)
     return value
 end
 
+local function DisplayActorR8(value)
+    local raw = tostring(value or "Leadership")
+    local lower = string.lower(raw)
+    local dash = string.find(lower, "-", 1, true)
+    local short = dash and string.sub(lower, 1, dash - 1) or lower
+    if short == "morrow" then return "Lucks" end
+    return raw
+end
+
 local function CountH1(tbl)
     local count = 0
     local key
@@ -451,7 +460,8 @@ if PreviousHandleTreasuryH1 then
                 if entry then AddTreasuryUsefulActivityC8(self, entry, goal and goal.name or "Guild Treasury") end
             end
         elseif handled and kind == "END" then
-            self:EvaluateTreasuryDonorAchievementsH1()
+            local acceptedAt = self.runtime and tonumber(self.runtime.lastTreasuryEndAcceptedR13) or 0
+            if acceptedAt > 0 and self:Now() - acceptedAt <= 1 then self:EvaluateTreasuryDonorAchievementsH1() end
         end
         return handled
     end
@@ -474,6 +484,130 @@ end
 -- stronger hover feedback. Work runs only while the Treasury UI is visible.
 -- ---------------------------------------------------------------------------
 
+local function MoneyCompactH1(copper)
+    copper = math.max(0, math.floor(tonumber(copper) or 0))
+    local gold = math.floor(copper / 10000)
+    local silver = math.floor(math.mod(copper, 10000) / 100)
+    local coins = math.mod(copper, 100)
+    if gold > 0 then
+        if silver > 0 then return tostring(gold) .. "g " .. tostring(silver) .. "s" end
+        return tostring(gold) .. "g"
+    end
+    if silver > 0 then return tostring(silver) .. "s " .. tostring(coins) .. "c" end
+    return tostring(coins) .. "c"
+end
+
+local function EnsureTreasuryContributorSummaryH1(self)
+    local ui = self.ui and self.ui.treasury170
+    if not ui or not ui.detail or ui.contributorSummaryH1 then return end
+
+    -- The server-adapter implementation detail used to occupy the most visible
+    -- part of the Treasury page. Players care about the goal and its donors,
+    -- so keep adapter detection internal and use this space for useful data.
+    if ui.serverTitle then ui.serverTitle:Hide() end
+    if ui.serverState then ui.serverState:Hide() end
+    if ui.detect then ui.detect:Hide() end
+
+    local panel = ui.detail
+    ui.contributorSummaryH1 = CreateFrame("Frame", nil, panel)
+    ui.contributorSummaryH1:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -7)
+    ui.contributorSummaryH1:SetWidth(244)
+    ui.contributorSummaryH1:SetHeight(118)
+    BackdropH1(ui.contributorSummaryH1, 8)
+    if ui.contributorSummaryH1.SetBackdropColor then ui.contributorSummaryH1:SetBackdropColor(0.025, 0.022, 0.016, 0.96) end
+    if ui.contributorSummaryH1.SetBackdropBorderColor then ui.contributorSummaryH1:SetBackdropBorderColor(0.38, 0.27, 0.10, 0.95) end
+
+    ui.contributorIcon184 = ui.contributorSummaryH1:CreateTexture(nil, "ARTWORK")
+    ui.contributorIcon184:SetTexture("Interface\\Icons\\INV_Misc_Coin_01")
+    ui.contributorIcon184:SetWidth(17) ui.contributorIcon184:SetHeight(17)
+    ui.contributorIcon184:SetPoint("TOPLEFT", ui.contributorSummaryH1, "TOPLEFT", 8, -7)
+    if ui.contributorIcon184.SetTexCoord then ui.contributorIcon184:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
+    ui.contributorTitleH1 = TextH1(ui.contributorSummaryH1, "GameFontNormalSmall", "TOP CONTRIBUTORS", 31, -8, 110, "LEFT")
+    ui.contributorTitleH1:SetTextColor(1.0, 0.78, 0.25)
+    ui.contributorGoalH1 = TextH1(ui.contributorSummaryH1, "GameFontNormalSmall", "Select a funding goal", 31, -25, 108, "LEFT")
+    ui.contributorGoalH1:SetTextColor(0.70, 0.70, 0.67)
+    ui.contributorRowsH1 = {}
+    local index
+    for index = 1, 5 do
+        local row = CreateFrame("Frame", nil, ui.contributorSummaryH1)
+        row:SetPoint("TOPLEFT", ui.contributorSummaryH1, "TOPLEFT", 8, -41 - ((index - 1) * 19))
+        row:SetWidth(228)
+        row:SetHeight(18)
+        row.rank = TextH1(row, "GameFontNormalSmall", tostring(index) .. ".", 1, -1, 18, "LEFT")
+        row.rank:SetTextColor(0.55, 0.55, 0.52)
+        row.name = TextH1(row, "GameFontNormalSmall", "", 21, -1, 133, "LEFT")
+        row.amount = TextH1(row, "GameFontNormalSmall", "", 154, -1, 72, "RIGHT")
+        row.amount:SetTextColor(1.0, 0.72, 0.20)
+        ui.contributorRowsH1[index] = row
+    end
+    ui.fullLedgerH1 = ButtonH1(ui.contributorSummaryH1, "Full Ledger", 143, -14, 92, 24, function()
+        local treasuryUI = OTLGM.ui and OTLGM.ui.treasury170
+        if treasuryUI and treasuryUI.selected then OTLGM:OpenTreasuryGoalLedgerR5(treasuryUI.selected) end
+    end, "utility")
+    ui.contributorStatusH1 = TextH1(ui.contributorSummaryH1, "GameFontNormalSmall", "", 8, -97, 226, "LEFT")
+    ui.contributorStatusH1:SetTextColor(0.62, 0.62, 0.58)
+end
+
+local function FundingPercentH1(current, target)
+    current, target = math.max(0, tonumber(current) or 0), math.max(0, tonumber(target) or 0)
+    if target <= 0 then return "0%" end
+    local ratio = current / target
+    if ratio > 0 and ratio < 0.01 then return "<1%" end
+    return tostring(math.floor((ratio * 100) + 0.5)) .. "%"
+end
+
+local function RefreshTreasuryContributorSummaryH1(self)
+    local ui = self.ui and self.ui.treasury170
+    if not ui then return end
+    EnsureTreasuryContributorSummaryH1(self)
+    if not ui.contributorSummaryH1 then return end
+    local goal = ui.selected and self.GetTreasuryGoal170 and self:GetTreasuryGoal170(ui.selected) or nil
+    local ledger = goal and self.GetTreasuryGoalLedgerR5 and self:GetTreasuryGoalLedgerR5(goal.id) or nil
+    if goal then
+        local current = math.max(0, tonumber(goal.current) or 0)
+        local target = math.max(0, tonumber(goal.target) or 0)
+        local percentText = FundingPercentH1(current, target)
+        ui.contributorGoalH1:SetText(SafeH1(goal.name or "Funding goal", 22) .. "  •  " .. percentText .. " funded")
+        if ui.contributorStatusH1 then
+            local contributorCount = table.getn(ledger and ledger.contributors or {})
+            local entryCount = table.getn(ledger and ledger.entries or {})
+            local lastText = "no contributions yet"
+            if ledger and (tonumber(ledger.lastAt) or 0) > 0 then
+                local clock = self.FormatServerClock180 and self:FormatServerClock180(ledger.lastAt, false) or date("%H:%M", ledger.lastAt)
+                lastText = "last " .. tostring(clock) .. " ST"
+            end
+            ui.contributorStatusH1:SetText(tostring(contributorCount) .. " contributor" .. (contributorCount == 1 and "" or "s")
+                .. "  •  " .. tostring(entryCount) .. " contribution" .. (entryCount == 1 and "" or "s") .. "  •  " .. lastText)
+        end
+    else
+        ui.contributorGoalH1:SetText("Select a funding goal")
+        if ui.contributorStatusH1 then ui.contributorStatusH1:SetText("Pick a goal to review donors and the full ledger.") end
+    end
+    SetEnabledH1(ui.fullLedgerH1, goal ~= nil, "Select a funding goal first.")
+    local contributors = ledger and ledger.contributors or {}
+    local visibleRows = math.max(3, math.min(5, tonumber(ui.contributorVisibleRowsR25) or 3))
+    local index, contributor, row
+    for index = 1, 5 do
+        row = ui.contributorRowsH1[index]
+        contributor = index <= visibleRows and contributors[index] or nil
+        if contributor then
+            row.rank:SetText(tostring(index) .. ".")
+            row.name:SetTextColor(1, 1, 1)
+            row.name:SetText(ColoredContributorNameH1(self, SafeH1(contributor.name or "Anonymous", 24)))
+            row.amount:SetText(MoneyCompactH1(contributor.amount))
+            row:Show()
+        elseif index == 1 and goal then
+            row.rank:SetText("")
+            row.name:SetText("No contributions recorded yet")
+            row.name:SetTextColor(0.62, 0.62, 0.59)
+            row.amount:SetText("")
+            row:Show()
+        else
+            row:Hide()
+        end
+    end
+end
+
 local function EnsureGoalButtonsH1(self)
     local ui = self.ui and self.ui.treasury170
     if not ui or not ui.rows then return end
@@ -481,13 +615,28 @@ local function EnsureGoalButtonsH1(self)
     for index = 1, table.getn(ui.rows) do
         row = ui.rows[index]
         if row and not row.ledgerButtonH1 then
-            if row.name then row.name:SetWidth(176) end
+            if not row.goalIconH1 then
+                row.goalIconH1 = row:CreateTexture(nil, "ARTWORK")
+                row.goalIconH1:SetPoint("TOPLEFT", row, "TOPLEFT", 10, -8)
+                row.goalIconH1:SetWidth(24)
+                row.goalIconH1:SetHeight(24)
+                row.goalIconH1:SetTexture("Interface\\Icons\\INV_Misc_Coin_05")
+            end
+            if row.name then
+                row.name:ClearAllPoints()
+                row.name:SetPoint("TOPLEFT", row, "TOPLEFT", 42, -8)
+                row.name:SetWidth(138)
+            end
             if row.amount then
                 row.amount:ClearAllPoints()
                 row.amount:SetPoint("TOPLEFT", row, "TOPLEFT", 188, -9)
                 row.amount:SetWidth(108)
             end
-            if row.meta then row.meta:SetWidth(284) end
+            if row.meta then
+                row.meta:ClearAllPoints()
+                row.meta:SetPoint("TOPLEFT", row, "TOPLEFT", 42, -30)
+                row.meta:SetWidth(244)
+            end
             if row.progressBack then row.progressBack:SetWidth(286) end
             row.ledgerButtonH1 = ButtonH1(row, "Ledger", 302, -6, 58, 23, function(button)
                 local goal = button.goalH1
@@ -511,6 +660,7 @@ if PreviousBuildTreasuryPageH1 then
     function OTLGM:BuildTreasuryPage170(page)
         local result = PreviousBuildTreasuryPageH1(self, page)
         EnsureGoalButtonsH1(self)
+        EnsureTreasuryContributorSummaryH1(self)
         return result
     end
 end
@@ -534,12 +684,22 @@ if PreviousRefreshTreasuryPageH1 then
                 SetEnabledH1(row.addButtonH1, goal ~= nil and canEdit, "Only guild leadership can record contributions.")
                 if goal and row.progress then
                     percentage = (tonumber(goal.target) or 0) > 0 and math.min(1, (tonumber(goal.current) or 0) / goal.target) or 0
-                    if row.progressBack then row.progressBack:SetWidth(286) end
-                    row.progress:SetWidth(math.max(1, math.floor(286 * percentage)))
+                    local progressWidth = math.max(1, tonumber(row.otlTreasuryProgressWidth184) or 286)
+                    if row.progressBack then row.progressBack:SetWidth(progressWidth) end
+                    row.progress:SetWidth(math.max(1, math.floor(progressWidth * percentage)))
                 end
-                if goal then row.ledgerButtonH1:Show() row.addButtonH1:Show() else row.ledgerButtonH1:Hide() row.addButtonH1:Hide() end
+                if goal then
+                    row.ledgerButtonH1:Show()
+                    row.addButtonH1:Show()
+                    if row.goalIconH1 then row.goalIconH1:Show() end
+                else
+                    row.ledgerButtonH1:Hide()
+                    row.addButtonH1:Hide()
+                    if row.goalIconH1 then row.goalIconH1:Hide() end
+                end
             end
         end
+        RefreshTreasuryContributorSummaryH1(self)
         self:EvaluateTreasuryDonorAchievementsH1()
         return result
     end
@@ -550,6 +710,16 @@ local function RepairContributionDialogH1(self)
     if not dialog or dialog.repairedH1 then return end
     dialog.repairedH1 = true
     StyleModalH1(dialog)
+    dialog.goalStatusH1 = TextH1(dialog, "GameFontNormalSmall", "", 18, -48, 260, "LEFT")
+    dialog.goalStatusH1:SetTextColor(1.0, 0.82, 0.28)
+    dialog.goalProgressBackH1 = dialog:CreateTexture(nil, "BACKGROUND")
+    dialog.goalProgressBackH1:SetPoint("TOPLEFT", dialog, "TOPLEFT", 18, -72)
+    dialog.goalProgressBackH1:SetWidth(230) dialog.goalProgressBackH1:SetHeight(7)
+    dialog.goalProgressBackH1:SetTexture(0.10, 0.08, 0.05, 1)
+    dialog.goalProgressFillH1 = dialog:CreateTexture(nil, "ARTWORK")
+    dialog.goalProgressFillH1:SetPoint("TOPLEFT", dialog.goalProgressBackH1, "TOPLEFT", 0, 0)
+    dialog.goalProgressFillH1:SetHeight(7)
+    dialog.goalProgressFillH1:SetTexture(1.0, 0.78, 0.22, 1)
     if dialog.add176 then
         dialog.add176:ClearAllPoints()
         dialog.add176:SetPoint("TOPLEFT", dialog, "TOPLEFT", 382, -144)
@@ -615,7 +785,7 @@ if PreviousRefreshContributionDialogH1 then
                 meta = ContributorMetaTextH1(self, entry.contributor, true)
                 note = entry.note and entry.note ~= "" and ("  -  " .. entry.note) or ""
                 identity = ColoredContributorNameH1(self, entry.contributor)
-                dialog.rows176[index]:SetText(date("%d %b %H:%M", entry.ts or self:Now()) .. "  " .. identity .. "  +" .. tostring(math.floor((tonumber(entry.amount) or 0) / 10000)) .. "g  [" .. meta .. "]  by " .. tostring(entry.actor or "Leadership") .. note)
+                dialog.rows176[index]:SetText(((self.FormatServerDate180 and self:FormatServerDate180(entry.ts or self:Now(), "%d %b") or date("%d %b", entry.ts or self:Now())) .. " " .. (self.FormatServerClock180 and self:FormatServerClock180(entry.ts or self:Now(), false) or date("%H:%M", entry.ts or self:Now())) .. " ST") .. "  " .. identity .. "  +" .. tostring(math.floor((tonumber(entry.amount) or 0) / 10000)) .. "g  [" .. meta .. "]  by " .. DisplayActorR8(entry.actor) .. note)
             end
         end
         return result
@@ -725,7 +895,18 @@ if PreviousRefreshLedgerH1 then
         local dialog = self.ui and self.ui.treasuryLedgerDialogR5
         if not dialog then return result end
         local ledger = self:GetTreasuryGoalLedgerR5(dialog.goalIdR5)
+        local goal = self.GetTreasuryGoal170 and self:GetTreasuryGoal170(dialog.goalIdR5) or nil
         local index, row, contributor, entry, meta, note
+        if dialog.goalStatusH1 and goal then
+            local current = math.max(0, tonumber(goal.current) or 0)
+            local target = math.max(0, tonumber(goal.target) or 0)
+            local percentText = FundingPercentH1(current, target)
+            dialog.goalStatusH1:SetText(MoneyCompactH1(current) .. " raised  •  " .. percentText .. " funded")
+            if dialog.goalProgressFillH1 then dialog.goalProgressFillH1:SetWidth(math.max(1, math.floor(230 * math.min(1, target > 0 and (current / target) or 0)))) end
+        elseif dialog.goalStatusH1 then
+            dialog.goalStatusH1:SetText("")
+            if dialog.goalProgressFillH1 then dialog.goalProgressFillH1:SetWidth(1) end
+        end
         for index = 1, table.getn(dialog.summaryRowsR5 or {}) do
             row = dialog.summaryRowsR5[index]
             contributor = ledger.contributors[(tonumber(dialog.summaryOffsetR5) or 0) + index]
@@ -740,7 +921,7 @@ if PreviousRefreshLedgerH1 then
             if row and entry then
                 meta = ContributorMetaTextH1(self, entry.contributor, true)
                 note = entry.note and entry.note ~= "" and (" - " .. entry.note) or ""
-                row.textR5:SetText(date("%d %b %H:%M", entry.ts or self:Now()) .. "  " .. ColoredContributorNameH1(self, entry.contributor) .. "  +" .. tostring(math.floor((tonumber(entry.amount) or 0) / 10000)) .. "g  [" .. meta .. "]  by " .. tostring(entry.actor or "Leadership") .. note)
+                row.textR5:SetText(((self.FormatServerDate180 and self:FormatServerDate180(entry.ts or self:Now(), "%d %b") or date("%d %b", entry.ts or self:Now())) .. " " .. (self.FormatServerClock180 and self:FormatServerClock180(entry.ts or self:Now(), false) or date("%H:%M", entry.ts or self:Now())) .. " ST") .. "  " .. ColoredContributorNameH1(self, entry.contributor) .. "  +" .. tostring(math.floor((tonumber(entry.amount) or 0) / 10000)) .. "g  [" .. meta .. "]  by " .. DisplayActorR8(entry.actor) .. note)
             end
         end
         return result

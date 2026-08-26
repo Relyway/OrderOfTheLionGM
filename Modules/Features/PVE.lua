@@ -90,6 +90,15 @@ local function PveSortedValues(map, comparator)
 end
 
 function OTLGM:EnsurePveDB()
+    -- Runtime queues must exist even when the character is temporarily outside a guild.
+    -- Saved guild PvE data remains unavailable until GetGuildDB() is valid.
+    self.runtime = self.runtime or {}
+    self.runtime.pve = self.runtime.pve or {}
+    if type(self.runtime.pve.pendingGroupMeta180) ~= "table" then self.runtime.pve.pendingGroupMeta180 = {} end
+    if type(self.runtime.pve.pendingTeamPackets180) ~= "table" then self.runtime.pve.pendingTeamPackets180 = {} end
+    if type(self.runtime.pve.pendingGroupMatchEval180) ~= "table" then self.runtime.pve.pendingGroupMatchEval180 = {} end
+    if type(self.runtime.raidInviteSession180) ~= "table" then self.runtime.raidInviteSession180 = {} end
+
     local db = self:GetGuildDB()
     if not db then return nil end
     if type(db.pve) ~= "table" then db.pve = {} end
@@ -111,13 +120,6 @@ function OTLGM:EnsurePveDB()
     for eventId, event in pairs(db.pve.raids) do
         if type(event) == "table" and type(event.roster180) ~= "table" then event.roster180 = {} end
     end
-
-    self.runtime = self.runtime or {}
-    self.runtime.pve = self.runtime.pve or {}
-    if type(self.runtime.pve.pendingGroupMeta180) ~= "table" then self.runtime.pve.pendingGroupMeta180 = {} end
-    if type(self.runtime.pve.pendingTeamPackets180) ~= "table" then self.runtime.pve.pendingTeamPackets180 = {} end
-    if type(self.runtime.pve.pendingGroupMatchEval180) ~= "table" then self.runtime.pve.pendingGroupMatchEval180 = {} end
-    if type(self.runtime.raidInviteSession180) ~= "table" then self.runtime.raidInviteSession180 = {} end
 
     OTLGM_DB.settings.pveSection = OTLGM_DB.settings.pveSection or "RAIDS"
     OTLGM_DB.settings.pveRequestKind = OTLGM_DB.settings.pveRequestKind or "DUNGEON"
@@ -836,9 +838,30 @@ end
 function OTLGM:ProcessPveGroupLiveState180()
     local runtime = self.runtime and self.runtime.pve
     if not runtime or not runtime.groupLiveStateDue180 or self:Now() < runtime.groupLiveStateDue180 then return end
+    local now = self:Now()
+    local pressure = self.GetClientPressure181 and self:GetClientPressure181() or nil
+    if self.runtime and self.runtime.transitionActive176 then
+        -- Group state is durable bookkeeping, not frame-critical rendering work.
+        -- Never compete with a zone load; transition recovery has its own
+        -- fail-safe and will wake this exact deadline again.
+        runtime.groupLiveStateDue180 = now + 3
+        runtime.groupLiveStatePressureDeferrals181 = (tonumber(runtime.groupLiveStatePressureDeferrals181) or 0) + 1
+        return false
+    end
+    if pressure and tonumber(pressure.level) >= 3 then
+        runtime.groupLiveStatePressureStarted181 = tonumber(runtime.groupLiveStatePressureStarted181) or now
+        if now - runtime.groupLiveStatePressureStarted181 < 30 then
+            -- A bounded wait avoids both a weather/city hitch and an eternal
+            -- two-second background wake on a permanently slow client.
+            runtime.groupLiveStateDue180 = now + 3
+            runtime.groupLiveStatePressureDeferrals181 = (tonumber(runtime.groupLiveStatePressureDeferrals181) or 0) + 1
+            return false
+        end
+    end
     local reason = runtime.groupLiveStateReason180
     runtime.groupLiveStateDue180 = nil
     runtime.groupLiveStateReason180 = nil
+    runtime.groupLiveStatePressureStarted181 = nil
     self:RefreshOwnPveGroupLiveState180(reason)
 end
 
@@ -1085,6 +1108,7 @@ end
 
 function OTLGM:ApplyRemotePveGroupMeta180(fields, sender, channel)
     local pve = self:EnsurePveDB()
+    if not pve then return false end
     local meta = {
         groupId = PveSafeText(fields[3] or "", 64),
         rev = tonumber(fields[4]) or 0,
@@ -1356,7 +1380,10 @@ end
 function OTLGM:GetRaidRosterSourceEvent180(eventId)
     local event = self:GetRaidEvent180(eventId)
     if event then return event end
-    local pve = self.GetPveDB and self:GetPveDB() or nil
+    -- GetPveDB never existed in the 1.8 tree.  The stale compatibility call
+    -- made cancelled/archived raids disappear from "previous roster" sources
+    -- even though their durable data was still present.
+    local pve = self.EnsurePveDB and self:EnsurePveDB() or nil
     local source
     if pve and type(pve.cancelledRaids156) == "table" then source = pve.cancelledRaids156[eventId] end
     if not source and pve and type(pve.archivedRaids180) == "table" then source = pve.archivedRaids180[eventId] end
@@ -1526,6 +1553,7 @@ end
 
 function OTLGM.__impl180.ApplyRemoteRaidTeamHeader180__impl1(self, fields, sender, channel)
     local pve = self:EnsurePveDB()
+    if not pve then return false end
     local id, rev = fields[3] or "", tonumber(fields[4]) or 0
     local tombstone = pve.raidTeamDeleted180[id]
     if tombstone and (tonumber(tombstone.rev) or 0) >= rev then return true end
@@ -1596,6 +1624,7 @@ end
 
 function OTLGM.__impl180.ApplyRemoteRaidTeamDelete180__impl1(self, fields)
     local pve = self:EnsurePveDB()
+    if not pve then return false end
     local id, rev = fields[3] or "", tonumber(fields[4]) or 0
     local old = pve.raidTeams180[id]
     local deleted = pve.raidTeamDeleted180[id]
@@ -2005,7 +2034,8 @@ end
 
 function OTLGM:ClearPveRaid(id)
     if not self.IsOfficerMode or not self:IsOfficerMode() then return false end
-    local pve=self:EnsurePveDB(); local raid=id and pve.raids[id] or self:GetPveActiveRaid()
+    local pve=self:EnsurePveDB(); if not pve then return false end
+    local raid=id and pve.raids[id] or self:GetPveActiveRaid()
     if not raid then return false end
     local rev=(tonumber(raid.rev) or 0)+1; id=raid.id
     pve.raids[id]=nil; pve.deleted[id]={rev=rev,ts=self:Now(),kind="RAID"}; self:RefreshNearestRaid155()
@@ -2105,7 +2135,7 @@ function OTLGM:CheckPveRaidReminders()
     end
 end
 
-function OTLGM.__impl180.Stage_PVE_RequestPveSync_1__impl1(self, force)
+function OTLGM.__impl180.Stage_PVE_RequestPveSync_1__impl1(self, force, manual)
     if not SendAddonMessage or not GetGuildInfo("player") then return false end
     local now = self:Now()
     local pve = self:EnsurePveDB()
@@ -2114,18 +2144,29 @@ function OTLGM.__impl180.Stage_PVE_RequestPveSync_1__impl1(self, force)
     if not force and self.lastPveSyncRequestAt and now - self.lastPveSyncRequestAt < 90 then return false end
     local peers = self.GetCompatibleSyncPeersR2 and self:GetCompatibleSyncPeersR2(360) or {}
     if table.getn(peers) == 0 then
-        if force and self.SetStatus then self:SetStatus("No compatible 1.8 PvE peer is online yet; current cached data was kept.") end
+        if manual and self.SetStatus then
+            self:SetStatus("No compatible guildmate is sharing PvE Hub updates right now; your saved information was kept.", 5, { source = "pve", manual = true })
+        end
         return false
     end
     local nonce = tostring(now) .. ":" .. tostring(self.pveSequence or 0)
     local queued, index, target = 0, nil, nil
-    for index = 1, math.min(3, table.getn(peers)) do
+    local requestedPeerKeysR13 = {}
+    -- One healthy peer is enough for an automatic full-state refresh.  Asking
+    -- three guildmates at login made every one of them serialize the same PvE
+    -- state back to us and could create a needless burst.  A deliberate manual
+    -- refresh keeps a second peer for redundancy.
+    local peerLimit = manual and 2 or 1
+    for index = 1, math.min(peerLimit, table.getn(peers)) do
         target = peers[index]
-        if self:QueuePvePayload(table.concat({ self.pveProtocol, "SYNC", nonce, self.version or "?" }, "^"), "WHISPER", target, "pve:sync:" .. PveNormalizeName(target)) then queued = queued + 1 end
+        if self:QueuePvePayload(table.concat({ self.pveProtocol, "SYNC", nonce, self.version or "?" }, "^"), "WHISPER", target, "pve:sync:" .. PveNormalizeName(target)) then
+            queued = queued + 1
+            requestedPeerKeysR13[PveNormalizeName(target)] = true
+        end
     end
     if queued <= 0 then return false end
     self.lastPveSyncRequestAt = now
-    self.pveSyncPending180 = { nonce = nonce, startedAt = now, manualR2 = force and true or false, peersR2 = queued }
+    self.pveSyncPending180 = { nonce = nonce, startedAt = now, manualR2 = manual and true or false, peersR2 = queued, requestedPeerKeysR13 = requestedPeerKeysR13 }
     return true
 end
 
@@ -2134,8 +2175,11 @@ function OTLGM:ConfirmPveSyncResponse180(sender, kind, nonce)
     if not pending then return false end
     if kind == "SYNCACK" and tostring(nonce or "") ~= tostring(pending.nonce or "") then return false end
     if not sender or PveNormalizeName(sender) == PveNormalizeName(UnitName("player") or "") then return false end
+    local senderKey = PveNormalizeName(sender)
+    if type(pending.requestedPeerKeysR13) == "table" and not pending.requestedPeerKeysR13[senderKey] then return false end
     local now = self:Now()
     if now - (tonumber(pending.startedAt) or now) > 20 then return false end
+    local manual = pending.manualR2 and true or false
     self.pveSyncPending180 = nil
     local pve = self:EnsurePveDB()
     if pve then
@@ -2145,7 +2189,7 @@ function OTLGM:ConfirmPveSyncResponse180(sender, kind, nonce)
         pve.syncFailuresR2 = 0
         pve.syncBackoffUntilR2 = 0
     end
-    if self.SetOperationState156 then self:SetOperationState156("PVE", "DONE", "Synchronized at " .. (self.FormatServerClock180 and self:FormatServerClock180(now, false) or "--:--") .. " ST", 5) end
+    if self.SetOperationState156 then self:SetOperationState156("PVE", "DONE", "PvE data updated at " .. (self.FormatServerClock180 and self:FormatServerClock180(now, false) or "--:--") .. " ST", 5, { source = "pve", manual = manual }) end
     if self.ui and self.ui.main and self.ui.main:IsVisible() and self.ui.currentPage == "pve" and self.RefreshPvePage then self:RefreshPvePage() end
     return true
 end
@@ -2164,10 +2208,18 @@ function OTLGM:ProcessPveSyncState180()
     end
     local manual = pending.manualR2 and true or false
     if self.SetOperationState156 then
-        if manual then self:SetOperationState156("PVE", "ERROR", "No compatible peer confirmed synchronization", 6, { source = "pve", manual = true })
-        else self:SetOperationState156("PVE", "IDLE", "No compatible peer confirmed synchronization; background retry delayed", nil, { source = "pve", manual = false }) end
+        if manual then
+            -- A manual refresh timing out is reported inside PvE Hub only.  Do
+            -- not create a global shell toast: the player may have left the page
+            -- during the 18-second wait, which previously allowed this message
+            -- to appear over Achievements/Treasury and look completely random.
+            -- No expiry timer is needed either, so an unanswered peer does not
+            -- keep the shared scheduler awake merely to remove a transient error.
+            self:SetOperationState156("PVE", "IDLE", "No compatible guildmate responded; cached raid/group information was kept", nil, { source = "pve", manual = true, expected = true })
+        else
+            self:SetOperationState156("PVE", "IDLE", "No online guildmate answered; background refresh will wait before trying again", nil, { source = "pve", manual = false, expected = true })
+        end
     end
-    if manual and self.SetStatus then self:SetStatus("PvE sync was not confirmed. Cached raid/group data was kept; background retry is delayed.") end
     if self.ui and self.ui.main and self.ui.main:IsVisible() and self.ui.currentPage == "pve" and self.RefreshPvePage then self:RefreshPvePage() end
 end
 
@@ -2206,12 +2258,17 @@ end
 function OTLGM:InitializePveSync()
     self:EnsurePveDB()
     if RegisterAddonMessagePrefix then pcall(RegisterAddonMessagePrefix, "OTLGM") end
-    self.pveSyncAt = self:Now() + 4
+    -- PvE full-state exchange is useful but not cold-start critical.  Keep it
+    -- away from the first roster scan/version burst and spread guild clients by
+    -- a few seconds so several logins do not all request large state together.
+    local jitter = math.random and math.random(0, 6) or 3
+    self.pveSyncAt = self:Now() + 18 + jitter
     if self.WakeScheduler180 then self:WakeScheduler180("pve-initial-sync") end
 end
 
 function OTLGM.__impl180.Stage_PVE_ApplyRemotePveRequest_1__impl1(self, fields, sender, channel)
     local pve = self:EnsurePveDB()
+    if not pve then return false end
     local record = {
         id = fields[3] or "", rev = tonumber(fields[4]) or 0, ts = tonumber(fields[5]) or 0, expires = tonumber(fields[6]) or 0,
         author = fields[7] or "Unknown", level = tonumber(fields[8]) or 0, class = fields[9] or "",
@@ -2255,6 +2312,7 @@ end
 
 function OTLGM.__impl180.Stage_PVE_ApplyRemotePveApplication_1__impl1(self, fields, sender)
     local pve = self:EnsurePveDB()
+    if not pve then return false end
     local record = {
         id = fields[3] or "", groupId = fields[4] or "", rev = tonumber(fields[5]) or 0,
         ts = tonumber(fields[6]) or 0, expires = tonumber(fields[7]) or 0,
@@ -2289,6 +2347,7 @@ end
 
 function OTLGM:ApplyRemotePveBoard(fields)
     local pve = self:EnsurePveDB()
+    if not pve then return false end
     local record = {
         id = fields[3] or "", rev = tonumber(fields[4]) or 0, ts = tonumber(fields[5]) or 0, expires = tonumber(fields[6]) or 0,
         author = fields[7] or "Unknown", level = tonumber(fields[8]) or 0, class = fields[9] or "", text = fields[10] or "",
@@ -2302,7 +2361,7 @@ function OTLGM:ApplyRemotePveBoard(fields)
 end
 
 function OTLGM.__impl180.Stage_PVE_ApplyRemotePveRaid_1__impl1(self, fields)
-    local pve=self:EnsurePveDB()
+    local pve=self:EnsurePveDB(); if not pve then return false end
     local record={id=fields[3] or "",rev=tonumber(fields[4]) or 0,ts=tonumber(fields[5]) or 0,startTs=tonumber(fields[6]) or 0,
         author=fields[7] or "Unknown",name=fields[8] or "Guild Raid",location=fields[9] or "",serverTime=fields[10] or "",note=fields[11] or "",
         recurring=fields[12]=="WEEKLY" and "WEEKLY" or "ONCE",reminderMinutes=tonumber(fields[13]) or 60,
@@ -2319,7 +2378,8 @@ function OTLGM.__impl180.Stage_PVE_ApplyRemotePveRaid_1__impl1(self, fields)
 end
 
 function OTLGM.__impl180.Stage_PVE_ApplyRemotePveDelete_1__impl1(self, kind,id,rev)
-    local pve=self:EnsurePveDB(); rev=tonumber(rev) or 0
+    local pve=self:EnsurePveDB(); if not pve then return false end
+    rev=tonumber(rev) or 0
     if id=="" or self:GetPveRecordRevision(id)>=rev then return end
     if kind=="REQDEL" then
         pve.requests[id]=nil
@@ -2366,6 +2426,7 @@ function OTLGM.__impl180.Stage_PVE_HandlePveAddonMessage_1__impl1(self, message,
     if kind == "REQDEL" or kind == "BOARDDEL" or kind == "RAIDDEL" then
         local id = fields[3] or ""
         local pve = self:EnsurePveDB()
+        if not pve then return true end
         local record = kind == "REQDEL" and pve.requests[id] or (kind == "BOARDDEL" and pve.board[id] or (pve.raids and pve.raids[id]))
         local senderLeadership = self:IsPveLeadershipName(sender)
         local senderOwns = record and PveNormalizeName(record.author) == PveNormalizeName(sender)
@@ -2391,12 +2452,40 @@ function OTLGM.__impl180.Stage_PVE_HandlePveAddonMessage_1__impl1(self, message,
 end
 
 function OTLGM.__impl180.Stage_PVE_OnPveDataChanged_1__impl1(self, section, remote)
-    if self.RefreshPveNavigationBadge then self:RefreshPveNavigationBadge() end
-    if self.ui and self.ui.main and self.ui.main:IsVisible() then
-        if self.ui.currentPage == "pve" and self.RefreshPvePage then self:RefreshPvePage() end
-        if self.ui.currentPage == "guildchat" and section == "BOARD" and self.RefreshGuildChatPage then self:RefreshGuildChatPage() end
-        if self.ui.currentPage == "home" and self.RefreshHomePage then self:RefreshHomePage() end
-        if self.ui.currentPage == "overview" and self.RefreshOverviewPage then self:RefreshOverviewPage() end
+    if not (self.ui and self.ui.main and self.ui.main:IsVisible()) then
+        if self.RefreshPveNavigationBadge then self:RefreshPveNavigationBadge() end
+        return
+    end
+
+    local function RefreshRelevantPvePage184(owner)
+        if not owner then return end
+        if owner.RefreshPveNavigationBadge then owner:RefreshPveNavigationBadge() end
+        if not owner.ui or not owner.ui.main or not owner.ui.main:IsVisible() then return end
+        if owner.ui.currentPage == "pve" and owner.RefreshPvePage then owner:RefreshPvePage() end
+        if owner.ui.currentPage == "guildchat" and section == "BOARD" and owner.RefreshGuildChatPage then owner:RefreshGuildChatPage() end
+        if owner.ui.currentPage == "home" and owner.RefreshHomePage then owner:RefreshHomePage() end
+        if owner.ui.currentPage == "overview" and owner.RefreshOverviewPage then owner:RefreshOverviewPage() end
+    end
+
+    -- RC4-r9: an officer sync can apply many PvE records back-to-back.  Network
+    -- data still commits immediately, but remote presentation is painted once at
+    -- the end of the burst instead of rebuilding a complex PvE/Home page for
+    -- every record. Local edits remain immediate.
+    if remote and self.ScheduleAfter180 then
+        self.runtime = self.runtime or {}
+        self.runtime.pendingPveRefreshSections184 = self.runtime.pendingPveRefreshSections184 or {}
+        if section then self.runtime.pendingPveRefreshSections184[section] = true end
+        self:ScheduleAfter180("pve-visible-refresh-184", 0.08, function(owner)
+            local sections184 = owner and owner.runtime and owner.runtime.pendingPveRefreshSections184 or {}
+            if owner and owner.runtime then owner.runtime.pendingPveRefreshSections184 = {} end
+            -- BOARD is the only section whose Guild Chat presentation differs.
+            -- Preserve that signal even if a later packet in the same burst used
+            -- a different section.
+            if sections184.BOARD then section = "BOARD" end
+            RefreshRelevantPvePage184(owner)
+        end, 74)
+    else
+        RefreshRelevantPvePage184(self)
     end
 end
 
@@ -2413,7 +2502,9 @@ if CreateFrame and not OTLGM.pveProfileEventFrame180 then
             OTLGM:RefreshCurrentPveCharacterProfile180()
             if OTLGM.RefreshObservedGuildFactions180 then OTLGM:RefreshObservedGuildFactions180("world") end
             OTLGM:SchedulePveGroupLiveState180("world")
-            if OTLGM.ScheduleAfter180 then
+            if OTLGM.ScheduleAllRaidAccessEvaluation180 then
+                OTLGM:ScheduleAllRaidAccessEvaluation180(true, 2)
+            elseif OTLGM.ScheduleAfter180 then
                 OTLGM:ScheduleAfter180("raid-access-login", 2, function() OTLGM:EvaluateAllRaidAccess180(true) end, "NORMAL")
             else OTLGM:EvaluateAllRaidAccess180(true) end
         elseif event == "PARTY_MEMBERS_CHANGED" or event == "RAID_ROSTER_UPDATE" then
@@ -2477,9 +2568,11 @@ end
 function OTLGM:ValidateRaidTeamName180(name, ignoreId)
     name = PveSafeText(name or "", 36)
     if name == "" then return nil, "Enter a Raid Team name." end
+    local pve = self:EnsurePveDB()
+    if not pve then return nil, "Guild data is not ready." end
     local normalized = string.lower(name)
     local _, team
-    for _, team in pairs(self:EnsurePveDB().raidTeams180 or {}) do
+    for _, team in pairs(pve.raidTeams180 or {}) do
         if team.id ~= ignoreId and string.lower(team.name or "") == normalized then return nil, "A Raid Team with this name already exists." end
     end
     return name
@@ -2503,12 +2596,14 @@ end
 
 function OTLGM:CreateRaidTeam180(data)
     if not (self.IsOfficerMode and self:IsOfficerMode()) then return false, "Only Leadership can create a permanent Raid Team." end
+    local pve = self:EnsurePveDB()
+    if not pve then return false, "Guild data is not ready." end
     data = type(data) == "table" and data or {}
     local name, errorText = self:ValidateRaidTeamName180(data.name)
     if not name then return false, errorText end
     local active = 0
     local _, candidate
-    for _, candidate in pairs(self:EnsurePveDB().raidTeams180 or {}) do if candidate.status ~= "ARCHIVED" then active = active + 1 end end
+    for _, candidate in pairs(pve.raidTeams180 or {}) do if candidate.status ~= "ARCHIVED" then active = active + 1 end end
     if active >= PVE_C5_ACTIVE_TEAM_LIMIT180 then return false, "The active Raid Team limit has been reached." end
     local player = PveSafeText(UnitName("player") or "Unknown", 40)
     local leader = PveSafeText(data.raidLeader or player, 40)
@@ -2522,7 +2617,6 @@ function OTLGM:CreateRaidTeam180(data)
         inviteHelpers = PveC5JoinNames180(helpers), description = PveSafeText(data.description or "", PVE_C5_DESCRIPTION_LIMIT180),
         createdBy = player, createdAt = self:Now(), members = {}, primary180 = false,
     }
-    local pve = self:EnsurePveDB()
     pve.raidTeams180[team.id] = team
     pve.raidTeamDeleted180[team.id] = nil
     self:QueueRaidTeamSnapshot180(team, "GUILD")
@@ -2559,6 +2653,7 @@ function OTLGM:UpdateRaidTeam180(teamId, data)
     for _, member in pairs(team.members or {}) do member.teamRev = team.rev member.updatedAt = team.ts end
     if wantsPrimary then
         local pve = self:EnsurePveDB()
+        if not pve then return false, "Guild data is not ready." end
         local otherId, otherTeam
         for otherId, otherTeam in pairs(pve.raidTeams180 or {}) do
             if otherId ~= team.id and type(otherTeam) == "table" and otherTeam.primary180 then
@@ -2790,7 +2885,7 @@ function OTLGM:RefreshRaidEventRosterFromTeam180(eventId)
     local event = self:GetRaidEvent180(eventId)
     if not event then return false, "Raid event not found." end
     if not self:CanModifyPveRecord(event) then return false, "You do not have permission to refresh this event roster." end
-    if not event.teamId180 or event.teamId180 == "" then return false, "This event is not linked to a Raid Team snapshot." end
+    if not event.teamId180 or event.teamId180 == "" then return false, "This event is not linked to a saved Raid Team roster." end
     local roster, team = self:BuildRaidRosterSnapshotFromTeam180(event.teamId180)
     if not roster then return false, team end
     event.rev = (tonumber(event.rev) or 0) + 1
@@ -3110,6 +3205,7 @@ end
 
 local PVE_C6_ACCESS_PER_CHARACTER_LIMIT180 = 160
 local PVE_C6_INVITE_SESSION_MEMBER_LIMIT180 = 60
+local PVE_C6_ACCESS_EVAL_PER_SLICE180 = 4
 local PVE_C6_INVITE_STATE180 = { WAITING = true, INVITED = true, JOINED = true, OFFLINE = true }
 local PVE_C6_SLOT_ORDER180 = { ASSIGNED = 1, RESERVE = 2, GUEST = 3 }
 local PVE_C6_ROLE_ORDER180 = { TANK = 1, HEALER = 2, DAMAGE = 3, UNASSIGNED = 4 }
@@ -3675,7 +3771,7 @@ end
 function OTLGM:GetRaidEventGuildLeader180()
     -- User-facing Guild Leader identity is canonical for this guild.  Do not
     -- let stale rankIndex/rank-label snapshots redirect whispers to somebody
-    -- other than Morrow or Lucks.
+    -- other than the configured guild leader.
     if self.GetCanonicalGuildLeaderName180 then
         local name = PveC6ShortName180(self:GetCanonicalGuildLeaderName180() or "")
         if name ~= "" then return name end
@@ -3721,8 +3817,77 @@ end
 
 function OTLGM:EvaluateAllRaidAccess180(remote)
     local pve = self:EnsurePveDB()
-    local eventId
-    for eventId in pairs(pve and pve.raids or {}) do self:EvaluateRaidEventAccess180(eventId, remote and true or false) end
-    for eventId in pairs(pve and pve.cancelledRaids156 or {}) do self:EvaluateRaidEventAccess180(eventId, remote and true or false) end
+    local eventId, seen = nil, {}
+    for eventId in pairs(pve and pve.raids or {}) do
+        seen[eventId] = true
+        self:EvaluateRaidEventAccess180(eventId, remote and true or false)
+    end
+    for eventId in pairs(pve and pve.cancelledRaids156 or {}) do
+        if not seen[eventId] then self:EvaluateRaidEventAccess180(eventId, remote and true or false) end
+    end
     return true
+end
+
+-- World entry used to evaluate every retained and cancelled raid in one callback
+-- two seconds after loading began. Keep the public synchronous helper above for
+-- explicit callers, but route automatic world recovery through a bounded queue.
+function OTLGM:ScheduleAllRaidAccessEvaluation180(remote, delay)
+    local pve = self:EnsurePveDB()
+    self.runtime = self.runtime or {}
+    self.runtime.raidAccessAllGeneration181 = (tonumber(self.runtime.raidAccessAllGeneration181) or 0) + 1
+    local generation = self.runtime.raidAccessAllGeneration181
+    local ids, seen = {}, {}
+    local eventId
+    for eventId in pairs(pve and pve.raids or {}) do
+        if not seen[eventId] then seen[eventId] = true table.insert(ids, eventId) end
+    end
+    for eventId in pairs(pve and pve.cancelledRaids156 or {}) do
+        if not seen[eventId] then seen[eventId] = true table.insert(ids, eventId) end
+    end
+    if table.getn(ids) == 0 then
+        self.runtime.raidAccessAllState181 = nil
+        if self.CancelTask180 then self:CancelTask180("raid-access-all-181") end
+        return false
+    end
+
+    local state = {
+        generation = generation, ids = ids, index = 1,
+        remote = remote and true or false, startedAt = self:Now(), pressureDeferrals = 0,
+    }
+    self.runtime.raidAccessAllState181 = state
+    local function Slice181(owner)
+        local current = owner and owner.runtime and owner.runtime.raidAccessAllState181
+        if not current or tonumber(current.generation) ~= generation then return end
+        local pressure = owner.GetClientPressure181 and owner:GetClientPressure181() or nil
+        local level = pressure and tonumber(pressure.level) or 0
+        local age = owner:Now() - (tonumber(current.startedAt) or owner:Now())
+        if ((owner.runtime and owner.runtime.transitionActive176) or level >= 3) and age < 30 then
+            current.pressureDeferrals = (tonumber(current.pressureDeferrals) or 0) + 1
+            owner:ScheduleAfter180("raid-access-all-181", 2, Slice181, 12)
+            return
+        end
+        local maximum = level >= 2 and 1 or PVE_C6_ACCESS_EVAL_PER_SLICE180
+        local processed = 0
+        while current.index <= table.getn(current.ids) and processed < maximum do
+            local id = current.ids[current.index]
+            current.index = current.index + 1
+            processed = processed + 1
+            pcall(owner.EvaluateRaidEventAccess180, owner, id, current.remote)
+        end
+        owner.runtime.raidAccessEvaluationSlices181 = (tonumber(owner.runtime.raidAccessEvaluationSlices181) or 0) + 1
+        if current.index <= table.getn(current.ids) then
+            owner:ScheduleAfter180("raid-access-all-181", level >= 2 and 0.25 or 0.06, Slice181, 12)
+        else
+            owner.runtime.raidAccessAllState181 = nil
+            owner.runtime.lastRaidAccessEvaluationCount181 = table.getn(current.ids)
+            owner.runtime.lastRaidAccessEvaluationAt181 = owner:Now()
+        end
+    end
+
+    if self.ScheduleAfter180 then
+        self:ScheduleAfter180("raid-access-all-181", math.max(0, tonumber(delay) or 0), Slice181, 12)
+        return true
+    end
+    self.runtime.raidAccessAllState181 = nil
+    return self:EvaluateAllRaidAccess180(remote)
 end

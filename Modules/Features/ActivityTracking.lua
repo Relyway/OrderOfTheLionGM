@@ -71,10 +71,11 @@ local function GetGuildLeaderNameR6(self)
     return ""
 end
 
-local function IsGuildLeaderNameR6(self, name)
-    if self.IsCanonicalGuildLeaderName180 then return self:IsCanonicalGuildLeaderName180(name) end
-    local key = KeyR6(name)
-    return key == "morrow" or key == "lucks"
+local function IsLucksNameR6(name)
+    -- Published achievement text names Lucks explicitly. Legacy leader aliases
+    -- are valid for old SavedVariables/administration compatibility only and
+    -- must never satisfy an achievement condition.
+    return KeyR6(name) == "lucks"
 end
 
 local function FullGuildPartyR6(self)
@@ -118,7 +119,7 @@ local ADDITIONS_R6 = {
     {id="D008",category="SOCIAL",name="Mail Call",description="Send an item to a guild member through the in-game mail.",icon="Interface\\Icons\\INV_Letter_15",progress="mailCallR6",required=1},
     {id="D009",category="SOCIAL",name="Pen Pals",description="Receive mail from ten different guild members.",icon="Interface\\Icons\\INV_Misc_Note_02",progress="mailGuildSendersR6",required=10},
     {id="D010",category="SOCIAL",name="Roll of Fate",description="Roll 100 with /roll while in a full guild party.",icon="Interface\\Icons\\INV_Misc_Dice_02",progress="rollOfFateR6",required=1},
-    {id="D011",category="SOCIAL",name="Rise, Commander",description="Successfully resurrect Morrow or Lucks with a standard resurrection spell.",icon="Interface\\Icons\\Spell_Holy_Resurrection",progress="riseCommanderR6",required=1},
+    {id="D011",category="SOCIAL",name="Rise, Commander",description="Successfully resurrect Lucks with a standard resurrection spell.",icon="Interface\\Icons\\Spell_Holy_Resurrection",progress="riseCommanderR6",required=1},
     {id="D012",category="RAIDS",name="The World Is Watching",description="Defeat a world boss with at least ten guild members present.",icon="Interface\\Icons\\INV_Misc_Head_Dragon_01",progress="worldBossR6",required=1},
     {id="D013",category="LEGACY",name="The Final Step",description="Reach the maximum level while grouped with a guild member.",icon="Interface\\Icons\\INV_Crown_01",progress="finalStepR6",required=1},
     {id="D014",category="LEGACY",name="First Fortune",description="Carry at least one hundred gold on this character.",icon="Interface\\Icons\\INV_Misc_Coin_02",progress="moneyCopperR6",required=1000000,unitR6="gold"},
@@ -127,7 +128,7 @@ local ADDITIONS_R6 = {
     {id="D017",category="LEGACY",name="Traveling Apothecary",description="Carry ten different potions or elixirs at the same time.",icon="Interface\\Icons\\INV_Potion_01",progress="uniquePotionsR6",required=10},
     {id="D018",category="LEGACY",name="Living Legend",description="Link a legendary item you own in guild chat.",icon="Interface\\Icons\\INV_Misc_Gem_Pearl_05",progress="livingLegendR6",required=1},
     {id="D019",category="SECRETS",name="Absolutely Broke",description="The title is your clue.",revealed="Stand in a faction capital with exactly zero copper.",icon="Interface\\Icons\\INV_Misc_Coin_01",progress="absolutelyBrokeR6",required=1,secret=true},
-    {id="D020",category="SECRETS",name="Exact Change",description="The title is your clue.",revealed="Give Morrow or Lucks exactly one copper and receive nothing.",icon="Interface\\Icons\\INV_Misc_Coin_01",progress="exactChangeR6",required=1,secret=true},
+    {id="D020",category="SECRETS",name="Exact Change",description="The title is your clue.",revealed="Give Lucks exactly one copper and receive nothing.",icon="Interface\\Icons\\INV_Misc_Coin_01",progress="exactChangeR6",required=1,secret=true},
     {id="D021",category="SECRETS",name="Gravity Wins",description="The title is your clue.",revealed="Die from falling damage while grouped with a guild member.",icon="Interface\\Icons\\Ability_Rogue_Sprint",progress="gravityWinsR6",required=1,secret=true},
 }
 
@@ -152,8 +153,12 @@ local SERIES_R6 = {
     {key="riding",icon="Interface\\Icons\\Ability_Mount_RidingHorse",ids={"B080","B081"}},
 }
 
+local seriesAppliedRevisionR31 = nil
 local function ApplySeriesR6()
     if not A6 then return end
+    local seriesRevisionR31 = tostring(tonumber(A6.catalogRevision) or 0) .. ":" .. tostring(table.getn(A6.catalog or {}))
+    if seriesAppliedRevisionR31 == seriesRevisionR31 then return end
+    seriesAppliedRevisionR31 = seriesRevisionR31
     local catalogIndex = {}
     local index, def, series, tier
     for index=1,table.getn(A6.catalog or {}) do
@@ -197,27 +202,52 @@ end
 local PreviousDisplayListR6 = OTLGM.__impl180.GetAchievementDisplayList174__impl2
 function OTLGM:GetAchievementDisplayList174()
     ApplySeriesR6()
-    local list=PreviousDisplayListR6(self)
-    local category=OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.achievementCategory174 or "OVERVIEW"
-    local function StateRank(def)
-        if self:IsAchievementComplete174(def.id) then return 1 end
-        local current=self:GetAchievementProgress174(def)
-        if not def.secret and tonumber(current)>0 then return 2 end
-        return 3
-    end
-    table.sort(list,function(left,right)
-        if category=="OVERVIEW" then
-            local ls,rs=StateRank(left),StateRank(right)
-            if ls~=rs then return ls<rs end
+    -- R31: the old chain sorted the same list twice and repeatedly called
+    -- GetAchievementProgress174 from table.sort comparators. On a large catalog
+    -- this turned one page open into ~100 ms. Evaluate each achievement once,
+    -- retain the final R6 ordering semantics, and keep comparator work O(1).
+    local category = OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.achievementCategory174 or "OVERVIEW"
+    local filter = OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.achievementFilter174 or "ALL"
+    local search = string.lower(TrimR6((self.ui and self.ui.achievementSearchRuntime180) or (OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.achievementSearch174) or ""))
+    local list, meta = {}, {}
+    local index, def, complete, current, required, matches, stateRank
+    for index = 1, table.getn(A6 and A6.catalog or {}) do
+        def = A6.catalog[index]
+        complete = self:IsAchievementComplete174(def.id)
+        current, required = self:GetAchievementProgress174(def)
+        matches = search == "" or string.find(string.lower(def.name or ""), search, 1, true)
+            or string.find(string.lower(def.description or ""), search, 1, true)
+        if matches and (category == "OVERVIEW" or def.category == category) then
+            if filter == "ALL" or (filter == "COMPLETE" and complete)
+                or (filter == "PROGRESS" and not complete and (tonumber(current) or 0) > 0 and not def.secret)
+                or (filter == "LOCKED" and not complete and (def.secret or (tonumber(current) or 0) <= 0)) then
+                table.insert(list, def)
+                if complete then stateRank = 1
+                elseif not def.secret and (tonumber(current) or 0) > 0 then stateRank = 2
+                else stateRank = 3 end
+                meta[def.id] = {
+                    state = stateRank,
+                    tracked = (not complete and self.IsAchievementTracked183 and self:IsAchievementTracked183(def.id)) and 0 or 1,
+                    order = tonumber(def.seriesOrderR6) or tonumber(def.catalogIndexR6) or index,
+                    tier = tonumber(def.seriesTierR6) or 1,
+                    name = tostring(def.name or ""),
+                }
+            end
         end
-        local lo=tonumber(left.seriesOrderR6) or tonumber(left.catalogIndexR6) or 999999
-        local ro=tonumber(right.seriesOrderR6) or tonumber(right.catalogIndexR6) or 999999
-        if lo~=ro then return lo<ro end
-        local lt=tonumber(left.seriesTierR6) or 1
-        local rt=tonumber(right.seriesTierR6) or 1
-        if lt~=rt then return lt<rt end
-        return tostring(left.name or "")<tostring(right.name or "")
+    end
+    table.sort(list, function(left, right)
+        local lm, rm = meta[left.id], meta[right.id]
+        -- r32: tracked goals are pinned above ordinary results in every view.
+        -- Completion still removes a goal automatically, so this cannot pin stale
+        -- completed achievements ahead of the catalog.
+        if lm.tracked ~= rm.tracked then return lm.tracked < rm.tracked end
+        if category == "OVERVIEW" and lm.state ~= rm.state then return lm.state < rm.state end
+        if lm.order ~= rm.order then return lm.order < rm.order end
+        if lm.tier ~= rm.tier then return lm.tier < rm.tier end
+        return lm.name < rm.name
     end)
+    self.runtime = self.runtime or {}
+    self.runtime.achievementDisplayEvaluationsR31 = (tonumber(self.runtime.achievementDisplayEvaluationsR31) or 0) + table.getn(A6 and A6.catalog or {})
     return list
 end
 
@@ -343,7 +373,10 @@ end
 
 local CAPITALS_R6={stormwind=true,stormwindcity=true,ironforge=true,darnassus=true,orgrimmar=true,undercity=true,thunderbluff=true,silvermooncity=true,exodar=true,theexodar=true}
 local CORE_CLOTH_R6={ [2589]=20,[2592]=20,[4306]=20,[4338]=20,[14047]=20 }
-local WORLD_BOSSES_R6={azuregos=true,["lordkazzak"]=true,emeriss=true,lethon=true,taerar=true,ysondre=true,ostarius=true}
+local WORLD_BOSSES_R6={
+    azuregos=true,["lordkazzak"]=true,emeriss=true,lethon=true,taerar=true,ysondre=true,
+    ostarius=true,ostariusofuldum=true,concavius=true,nerubianoverseer=true,darkreaverofkarazhan=true,
+}
 
 local function CurrentZoneKeyR6()
     local zone=GetRealZoneText and GetRealZoneText() or GetZoneText and GetZoneText() or ""
@@ -351,6 +384,12 @@ local function CurrentZoneKeyR6()
 end
 
 local function CheckMoneyR6(self,silent)
+    local db=self:EnsureAchievements174()
+    -- PLAYER_MONEY can arrive before the delayed R6 login baseline. Existing
+    -- wallet state on a cold/fresh login is retrospective, so never announce
+    -- First Fortune / Absolutely Broke until this character has established the
+    -- baseline at least once. Persisted completed[id] remains the primary gate.
+    if not db.releaseBaselineR6 then silent=true end
     local money=GetMoney and tonumber(GetMoney()) or 0
     self:SetAchievementCounter174("moneyCopperR6",money)
     if money>=100*COPPER_PER_GOLD_R6 then self:CompleteAchievement174("D014",silent) end
@@ -454,6 +493,46 @@ local function CheckLevelUpR6(self,newLevel)
     end
 end
 
+
+-- r41: D001 must be observable by the local client even when the character
+-- reaching 60 does not run the addon. We keep a transient baseline only for
+-- guild members currently grouped with this player. Seeing somebody already at
+-- 60 establishes a baseline; only a real <60 -> 60 transition awards progress.
+function OTLGM:ObserveGroupedGuildLevelsR41(silent)
+    self.runtime=self.runtime or {}
+    if self.IsAchievementComplete174 and self:IsAchievementComplete174("D001") then
+        self.runtime.groupLevelBaselineR41=nil
+        return false
+    end
+    local group=self.GetGroupSnapshot174 and self:GetGroupSnapshot174() or nil
+    local baseline=self.runtime.groupLevelBaselineR41 or {}
+    self.runtime.groupLevelBaselineR41=baseline
+    local seen={}
+    local index,member,key,level,previous
+    for index=1,table.getn(group and group.guildMembers or {}) do
+        member=group.guildMembers[index]
+        if member and not IsPlayerR6(member.name) then
+            key=KeyR6(member.name)
+            level=0
+            if member.unit and UnitLevel then level=tonumber(UnitLevel(member.unit)) or 0 end
+            if level<=0 then level=tonumber(member.level) or 0 end
+            if key~="" and level>0 then
+                seen[key]=true
+                previous=tonumber(baseline[key]) or 0
+                baseline[key]=level
+                if previous>0 and previous<MAX_LEVEL_R6 and level>=MAX_LEVEL_R6 then
+                    self:SetAchievementCounter174("witnessMaxLevelR6",1)
+                    self:CompleteAchievement174("D001",silent and true or false)
+                    self.runtime.groupLevelBaselineR41=nil
+                    return true
+                end
+            end
+        end
+    end
+    for key in pairs(baseline) do if not seen[key] then baseline[key]=nil end end
+    return false
+end
+
 local PreviousReleaseMessageR6=OTLGM.__impl180.HandleRelease175Message__impl1
 function OTLGM:HandleRelease175Message(message,channel,sender)
     local fields=self:Split(message or "","^")
@@ -508,14 +587,14 @@ function OTLGM:FinishTradeTracking174(success)
     PreviousFinishTradeR6(self,success)
     if not success or not snapshot or not IsGuildMemberR6(self,snapshot.target) then return end
     if snapshot.playerMoney>=COPPER_PER_GOLD_R6 and snapshot.targetMoney==0 and snapshot.targetItems==0 then self:SetAchievementCounter174("generousTipR6",1) self:CompleteAchievement174("D007",false) end
-    if snapshot.playerMoney==1 and snapshot.targetMoney==0 and snapshot.targetItems==0 and snapshot.playerItems==0 and IsGuildLeaderNameR6(self,snapshot.target) then self:SetAchievementCounter174("exactChangeR6",1) self:CompleteAchievement174("D020",false) end
+    if snapshot.playerMoney==1 and snapshot.targetMoney==0 and snapshot.targetItems==0 and snapshot.playerItems==0 and IsLucksNameR6(snapshot.target) then self:SetAchievementCounter174("exactChangeR6",1) self:CompleteAchievement174("D020",false) end
 end
 
 local PreviousCheckResurrectionR6=OTLGM.__impl180.CheckResurrection175__impl2
 function OTLGM.__impl180.CheckResurrection175__impl3(self)
     local target=self.runtime and self.runtime.resurrection175 and self.runtime.resurrection175.target or ""
     local result=PreviousCheckResurrectionR6(self)
-    if result and target~="" and IsGuildLeaderNameR6(self,target) then self:SetAchievementCounter174("riseCommanderR6",1) self:CompleteAchievement174("D011",false) end
+    if result and target~="" and IsLucksNameR6(target) then self:SetAchievementCounter174("riseCommanderR6",1) self:CompleteAchievement174("D011",false) end
     return result
 end
 
@@ -602,28 +681,72 @@ end
 local function ParseRollSystemR6(self,message)
     local text=tostring(message or "")
     local lower=string.lower(text)
+
+    -- /roll remains a system-chat message.
     local _,_,name,value,minv,maxv=string.find(text,"^(.+) rolls (%d+) %((%d+)%-(%d+)%)")
     if name and tonumber(value)==100 and tonumber(minv)==1 and tonumber(maxv)==100 and IsPlayerR6(name) then
         local group,full=FullGuildPartyR6(self)
         if full then self:SetAchievementCounter174("rollOfFateR6",1) self:CompleteAchievement174("D010",false) end
     end
-    local _,_,rolledName,rolledValue=string.find(text,"^(.+) rolls (%d+)")
+
     local state=RecentLootStateR6(self)
-    if state and rolledName and rolledValue and (string.find(lower,"need",1,true) or string.find(lower,"greed",1,true)) then
-        state.rolls[KeyR6(rolledName)]={value=tonumber(rolledValue) or 0,choice=string.find(lower,"need",1,true) and "NEED" or "GREED"}
+    if not state then return end
+    local player=ShortNameR6(UnitName and UnitName("player") or "")
+    local rolledName,rolledValue,choice
+
+    -- Vanilla 1.12 loot messages live in CHAT_MSG_LOOT and use different
+    -- layouts for self and other players. Support both stock forms plus the
+    -- older/custom "Name rolls N ... Need/Greed" wording.
+    _,_,rolledValue=string.find(text,"^You roll a (%d+) %(Need%) on:")
+    if rolledValue then rolledName=player choice="NEED" end
+    if not rolledValue then
+        _,_,rolledValue=string.find(text,"^You roll a (%d+) %(Greed%) on:")
+        if rolledValue then rolledName=player choice="GREED" end
     end
-    if state and string.find(lower,"pass",1,true) then
-        local _,_,passName=string.find(text,"^([^%s]+)")
-        if passName and IsGuildMemberR6(self,passName) then state.passes[KeyR6(passName)]=true end
-        if state.fullGuild and CountR6(state.passes)>=5 then self:SetAchievementCounter174("everybodyPassesR6",1) self:CompleteAchievement174("D006",false) end
+    if not rolledValue then
+        _,_,rolledValue,rolledName=string.find(text,"^Need Roll %- (%d+) .- by (.+)$")
+        if rolledValue then choice="NEED" end
     end
-    if state and string.find(lower,"won",1,true) then
-        local _,_,winner=string.find(text,"^([^%s]+)")
-        if string.find(lower,"you won",1,true) then winner=UnitName("player") end
-        local localRoll=state.rolls[KeyR6(UnitName("player") or "")]
-        local winnerRoll=winner and state.rolls[KeyR6(winner)] or nil
-        if winner and IsPlayerR6(winner) and localRoll and localRoll.value==100 then self:SetAchievementCounter174("perfectRollR6",1) self:CompleteAchievement174("D003",false) end
-        if winner and not IsPlayerR6(winner) and IsGuildMemberR6(self,winner) and localRoll and winnerRoll and localRoll.value==99 and winnerRoll.value==100 and localRoll.choice==winnerRoll.choice then self:SetAchievementCounter174("soCloseR6",1) self:CompleteAchievement174("D004",false) end
+    if not rolledValue then
+        _,_,rolledValue,rolledName=string.find(text,"^Greed Roll %- (%d+) .- by (.+)$")
+        if rolledValue then choice="GREED" end
+    end
+    if not rolledValue then
+        local _,_,genericName,genericValue=string.find(text,"^(.+) rolls (%d+)")
+        if genericName and genericValue and (string.find(lower,"need",1,true) or string.find(lower,"greed",1,true)) then
+            rolledName=genericName rolledValue=genericValue
+            choice=string.find(lower,"need",1,true) and "NEED" or "GREED"
+        end
+    end
+    if rolledName and rolledValue and choice then
+        state.rolls[KeyR6(rolledName)]={value=tonumber(rolledValue) or 0,choice=choice}
+    end
+
+    local passName=nil
+    if string.find(text,"^You passed on:") then passName=player
+    else _,_,passName=string.find(text,"^(.+) passed on:") end
+    if passName and IsGuildMemberR6(self,passName) then
+        state.passes[KeyR6(passName)]=true
+        if state.fullGuild and CountR6(state.passes)>=5 then
+            self:SetAchievementCounter174("everybodyPassesR6",1)
+            self:CompleteAchievement174("D006",false)
+        end
+    end
+
+    local winner=nil
+    if string.find(text,"^You won:") then winner=player
+    else _,_,winner=string.find(text,"^(.+) won:") end
+    if winner then
+        winner=ShortNameR6(winner)
+        local localRoll=state.rolls[KeyR6(player)]
+        local winnerRoll=state.rolls[KeyR6(winner)]
+        if IsPlayerR6(winner) and localRoll and localRoll.value==100 then
+            self:SetAchievementCounter174("perfectRollR6",1) self:CompleteAchievement174("D003",false)
+        end
+        if not IsPlayerR6(winner) and IsGuildMemberR6(self,winner) and localRoll and winnerRoll
+            and localRoll.value==99 and winnerRoll.value==100 and localRoll.choice==winnerRoll.choice then
+            self:SetAchievementCounter174("soCloseR6",1) self:CompleteAchievement174("D004",false)
+        end
     end
 end
 
@@ -671,6 +794,24 @@ end
 
 local PreviousRefreshActivityR6=OTLGM.__impl180.RefreshActivityPage__impl3
 function OTLGM:RefreshActivityPage()
+    self.runtime = self.runtime or {}
+    -- Preserve Activity's evidence-gathering semantics even when the expensive
+    -- visual repaint can be skipped. Nearby faction observations may change
+    -- without a roster commit, so perform that bounded probe before the cache key.
+    if self.RefreshObservedGuildFactions180 then self:RefreshObservedGuildFactions180("activity-r31-probe") end
+    local dbR31 = self.GetGuildDB and self:GetGuildDB() or nil
+    local sharedR31 = self.EnsureSharedActivity156 and self:EnsureSharedActivity156() or nil
+    local activityR31 = dbR31 and dbR31.activity or nil
+    local renderRevisionR31 = tostring(tonumber(dbR31 and dbR31.lastScan) or 0) .. ":"
+        .. tostring(tonumber(activityR31 and activityR31.totalScans) or 0) .. ":"
+        .. tostring(tonumber(sharedR31 and sharedR31.revisionR26) or 0) .. ":"
+        .. tostring(tonumber(self.runtime.factionObservationRevision180) or 0) .. ":"
+        .. tostring(math.floor(self:Now() / 60))
+    if self.runtime.activityRenderRevisionR31 == renderRevisionR31 then
+        self.runtime.activityRenderSkipsR31 = (tonumber(self.runtime.activityRenderSkipsR31) or 0) + 1
+        return true
+    end
+    self.runtime.activityRenderRevisionR31 = renderRevisionR31
     local result=PreviousRefreshActivityR6(self)
     if self.ui and self.ui.activityInsightText170 then
         local text=tostring(self.ui.activityInsightText170:GetText() or "")
@@ -734,12 +875,15 @@ function OTLGM:HandleSafeActivityEvent180(eventName, firstArg, secondArg)
         return true
     elseif eventName == "CHAT_MSG_SYSTEM" then
         local text = tostring(firstArg or "")
-        local lower = string.lower(text)
-        -- The parser only understands roll/pass/winner messages. Ignore every
-        -- other system line before touching loot state or the group cache.
-        if string.find(lower, " rolls ", 1, true) or string.find(lower, "pass", 1, true) or string.find(lower, "won", 1, true) then
-            ParseRollSystemR6(self, text)
-        end
+        -- Stock /roll results are system messages; Need/Greed/pass/winner
+        -- traffic is handled from CHAT_MSG_LOOT below.
+        if string.find(string.lower(text), " rolls ", 1, true) then ParseRollSystemR6(self, text) end
+        return true
+    elseif eventName == "CHAT_MSG_LOOT" then
+        ParseRollSystemR6(self, tostring(firstArg or ""))
+        return true
+    elseif eventName == "UNIT_LEVEL" then
+        self:ObserveGroupedGuildLevelsR41(false)
         return true
     elseif eventName == "CHAT_MSG_GUILD" then
         local text = tostring(firstArg or "")
@@ -755,7 +899,9 @@ function OTLGM:HandleSafeActivityEvent180(eventName, firstArg, secondArg)
         if string.find(lower, "azuregos", 1, true) or string.find(lower, "kazzak", 1, true)
             or string.find(lower, "emeriss", 1, true) or string.find(lower, "lethon", 1, true)
             or string.find(lower, "taerar", 1, true) or string.find(lower, "ysondre", 1, true)
-            or string.find(lower, "ostarius", 1, true) then
+            or string.find(lower, "ostarius", 1, true) or string.find(lower, "concavius", 1, true)
+            or string.find(lower, "nerubian overseer", 1, true)
+            or string.find(lower, "dark reaver of karazhan", 1, true) then
             CheckWorldBossR6(self, firstArg)
         end
         return true
@@ -808,4 +954,4 @@ frameR6:SetScript("OnEvent",function()
     end
 end)
 
-if OTLGM.RegisterModule then OTLGM:RegisterModule("ActivityTracking",{layer="feature",corrective=true,revision=6,totalAchievements=146,eventDriven=true,noOnUpdate=true}) end
+if OTLGM.RegisterModule then OTLGM:RegisterModule("ActivityTracking",{layer="feature",corrective=true,revision=7,totalAchievements=147,eventDriven=true,noOnUpdate=true}) end

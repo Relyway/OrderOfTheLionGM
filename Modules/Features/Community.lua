@@ -222,7 +222,7 @@ function OTLGM:ApplySystemsDefaults()
     if settings.announcementDraftTitle153 == nil then settings.announcementDraftTitle153 = "" end
     if settings.announcementDraftBody153 == nil then settings.announcementDraftBody153 = "" end
     if settings.craftingCategory153 == nil then settings.craftingCategory153 = "ALL" end
-    if settings.craftingLevelFilter153 == nil then settings.craftingLevelFilter153 = "ANY" end
+    if settings.craftingLevelFilter153 == nil or settings.craftingLevelFilter153 == "UNKNOWN" then settings.craftingLevelFilter153 = "ANY" end
     if settings.craftingRarityFilter153 == nil then settings.craftingRarityFilter153 = "ANY" end
     if settings.craftingSort153 == nil then settings.craftingSort153 = "ONLINE" end
     if settings.craftingOnlineOnly153 == nil then settings.craftingOnlineOnly153 = false end
@@ -373,6 +373,7 @@ function OTLGM:AddInboxNotification170(category, eventKey, title, body, priority
     table.insert(db.inbox170, 1, entry)
     while table.getn(db.inbox170) > 80 do table.remove(db.inbox170) end
     S152RecountInbox(db)
+    if self.MarkQuickDockDirty182 then self:MarkQuickDockDirty182("notifications") end
     return true
 end
 
@@ -390,7 +391,11 @@ function OTLGM:RemoveInboxObject180(objectType, objectId)
             changed = true
         end
     end
-    if changed then S152RecountInbox(db) if self.RefreshNavigation then self:RefreshNavigation() end end
+    if changed then
+        S152RecountInbox(db)
+        if self.RefreshNavigation then self:RefreshNavigation() end
+        if self.MarkQuickDockDirty182 then self:MarkQuickDockDirty182("notifications") end
+    end
     return changed
 end
 
@@ -517,7 +522,10 @@ function OTLGM:PruneInboxActions180()
             changed = true
         end
     end
-    if changed then S152RecountInbox(db) end
+    if changed then
+        S152RecountInbox(db)
+        if self.MarkQuickDockDirty182 then self:MarkQuickDockDirty182("notifications") end
+    end
     return changed
 end
 
@@ -921,7 +929,7 @@ function OTLGM:PublishAnnouncement152(title, body, importance, notifyFlag, pinne
     db.announcementRead[record.id] = tonumber(record.revision) or 1
     S152PruneAnnouncements(db)
     local queued = self:QueueAnnouncementRecord152(record)
-    if not queued and self.SetStatus then self:SetStatus("Announcement saved locally, but its network packets could not be queued safely.") end
+    if not queued and self.SetStatus then self:SetStatus("Announcement was saved on this character, but it could not be shared with other guild addon users yet.") end
     self:AddUsefulActivity152("ANNOUNCEMENT", "Leadership published: " .. title, author, "home", now)
     if self.OnAnnouncementDataChanged152 then self:OnAnnouncementDataChanged152(false) end
     return true, record
@@ -1016,19 +1024,55 @@ function OTLGM:GetAnnouncementReactionSummary152(id)
     return self:GetCommunityReactionSummary("ANN", id)
 end
 
+local function GetAnnouncementSyncPeersR26(self)
+    local compatible = self.GetCompatibleSyncPeersR2 and self:GetCompatibleSyncPeersR2(360) or {}
+    local peers = {}
+    local index, name
+    for index = 1, table.getn(compatible) do
+        name = compatible[index]
+        if self.IsLeadershipSender and self:IsLeadershipSender(name) then table.insert(peers, name) end
+    end
+    table.sort(peers)
+    return peers
+end
+
 function OTLGM:RequestAnnouncementSync152(force)
     if not self.QueueCommunityPayload or not GetGuildInfo("player") then return false end
     local now=self:Now()
-    if not force and self.lastAnnouncementSync152 and now-self.lastAnnouncementSync152<60 then return false end
+    -- R26: full official-post recovery is expensive because one response can be
+    -- dozens of META/BODY chunks. Passive recovery is coarse; published posts
+    -- themselves still propagate immediately.
+    if not force and self.lastAnnouncementSync152 and now-self.lastAnnouncementSync152<300 then return false end
+    local peers=GetAnnouncementSyncPeersR26(self)
+    if table.getn(peers)<=0 then
+        self.runtime=self.runtime or {}
+        self.runtime.announcementNoLeadershipPeerR26=(tonumber(self.runtime.announcementNoLeadershipPeerR26) or 0)+1
+        return false
+    end
+    self.runtime=self.runtime or {}
+    local cursor=tonumber(self.runtime.announcementPeerCursorR26) or 0
+    local index=math.mod(cursor,table.getn(peers))+1
+    local target=peers[index]
+    if not self:QueueCommunityPayload(table.concat({self.announcementProtocol,"SYNC",self.version,tostring(now)},"^"),"WHISPER",target,2,"announcements:sync:"..S152NormalizeName(target)) then return false end
+    self.runtime.announcementPeerCursorR26=math.mod(cursor+1,table.getn(peers))
+    self.runtime.announcementTargetedSyncsR26=(tonumber(self.runtime.announcementTargetedSyncsR26) or 0)+1
+    self.runtime.announcementLastSyncTargetR26=target
     self.lastAnnouncementSync152=now
     local db=self:GetGuildDB()
     if db and db.announcementSync then db.announcementSync.requested=now end
-    self:QueueCommunityPayload(table.concat({self.announcementProtocol,"SYNC",self.version,tostring(now)},"^"),"GUILD",nil,3,"announcements:sync")
     return true
 end
 
 function OTLGM:ScheduleAnnouncementState155(target)
     if not target or target == "" or S152NormalizeName(target)==S152NormalizeName(UnitName("player") or "") then return false end
+    self.runtime=self.runtime or {}
+    self.runtime.announcementResponseAtR26=self.runtime.announcementResponseAtR26 or {}
+    local responseKeyR26=S152NormalizeName(target)
+    local lastResponseR26=tonumber(self.runtime.announcementResponseAtR26[responseKeyR26]) or 0
+    if self:Now()-lastResponseR26<180 then
+        self.runtime.announcementResponseCoalescedR26=(tonumber(self.runtime.announcementResponseCoalescedR26) or 0)+1
+        return false
+    end
     local db=self:GetGuildDB()
     local hasVerified=false
     local _,record
@@ -1052,7 +1096,11 @@ function OTLGM:ProcessAnnouncementTimers155()
     for key,pending in pairs(self.announcementShareTargets155 or {}) do
         if pending and self:Now()>=(pending.due or 0) then
             self.announcementShareTargets155[key]=nil
-            self:QueueAnnouncementState152(pending.name)
+            if self:QueueAnnouncementState152(pending.name) then
+                self.runtime=self.runtime or {}
+                self.runtime.announcementResponseAtR26=self.runtime.announcementResponseAtR26 or {}
+                self.runtime.announcementResponseAtR26[S152NormalizeName(pending.name)]=self:Now()
+            end
             break
         end
     end
@@ -1187,6 +1235,7 @@ function OTLGM:HandleAnnouncementMessage152(message, channel, sender)
 end
 
 function OTLGM:OnAnnouncementDataChanged152(remote)
+    if self.InvalidateGlobalSearchCache185 then self:InvalidateGlobalSearchCache185("announcements") end
     if self.ui and self.ui.main and self.ui.main:IsVisible() then
         if self.ui.currentPage == "home" and self.RefreshHomePage then self:RefreshHomePage() end
         if self.ui.currentPage == "search" and self.RefreshSearchPage then self:RefreshSearchPage(true) end
@@ -1322,6 +1371,7 @@ function OTLGM:ApplyRemoteReaction(fields, sender, channel)
 end
 
 function OTLGM:OnPveDataChanged(section, remote)
+    if self.InvalidateGlobalSearchCache185 then self:InvalidateGlobalSearchCache185("pve") end
     if PreviousOnPveDataChanged152 then PreviousOnPveDataChanged152(self, section, remote) end
 end
 

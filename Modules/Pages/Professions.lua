@@ -189,7 +189,7 @@ function OTLGM:BuildProfessionsFiltersDrawer()
         OTLGM:RefreshProfessionsPage()
     end)
     drawer.favorites:SetPoint("LEFT", drawer.online, "RIGHT", 8, 0)
-    drawer.help = Label(drawer, "Filters always apply to the local recipe cache, even while guild sync is waiting.", "GameFontNormalSmall", 18, -480, 380, "LEFT")
+    drawer.help = Label(drawer, "Filters always use the profession information already available on this character, even while guild updates are waiting.", "GameFontNormalSmall", 18, -480, 380, "LEFT")
     drawer.help:SetHeight(46)
     drawer.help:SetJustifyV("TOP")
     drawer.help:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
@@ -282,7 +282,7 @@ local function BuildRecipePanels(owner, page)
     owner.ui.craftingStateText = Label(panel, "", "GameFontNormalSmall", 648, -9, 154, "RIGHT")
     owner.ui.craftingStateText:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
     owner.ui.craftingUpdate = UI:Button(panel, "Update guild", 122, 30, function()
-        if owner:RequestCraftingSync(true, true) and owner.ShowToast then owner:ShowToast("Synchronizing professions…", "pending") end
+        if owner:RequestCraftingSync(true, true) and owner.ShowToast then owner:ShowToast("Checking profession updates…", "pending") end
         owner:RefreshProfessionsPage()
     end, "utility")
     owner.ui.craftingUpdate:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, 0)
@@ -300,6 +300,17 @@ local function BuildRecipePanels(owner, page)
     owner.ui.professionColumn = professions
     owner.ui.recipeColumn = recipes
     owner.ui.recipeDetails = details
+    owner.ui.craftingCrafterFilterChipR42 = UI:Button(recipes, "", 126, 20, function()
+        owner.ui.craftingCrafterFilterR42 = nil
+        owner.ui.craftingRecipeOffset = 0
+        owner.ui.craftingSelectedRecipeKey = nil
+        if owner.InvalidateCraftingSearchCache then owner:InvalidateCraftingSearchCache() end
+        owner:RefreshProfessionsPage()
+    end, "utility")
+    owner.ui.craftingCrafterFilterChipR42:SetPoint("TOPRIGHT", recipes, "TOPRIGHT", -8, -6)
+    owner.ui.craftingCrafterFilterChipR42.otlTooltipTitle = "Member filter"
+    owner.ui.craftingCrafterFilterChipR42.otlTooltip = "Showing only recipes shared by this guild member. Click to clear."
+    owner.ui.craftingCrafterFilterChipR42:Hide()
 
     professions.rows = {}
     local definitions = owner:GetCraftingProfessionDefinitions()
@@ -484,7 +495,7 @@ local function BuildRecipePanels(owner, page)
     end)
     details.crafterScroll:SetPoint("TOPRIGHT", details, "TOPRIGHT", -7, -290)
     details.crafterScroll:Hide()
-    details.crafterEmpty = Label(details, "No guild crafters are cached for this recipe.", "GameFontNormalSmall", 12, -292, 286, "LEFT")
+    details.crafterEmpty = Label(details, "No guild crafters are currently known for this recipe.", "GameFontNormalSmall", 12, -292, 286, "LEFT")
     details.crafterEmpty:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
     details.crafterEmpty:Hide()
     details.actionsTitle = Label(details, "ACTIONS", "GameFontNormalSmall", 12, -378, 150, "LEFT")
@@ -522,7 +533,6 @@ function OTLGM:BuildCraftingRequestEditor()
     modal.selectionCard.reagentsText:SetJustifyV("TOP")
     modal.selectionCard.clear = UI:Button(modal.selectionCard, "Clear Selection", 114, 26, function()
         self:SetCraftingRequestEditorSelection180(nil)
-        modal.item:SetFocus()
     end, "secondary")
     modal.selectionCard.clear:SetPoint("TOPRIGHT", modal.selectionCard, "TOPRIGHT", -10, -30)
 
@@ -597,7 +607,7 @@ function OTLGM:SetCraftingRequestEditorSelection180(result)
             table.insert(reagents, tostring(reagent.count or 0) .. "x " .. tostring(reagent.name or "Reagent"))
         end
         if table.getn(identity.reagents or {}) > 8 then table.insert(reagents, "+" .. tostring(table.getn(identity.reagents) - 8) .. " more") end
-        modal.selectionCard.reagentsText:SetText(table.getn(reagents) > 0 and ("Reagents: " .. table.concat(reagents, ", ")) or "Reagents are not cached; this does not block the request.")
+        modal.selectionCard.reagentsText:SetText(table.getn(reagents) > 0 and ("Reagents: " .. table.concat(reagents, ", ")) or "Reagent details are not available yet; you can still send the request.")
         modal.selectionCard:Show()
         modal.itemLabel:Hide() modal.item:Hide()
         modal.kindLabel:ClearAllPoints() modal.kindLabel:SetPoint("TOPLEFT", modal, "TOPLEFT", 20, -206)
@@ -629,7 +639,6 @@ function OTLGM:OpenCraftingRequestEditor(itemOrResult)
     modal.validation:SetText(modal.requestIdentity180 and "The selected item identity is locked to this recipe." or "Generic requests remain available for enchants, transmutes, materials and custom services.")
     modal.validation:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
     self:ShowShellModal(modal)
-    if modal.requestIdentity180 then modal.note:SetFocus() else modal.item:SetFocus() end
 end
 
 function OTLGM:BuildCraftingResponseEditor()
@@ -666,7 +675,6 @@ function OTLGM:OpenCraftingResponseEditor(requestId)
     modal.canHelp.otlValue = false
     UI:SetSelected(modal.canHelp, false)
     self:ShowShellModal(modal)
-    modal.text:SetFocus()
 end
 
 local function BuildRequestsPanel(owner, page)
@@ -818,6 +826,10 @@ local function BuildProfessions(owner, page)
     owner.ui.professionsRecipesTab:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -4)
     owner.ui.professionsRequestsTab = UI:Tab(page, "Crafting Requests", 158, function() owner:SetProfessionsTab("REQUESTS") end)
     owner.ui.professionsRequestsTab:SetPoint("LEFT", owner.ui.professionsRecipesTab, "RIGHT", 8, 0)
+    if UI.HelpIcon then
+        owner.ui.professionsHelpR32 = UI:ContextHelpIcon(page, "PROFESSIONS")
+        owner.ui.professionsHelpR32:SetPoint("LEFT", owner.ui.professionsRequestsTab, "RIGHT", 8, 0)
+    end
     BuildRecipePanels(owner, page)
     BuildRequestsPanel(owner, page)
     owner.ui.professionsSection = OTLGM_DB.settings.craftingSection == "REQUESTS" and "REQUESTS" or "RECIPES"
@@ -858,17 +870,28 @@ local function RefreshRecipeDetails(owner, selected)
     details.otlResult = selected
     details.iconButton.otlResult = selected
     details.iconButton.icon:SetTexture(ResolveRecipeIcon(owner, selected))
-    details.titleText:SetText(tostring(selected.recipe.name or "Recipe"))
+    local recipeTitleR44 = tostring(selected.recipe.name or "")
+    if owner.NormalizeText and owner:NormalizeText(recipeTitleR44) == "" and owner.GetCraftingDetail then
+        local cachedDetailR44 = owner:GetCraftingDetail(selected.recipe, selected.professionKey)
+        recipeTitleR44 = cachedDetailR44 and tostring(cachedDetailR44.recipeName or "") or ""
+    end
+    if recipeTitleR44 == "" then recipeTitleR44 = tostring(selected.professionKey or "") == "ENCHANTING" and "Enchanting recipe" or "Recipe" end
+    details.titleText:SetText(recipeTitleR44)
     ApplyQualityColor(details.titleText, selected.recipe.quality)
     local skill = tonumber(selected.recipe.requiredSkill) or 0
     local meta = tostring(selected.professionLabel or selected.professionKey or "Profession")
     if skill > 0 then meta = meta .. "  |  Skill " .. tostring(skill) end
-    details.metaText:SetText(meta .. "  |  " .. tostring(table.getn(selected.crafters or {})) .. " crafter(s)")
-    local effectText = tostring(selected.recipe.effectText or "")
-    if effectText == "" and owner.GetCraftingDetail then
-        local cached = owner:GetCraftingDetail(selected.recipe, selected.professionKey)
-        effectText = tostring(cached and cached.effectText or "")
+    local totalCraftersR46, recentCraftersR46, olderCraftersR46 = owner:GetCraftingCrafterCountsR46(selected)
+    local crafterMetaR46
+    if olderCraftersR46 > 0 then
+        crafterMetaR46 = tostring(recentCraftersR46) .. " recent  |  " .. tostring(olderCraftersR46) .. " inactive"
+    else
+        crafterMetaR46 = tostring(totalCraftersR46) .. (totalCraftersR46 == 1 and " crafter" or " crafters")
     end
+    details.metaText:SetText(meta .. "  |  " .. crafterMetaR46)
+    local effectText = owner.GetFriendlyCraftingEffect183
+        and owner:GetFriendlyCraftingEffect183(selected.recipe, selected.professionKey)
+        or tostring(selected.recipe.effectText or "")
     if owner.NormalizeText and owner:NormalizeText(effectText) == owner:NormalizeText(selected.recipe.name or "") then effectText = "" end
     local hasEffect = effectText ~= ""
     local isEnchanting = tostring(selected.professionKey or "") == "ENCHANTING"
@@ -878,7 +901,7 @@ local function RefreshRecipeDetails(owner, selected)
         if hasEffect then
             details.effectText:SetText(Short(effectText, 190))
         else
-            details.effectText:SetText("Effect details have not been shared yet. An enchanter needs to open Enchanting once.")
+            details.effectText:SetText("Effect details are not available yet. Open Enchanting once on a character who knows this recipe.")
         end
     else
         details.effectTitle:Hide() details.effectText:Hide() details.effectText:SetText("")
@@ -909,7 +932,7 @@ local function RefreshRecipeDetails(owner, selected)
     details.reagentEmpty:ClearAllPoints()
     details.reagentEmpty:SetPoint("TOPLEFT", details, "TOPLEFT", 12, -reagentStartY)
     if table.getn(reagents) == 0 then
-        details.reagentEmpty:SetText(selected.recipe.materialsStatus == "COMPLETE" and "No reagents are required." or "Reagent details are not cached yet.")
+        details.reagentEmpty:SetText(selected.recipe.materialsStatus == "COMPLETE" and "No reagents are required." or "Reagent details are not available yet.")
         details.reagentEmpty:Show()
     else details.reagentEmpty:Hide() end
     local reagentRows = math.min(5, table.getn(reagents))
@@ -935,15 +958,25 @@ local function RefreshRecipeDetails(owner, selected)
         local crafter = index <= availableRows and selected.crafters and selected.crafters[details.crafterOffset + index] or nil
         if crafter then
             row.otlCrafter = crafter
+            -- Search results already carry the r46 activity snapshot. Reuse it
+            -- instead of asking the roster again for every visible detail row.
+            local activityLabelR46 = crafter.activityLabelR46
+            local activityAlphaR46 = tonumber(crafter.activityAlphaR46)
+            if not activityLabelR46 or not activityAlphaR46 then
+                local activityR46 = owner:GetCraftingCrafterActivityR46(crafter.name, crafter)
+                activityLabelR46 = activityR46.label
+                activityAlphaR46 = activityR46.alpha
+            end
             ApplyClassIcon(row.classIcon, crafter.class)
             row.nameText:SetText(owner:GetClassColor(crafter.class) .. Short(crafter.name, 18) .. owner.colors.reset)
-            row.statusText:SetText(crafter.online and "Online" or Short(owner:GetFreshnessText(crafter.ts), 18))
+            row.statusText:SetText(Short(activityLabelR46 or (crafter.online and "Online" or owner:GetFreshnessText(crafter.ts)), 18))
             row.statusText:SetTextColor(crafter.online and C.green[1] or C.grey[1], crafter.online and C.green[2] or C.grey[2], crafter.online and C.green[3] or C.grey[3])
+            row:SetAlpha(activityAlphaR46 or 1)
             UI:SetSelected(row, selectedCrafter and owner:NormalizeName(crafter.name) == owner:NormalizeName(selectedCrafter.name))
             row:ClearAllPoints()
             row:SetPoint("TOPLEFT", details, "TOPLEFT", 12, -crafterStartY - ((index - 1) * 29))
             row:Show()
-        else row.otlCrafter = nil row:Hide() end
+        else row.otlCrafter = nil row:SetAlpha(1) row:Hide() end
     end
     if totalCrafters == 0 then
         details.crafterEmpty:ClearAllPoints()
@@ -1030,6 +1063,15 @@ local function RefreshRecipes(owner)
         results = {}
         owner:ShowOperationError("Recipe search could not be refreshed.", function() owner:RefreshProfessionsPage() end)
     else owner:ClearOperationError() end
+    local crafterFilterR42 = owner.ui and owner.ui.craftingCrafterFilterR42 or nil
+    if owner.ui.craftingCrafterFilterChipR42 then
+        if crafterFilterR42 and crafterFilterR42 ~= "" then
+            UI:SetText(owner.ui.craftingCrafterFilterChipR42, "Crafter: " .. Short(crafterFilterR42, 14) .. "  ×")
+            owner.ui.craftingCrafterFilterChipR42:Show()
+        else
+            owner.ui.craftingCrafterFilterChipR42:Hide()
+        end
+    end
     local visibleRows = owner.ui.craftingRecipeVisibleRows180 or DEFAULT_RECIPE_ROWS
     local offset = math.max(0, tonumber(owner.ui.craftingRecipeOffset) or 0)
     local maximum = math.max(0, table.getn(results) - visibleRows)
@@ -1058,10 +1100,13 @@ local function RefreshRecipes(owner)
             row.nameText:SetText(Short(result.recipe.name or "Recipe", 32))
             ApplyQualityColor(row.nameText, result.recipe.quality)
             if favorite then row.favoriteIcon:Show() else row.favoriteIcon:Hide() end
-            local online = 0
-            local crafterIndex
-            for crafterIndex = 1, table.getn(result.crafters or {}) do if result.crafters[crafterIndex].online then online = online + 1 end end
-            row.crafterText:SetText(tostring(table.getn(result.crafters or {})) .. " crafters" .. (online > 0 and ("  " .. tostring(online) .. " online") or ""))
+            local totalR46, recentR46, olderR46, onlineR46 = owner:GetCraftingCrafterCountsR46(result)
+            if olderR46 > 0 then
+                if recentR46 > 0 then row.crafterText:SetText(tostring(recentR46) .. " recent / " .. tostring(olderR46) .. " inactive")
+                else row.crafterText:SetText(tostring(olderR46) .. " inactive") end
+            else
+                row.crafterText:SetText(tostring(totalR46) .. " crafters" .. (onlineR46 > 0 and ("  " .. tostring(onlineR46) .. " online") or ""))
+            end
             UI:SetSelected(row, selected and result.key == selected.key)
             row:Show()
         else row.otlResult = nil row.otlResultKey = nil row.favoriteIcon:Hide() row:Hide() end
@@ -1082,7 +1127,9 @@ local function RefreshRecipes(owner)
     local sync = craft and craft.syncState or {}
     local operation = owner.GetOperationState156 and owner:GetOperationState156("CRAFTING") or { state = "IDLE", detail = "" }
     local state
-    if operation.state == "ERROR" then
+    if owner.runtime and owner.runtime.craftingAggregateBuildR30 then
+        state = "Indexing guild recipes..."
+    elseif operation.state == "ERROR" then
         state = "Error" .. (operation.detail ~= "" and (": " .. Short(operation.detail, 34)) or "")
     elseif sync and sync.active then
         state = "Updating..."
@@ -1092,12 +1139,15 @@ local function RefreshRecipes(owner)
             local minutes = math.max(0, math.floor((owner:Now() - freshest) / 60))
             state = "Updated " .. tostring(minutes) .. " min ago"
         elseif table.getn(results) > 0 then state = "Local data"
-        else state = "Sync pending" end
+        else state = "Waiting for guild data" end
     end
     owner.ui.craftingStateText:SetText(state)
     UI:SetText(owner.ui.craftingUpdate, sync and sync.active and "Updating…" or "Update guild")
     UI:SetEnabled(owner.ui.craftingUpdate, not (sync and sync.active), "A guild recipe update is already in progress.")
     RefreshRecipeDetails(owner, selected)
+    if selected and tostring(selected.professionKey or "") == "ENCHANTING" and owner.ScheduleProfessionsEnchantProbeR30 then
+        owner:ScheduleProfessionsEnchantProbeR30(selected, "professions-detail")
+    end
 end
 
 local function RefreshRequests(owner)
@@ -1191,7 +1241,7 @@ local function RefreshRequests(owner)
         end
         reagentText = "\nReagents: " .. table.concat(parts, ", ")
     elseif presentation.source == "RECIPE" then
-        reagentText = "\nRecipe metadata is available; reagents are not cached on this client."
+        reagentText = "\nRecipe information is available; reagent details are not available on this client yet."
     end
     details.noteText:SetText((selected.note and selected.note ~= "" and selected.note or "No note") .. "\n" .. (selected.materials == "READY" and "Materials ready" or selected.materials == "NEEDED" and "Materials needed" or "Discuss materials") .. reagentText)
     local match = owner:GetCraftingRequestMatch180(selected)
@@ -1223,6 +1273,14 @@ local function RefreshRequests(owner)
 end
 
 function OTLGM:RefreshProfessionsPage()
+    -- R31 migration-on-read: UNKNOWN was a legitimate old filter option but is
+    -- a poor persistent default and can silently hide otherwise valid recipes.
+    -- Normalize only invalid/legacy values; explicit supported filters remain.
+    if OTLGM_DB and OTLGM_DB.settings then
+        local valueR31 = tostring(OTLGM_DB.settings.craftingLevelFilter153 or "ANY")
+        local allowedR31 = { ANY=true, ["1_20"]=true, ["21_40"]=true, ["41_60"]=true, ["61_PLUS"]=true, ["1_75"]=true, ["76_150"]=true, ["151_225"]=true, ["226_300"]=true, ["301_PLUS"]=true }
+        if valueR31 == "UNKNOWN" or not allowedR31[valueR31] then OTLGM_DB.settings.craftingLevelFilter153 = "ANY" end
+    end
     if self.CanRefreshShellPage180 and not self:CanRefreshShellPage180("professions") then return false end
     if not self.ui or not self.ui.professionsRecipesPanel then return end
     local section = self.ui.professionsSection == "REQUESTS" and "REQUESTS" or "RECIPES"

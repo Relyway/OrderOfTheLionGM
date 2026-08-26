@@ -144,7 +144,25 @@ function Toolkit:Card(parent, width, height, title)
         card.title = Text(card, string.upper(title), "GameFontNormalSmall", "LEFT")
         card.title:SetPoint("TOPLEFT", card, "TOPLEFT", 10, -9)
         card.title:SetWidth((width or 100) - 20)
-        card.title:SetTextColor(COLORS.gold[1], COLORS.gold[2], COLORS.gold[3])
+        card.title:SetTextColor(COLORS.goldMuted[1], COLORS.goldMuted[2], COLORS.goldMuted[3])
+        -- A tiny title marker is deliberately understated: it gives ordinary
+        -- cards a consistent visual anchor without turning every panel into a
+        -- bright banner. Profile cards replace it with their own section icon.
+        card.titleMarker184 = card:CreateTexture(nil, "ARTWORK")
+        card.titleMarker184:SetPoint("TOPLEFT", card, "TOPLEFT", 9, -10)
+        card.titleMarker184:SetWidth(2)
+        card.titleMarker184:SetHeight(9)
+        card.titleMarker184:SetTexture(COLORS.gold[1], COLORS.gold[2], COLORS.gold[3], 0.78)
+        card.title:ClearAllPoints()
+        card.title:SetPoint("TOPLEFT", card, "TOPLEFT", 16, -9)
+        card.title:SetWidth((width or 100) - 26)
+        -- A quiet header rule gives every information card the same visual
+        -- hierarchy without adding animation, gradients or extra update work.
+        card.headerRule183 = card:CreateTexture(nil, "ARTWORK")
+        card.headerRule183:SetPoint("TOPLEFT", card, "TOPLEFT", 9, -27)
+        card.headerRule183:SetPoint("TOPRIGHT", card, "TOPRIGHT", -9, -27)
+        card.headerRule183:SetHeight(1)
+        card.headerRule183:SetTexture(COLORS.goldDark[1], COLORS.goldDark[2], COLORS.goldDark[3], 0.36)
     end
     return card
 end
@@ -177,9 +195,15 @@ local function ApplyButton(button)
             background, border, textColor = { 0.030, 0.027, 0.023, 1 }, { 0.20, 0.18, 0.15, 1 }, COLORS.grey
         end
     elseif style == "tab" or style == "filter" then
-        background = selected and { 0.29, 0.15, 0.025, 1 } or (hover and { 0.13, 0.075, 0.025, 1 } or { 0.045, 0.037, 0.027, 1 })
-        border = selected and COLORS.gold or COLORS.goldDark
-        textColor = selected and { 1.00, 0.84, 0.38, 1 } or COLORS.white
+        if style == "tab" and button.otlQuietTabR29 and not selected then
+            background = hover and { 0.070, 0.052, 0.031, 1 } or { 0.027, 0.024, 0.021, 1 }
+            border = hover and COLORS.goldMuted or { 0.20, 0.17, 0.13, 1 }
+            textColor = hover and COLORS.white or COLORS.grey
+        else
+            background = selected and { 0.29, 0.15, 0.025, 1 } or (hover and { 0.13, 0.075, 0.025, 1 } or { 0.045, 0.037, 0.027, 1 })
+            border = selected and COLORS.gold or COLORS.goldDark
+            textColor = selected and { 1.00, 0.84, 0.38, 1 } or COLORS.white
+        end
     elseif style == "inline" then
         background = hover and { 0.12, 0.075, 0.030, 1 } or { 0.030, 0.026, 0.020, 1 }
         border, textColor = COLORS.goldDark, COLORS.white
@@ -254,6 +278,55 @@ function Toolkit:IconButton(parent, texturePath, width, height, handler, tooltip
     button.otlTooltip = tooltip
     button.otlTooltipTitle = tooltip
     return button
+end
+
+function Toolkit:HelpIcon(parent, title, body)
+    local button = self:Button(parent, "?", 22, 22, function() end, "utility")
+    button.otlTooltipTitle = tostring(title or "How this works")
+    button.otlTooltip = tostring(body or "")
+    if button.text then
+        button.text:SetText("?")
+        button.text:SetTextColor(0.72, 0.88, 1.00)
+        button.text:SetWidth(18)
+    end
+    return button
+end
+
+-- r33: keep workflow help copy in one registry so future compatibility or UX
+-- changes cannot leave four different pages explaining the same contract in
+-- four subtly different ways. This is lookup-only; it adds no frame/event/timer.
+Toolkit.contextHelpR33 = {
+    PROFESSIONS = {
+        title = "How Professions work",
+        body = "To publish your own recipes, open the normal profession window from the spellbook on that character. The addon reads the visible profession locally, then shares a compact recipe list with compatible online guildmates. Use Update guild to request newer shared data. Personal-only crafted outputs are not advertised as guild crafts.",
+    },
+    ACHIEVEMENTS = {
+        title = "How Guild Achievements work",
+        body = "Achievements are evaluated on your own client from guild, group, profession, dungeon and activity events. Track pins up to three incomplete goals to the top of the list and to My Goals. Other members' progress is shown only when a compatible addon has shared a summary; missing data is never invented.",
+    },
+    RECRUITMENT = {
+        title = "How Recruitment works",
+        body = "World recruitment alternates Recruit 1 -> Raid 1 -> Recruit 2 -> Raid 2. Send Next moves forward only after the client sees your sent message in chat. Open in Chat lets you edit before sending. Welcome! only posts a simple guild greeting and never changes recruitment timers.",
+    },
+    OFFICER_CASES = {
+        title = "How Officer Cases work",
+        body = "Reports are private Leadership data. The author may edit or withdraw an unreviewed report from My Reports. Once another officer takes it, use case status, resolution and follow-up instead of rewriting the original report. A Leadership author never self-acknowledges their own report.",
+    },
+    CHARACTER_IDENTITY = {
+        title = "How Main / Alt identity works",
+        body = "Links are voluntary. An alt chooses one guild main and the main must confirm. Pending requests stay private. Other guild members only see a relationship after both characters share the same confirmed link. Nothing is guessed from account data or character names.",
+    },
+}
+
+function Toolkit:GetContextHelpR33(key)
+    local entry = self.contextHelpR33 and self.contextHelpR33[tostring(key or "")] or nil
+    if type(entry) ~= "table" then return nil end
+    return entry.title, entry.body
+end
+
+function Toolkit:ContextHelpIcon(parent, key)
+    local title, body = self:GetContextHelpR33(key)
+    return self:HelpIcon(parent, title or "How this works", body or "No additional help is available for this workflow yet.")
 end
 
 function Toolkit:Tab(parent, label, width, handler)
@@ -505,15 +578,22 @@ end
 function Toolkit:EmptyState(parent, width, height, title, body)
     local state = self:Card(parent, width or 320, height or 120)
     state.otlEmptyState = true
+    ApplySurfaceColor(state, { 0.024, 0.021, 0.017, 1 }, { 0.27, 0.21, 0.13, 1 })
+    state.capR29 = state:CreateTexture(nil, "ARTWORK")
+    state.capR29:SetPoint("TOP", state, "TOP", 0, -14)
+    state.capR29:SetWidth(24)
+    state.capR29:SetHeight(1)
+    state.capR29:SetTexture(COLORS.goldMuted[1], COLORS.goldMuted[2], COLORS.goldMuted[3], 0.62)
     state.titleText = Text(state, title or "Nothing here yet", "GameFontNormal", "CENTER")
-    state.titleText:SetPoint("TOPLEFT", state, "TOPLEFT", 12, -22)
+    state.titleText:SetPoint("TOPLEFT", state, "TOPLEFT", 12, -24)
     state.titleText:SetWidth((width or 320) - 24)
-    state.titleText:SetTextColor(COLORS.gold[1], COLORS.gold[2], COLORS.gold[3])
+    state.titleText:SetTextColor(COLORS.goldMuted[1], COLORS.goldMuted[2], COLORS.goldMuted[3])
     state.bodyText = Text(state, body or "", "GameFontNormalSmall", "CENTER")
-    state.bodyText:SetPoint("TOPLEFT", state, "TOPLEFT", 16, -50)
+    state.bodyText:SetPoint("TOPLEFT", state, "TOPLEFT", 16, -51)
     state.bodyText:SetWidth((width or 320) - 32)
-    state.bodyText:SetHeight((height or 120) - 60)
+    state.bodyText:SetHeight((height or 120) - 61)
     state.bodyText:SetJustifyV("TOP")
+    state.bodyText:SetTextColor(COLORS.grey[1], COLORS.grey[2], COLORS.grey[3])
     return state
 end
 
@@ -825,6 +905,15 @@ function Toolkit:Check(parent, label, width, changed)
         if this:GetChecked() then this.box:Show() else this.box:Hide() end
         this.otlChanged(this:GetChecked() and true or false, this)
     end)
+    check:SetScript("OnEnter", function()
+        if this.otlTooltip and OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.showHelp ~= false and GameTooltip then
+            GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
+            GameTooltip:AddLine(this.otlTooltipTitle or this.text and this.text:GetText() or "Help", 1, 0.82, 0.35)
+            GameTooltip:AddLine(this.otlTooltip, 1, 1, 1, true)
+            GameTooltip:Show()
+        end
+    end)
+    check:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
     table.insert(OTLGM.uiToolkitButtons, check)
     return check
 end
@@ -930,7 +1019,7 @@ end
 
 OTLGM:RegisterModule("UIComponents180", {
     stage = "B",
-    revision = 9,
+    revision = 10,
     opaque = true,
     solidTexture = true,
     noPersistentOnUpdate = true,

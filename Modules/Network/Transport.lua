@@ -21,23 +21,15 @@ local TARGET_ENVELOPE = "T1^"
 -- and encodes any accidental raw pipe before packet sizing and retry handling.
 local function NormalizeWirePayload172(payload)
     payload = tostring(payload or "")
-    local parts = {}
-    local changed = false
-    local index, byteValue, character
-    for index = 1, string.len(payload) do
-        byteValue = string.byte(payload, index)
-        character = string.sub(payload, index, index)
-        if byteValue == 124 then
-            table.insert(parts, "%7C")
-            changed = true
-        elseif byteValue < 32 or byteValue == 127 then
-            table.insert(parts, " ")
-            changed = true
-        else
-            table.insert(parts, character)
-        end
-    end
-    return table.concat(parts), changed
+    -- RC4-r9 fast path: the overwhelming majority of protocol packets are
+    -- already sanitized by their serializers.  The old boundary copied every
+    -- byte into a temporary table even when nothing needed changing.  Let clean
+    -- payloads pass allocation-free and invoke pattern replacement only for the
+    -- exceptional raw pipe/control-byte case.
+    if not string.find(payload, "[|%c]") then return payload, false end
+    payload = string.gsub(payload, "|", "%%7C")
+    payload = string.gsub(payload, "%c", " ")
+    return payload, true
 end
 
 -- Vanilla 1.12 does not support WHISPER as an addon-message distribution
@@ -156,6 +148,16 @@ local function QueueFor(transport, priority)
     return transport.bulk
 end
 
+local function ScopedCoalesceKey(self, coalesceKey, channel, target, priority)
+    if coalesceKey == nil or tostring(coalesceKey) == "" then return nil end
+    local normalizedTarget = ""
+    if channel == "WHISPER" then
+        normalizedTarget = NormalizeTarget(target) or ""
+        if self and self.NormalizeName then normalizedTarget = self:NormalizeName(normalizedTarget) end
+    end
+    return tostring(channel or "GUILD") .. "|" .. tostring(normalizedTarget) .. "|" .. tostring(priority or PRIORITY_NORMAL) .. "|" .. tostring(coalesceKey)
+end
+
 local function Compact(queue)
     if queue.head < 80 or queue.head < table.getn(queue.items) / 2 then return end
     local compacted = {}
@@ -200,7 +202,7 @@ end
 
 local function DropOldestBulk(transport)
     local item = Pop(transport.bulk, math.huge)
-    if item and item.coalesceKey then transport.coalesced[item.coalesceKey] = nil end
+    if item and item.coalesceScopeKey then transport.coalesced[item.coalesceScopeKey] = nil end
     return item ~= nil
 end
 
@@ -255,11 +257,14 @@ function OTLGM.__impl180.QueueNetworkPayload__impl1(self, payload, channel, targ
         metrics.lastSanitizedSource172 = source
     end
     if fitted and payload ~= originalPayload then metrics.targetedTrimmed = (metrics.targetedTrimmed or 0) + 1 end
-    if coalesceKey and transport.coalesced[coalesceKey] then
-        local existing = transport.coalesced[coalesceKey]
+    -- A logical key is only interchangeable inside the same delivery domain.
+    -- Global coalescing could otherwise overwrite GUILD with a targeted packet,
+    -- merge two different WHISPER recipients, or leave a critical update parked
+    -- in a lower-priority queue.
+    local coalesceScopeKey = ScopedCoalesceKey(self, coalesceKey, channel, target, priority)
+    if coalesceScopeKey and transport.coalesced[coalesceScopeKey] then
+        local existing = transport.coalesced[coalesceScopeKey]
         existing.payload = payload
-        existing.target = target
-        existing.channel = channel
         existing.wirePayload = wirePayload
         existing.physicalChannel = physicalChannel
         existing.updatedAt = self:Now()
@@ -273,9 +278,15 @@ function OTLGM.__impl180.QueueNetworkPayload__impl1(self, payload, channel, targ
     while TotalCount(transport) >= MAX_QUEUED do
         if not DropOldestBulk(transport) then
             metrics.dropped = metrics.dropped + 1
+            if priority == PRIORITY_CRITICAL then metrics.droppedCritical = (tonumber(metrics.droppedCritical) or 0) + 1
+            elseif priority == PRIORITY_NORMAL then metrics.droppedNormal = (tonumber(metrics.droppedNormal) or 0) + 1
+            else metrics.droppedBulk = (tonumber(metrics.droppedBulk) or 0) + 1 end
             return false
         end
         metrics.dropped = metrics.dropped + 1
+        -- Capacity relief always removes the oldest BULK packet here, regardless
+        -- of the priority of the packet currently being enqueued.
+        metrics.droppedBulk = (tonumber(metrics.droppedBulk) or 0) + 1
     end
 
     transport.sequence = transport.sequence + 1
@@ -291,13 +302,17 @@ function OTLGM.__impl180.QueueNetworkPayload__impl1(self, payload, channel, targ
         queuedAt = self:Now(),
         sequence = transport.sequence,
         coalesceKey = coalesceKey,
+        coalesceScopeKey = coalesceScopeKey,
     }
     Push(QueueFor(transport, priority), item)
-    if coalesceKey then transport.coalesced[coalesceKey] = item end
+    if coalesceScopeKey then transport.coalesced[coalesceScopeKey] = item end
     metrics.queued = metrics.queued + 1
     if channel == "WHISPER" then metrics.targetedQueued = (metrics.targetedQueued or 0) + 1 end
     transport.highWater = math.max(transport.highWater or 0, TotalCount(transport))
     metrics.highWater = math.max(tonumber(metrics.highWater) or 0, transport.highWater or 0)
+    metrics.highWaterCritical = math.max(tonumber(metrics.highWaterCritical) or 0, tonumber(transport.critical and transport.critical.count) or 0)
+    metrics.highWaterNormal = math.max(tonumber(metrics.highWaterNormal) or 0, tonumber(transport.normal and transport.normal.count) or 0)
+    metrics.highWaterBulk = math.max(tonumber(metrics.highWaterBulk) or 0, tonumber(transport.bulk and transport.bulk.count) or 0)
     if priority == PRIORITY_CRITICAL and not transport.retryBackoff180 then transport.nextAttemptAt = nil end
     if self.WakeScheduler180 and queueWasEmpty then self:WakeScheduler180("network-enqueue")
     elseif self.UpdateSchedulerState180 then self:UpdateSchedulerState180("network-enqueue") end
@@ -329,7 +344,16 @@ function OTLGM.__impl180.ProcessNetworkQueue__impl1(self, maximum)
     local settings = OTLGM_DB and OTLGM_DB.settings or {}
     maximum = tonumber(maximum) or NETWORK_PACKET_BUDGET_180
     maximum = math.max(1, math.min(NETWORK_PACKET_BUDGET_180, maximum))
-    local pauseBulk = settings.pauseBulkSyncInCombat ~= false and self:InCombat()
+    local combatPause = settings.pauseBulkSyncInCombat ~= false and self:InCombat()
+    local guardActive = settings.adaptiveStutterGuard181 ~= false and self.IsPerformanceGuardActive181 and self:IsPerformanceGuardActive181() or false
+    local transitionPressure = self.runtime and self.runtime.transitionActive176 and true or false
+    local pressureState = self.GetClientPressure181 and self:GetClientPressure181() or nil
+    local pressureLevel = pressureState and tonumber(pressureState.level) or 0
+    local pauseBulk = combatPause or guardActive or transitionPressure or pressureLevel >= 3
+    if guardActive or transitionPressure or pressureLevel >= 2 then maximum = math.min(maximum, 1) end
+    if pauseBulk and transport.bulk and (tonumber(transport.bulk.count) or 0) > 0 then
+        metrics.bulkPressurePauses181 = (tonumber(metrics.bulkPressurePauses181) or 0) + 1
+    end
     local sent = 0
     local now = self.GetPreciseTime180 and self:GetPreciseTime180() or self:Now()
     if (tonumber(transport.nextAttemptAt) or 0) > now then return 0 end
@@ -353,7 +377,7 @@ function OTLGM.__impl180.ProcessNetworkQueue__impl1(self, maximum)
         if not item and not pauseBulk then item = Pop(transport.bulk, now) end
         if not item then break end
 
-        if item.coalesceKey then transport.coalesced[item.coalesceKey] = nil end
+        if item.coalesceScopeKey then transport.coalesced[item.coalesceScopeKey] = nil end
         local wirePayload = item.wirePayload
         local physicalChannel = item.physicalChannel
         if not wirePayload then wirePayload, physicalChannel = WirePacket(item.payload, item.channel, item.target) end
@@ -389,7 +413,7 @@ function OTLGM.__impl180.ProcessNetworkQueue__impl1(self, maximum)
             if item.retries <= MAX_RETRIES then
                 item.due = now + delay
                 Push(QueueFor(transport, item.priority), item)
-                if item.coalesceKey then transport.coalesced[item.coalesceKey] = item end
+                if item.coalesceScopeKey then transport.coalesced[item.coalesceScopeKey] = item end
                 metrics.retried = metrics.retried + 1
             else
                 metrics.dropped = metrics.dropped + 1
@@ -409,7 +433,9 @@ function OTLGM.__impl180.ProcessNetworkQueue__impl1(self, maximum)
         -- The former once-per-second heartbeat accidentally supplied pacing.
         -- A sleeping scheduler needs an explicit short deadline or a queue can
         -- otherwise emit two packets on every rendered frame.
-        transport.nextAttemptAt = now + NETWORK_SLICE_GAP_180
+        local nextGap = NETWORK_SLICE_GAP_180
+        if guardActive or transitionPressure then nextGap = math.max(nextGap, 0.5) end
+        transport.nextAttemptAt = now + nextGap
         metrics.slices = (tonumber(metrics.slices) or 0) + 1
     end
     return sent

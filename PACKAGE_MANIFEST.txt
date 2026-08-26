@@ -1,0 +1,63 @@
+OrderOfTheLionGM 1.8.3 final package manifest
+Build: release-1.8.3-20260827
+Manifest excludes this file itself.
+Entries: 58
+
+d0059c2991953d5208b2f5ff4757eb59f94a47d2731987a7754a965c6714d4a9       49170  Assets/LionCrest.tga
+276ff5fde2dabd38a65e74b575e720caac349e5cb351d035fbc1aeb9bc3bfd41       16428  Assets/Roles/Damage.tga
+46969993fe9c3469ea3ad2750636e9a12701e86e199812d2a1b50f340febb7a6       16428  Assets/Roles/Healer.tga
+de3c3c78d1d6ca548d023f5f9dde890f7caad8e93be3ab30d652cd3b13541882       16428  Assets/Roles/Review.tga
+55afbc1cc82fac84553b84589db6f1b1dd436ea56b42612b10c807fffb2bfafe       16428  Assets/Roles/Tank.tga
+5b93d1c97851fe6a1da7e06c77d944e648120f1fed2aadc0a9377ee4b6741104      109101  CHANGELOG.md
+8e8b2ba4e9913243298154f83714a835d8a3c5dbc3c8aaa162849995d4a783f9        2562  FINAL_RELEASE_GATE_1.8.3.md
+c86fda1ae86a9d6baecc64125f4141675a7efaea4dd1376d1f9380e5b89e91a7        1102  LICENSE
+f8201c7a06cc081f1e9e5b04c88251b132f3bf3e00d25b23dd04b7c6eb277292        2260  LIVE_VERIFICATION_1.8.3.md
+21c93215db48e5118ea77282c3cacd967bb399d97c2ab8d119104de1dd224ee1       25143  Modules/Core/Backup.lua
+5fdfdccfb186a75b66b8a3622e0386d933a0b3f2f02b01b8ff00f78133deea30       15277  Modules/Core/Bootstrap.lua
+b1fa38bb348ed9fc686939fd83717a1b88498be77bd347a6685811432ab18581       26635  Modules/Core/Database.lua
+13bf60a092267f15987cc461b5dda3d32115946d2b5a90f7da03a9b10d802f99      105365  Modules/Core/Events.lua
+e45af32ddb869e9bb9b457b0b5e6db198f1b56e993a814c4a4f03cfcf4fbc6c6      102336  Modules/Core/Guild.lua
+750d1ec7d48835db4c46d2113aaf794f24a1bd17d76ecdb2048999ab5bf90491      238490  Modules/Core/Performance176.lua
+33a23acbb6ad697329fd2c8bbfbdeaabaea480f83df69b2daca26a70cb2dd7a6       68262  Modules/Core/RuntimeCoordination.lua
+3d6858bd896958baf787085b84da7ccbf906d230f8be664fc466b3cc79cdb3e9       80057  Modules/Crafting/Details.lua
+1752ffbfd9752478310dea2a545f246cf8dca3ff5f81e8e1d58e47ed99b4b0ef        5497  Modules/Crafting/Search.lua
+19b0c8b9cfd0d49911686362ab71cbb14dcdd7c1861fcdb06cf87b46b59c96c8      129786  Modules/Features/AchievementRaidRuntime.lua
+e6287c9d78d9bf258a93061be78f6666f66ef0566d88acb3a6e966d3d2bf7102      143201  Modules/Features/Achievements174.lua
+736da6121113771ff46a2ca5b187ef447ba967528675f88d686cad39d257ee8a       52416  Modules/Features/ActivityTracking.lua
+9a291da2a260c90b6906334b9eff992095ff81f39df055105e6d294909d3cf8f       72011  Modules/Features/CharacterIdentity184.lua
+157664a99519149f590b4e4cc8bbf7099d3c890db6cb05fbc90c57504a3ca99d        2988  Modules/Features/ChatPresentation.lua
+6e2398de427a24e2bbe877a836b5386ef472a7cdfd26fdf6f232d71135a32429       73524  Modules/Features/Community.lua
+dfeb71e8a61e5fc406d5af75642f0ba25c72194826d275e2d4475c98deda6bb3       56938  Modules/Features/CommunityEnhancements.lua
+48084734ed3456805e409ebbb06fe462c51878225bc07e519d04d92ccb9e7a51       21391  Modules/Features/CommunityExperience183.lua
+333ed8297ce9c9d4eb54d47ae1606392162ecfec76f6cc893662140165cc42ef      209071  Modules/Features/Crafting.lua
+283061ee7972fcda9bf93fc16e7400eb9c5dc83b48bdf02386606a072f6bce8b       43739  Modules/Features/FeaturePresentation.lua
+997ca3f520ee1e059774261acba984c2fbdc50fc2c0e1a4335e6b403cea0df1a      282550  Modules/Features/Moderation183.lua
+719bd8a52f81cdc98f038b5a30fe03a64d1f8ea0235f98e8b2bdc35d57701c3c      206960  Modules/Features/PVE.lua
+096e0dea397e6fbfd4da442b9ae7f9f7f01663a16418142c58f5cb7dca5ab0ae       18528  Modules/Features/ProfileDetailsR42.lua
+27d612963fb5b23a9e7114d4c161af2ae0cc3aa240aff613bc2e1cb520d9bc3e      112282  Modules/Features/SocialProfiles183.lua
+c8dd29c6afae006249d725755160144fe12a89d25b4a86a8507e3f5c2b88547c       27424  Modules/Features/Treasury.lua
+421425c18146cb9ffd12940a3309e06883bb83304f0d53824098262259399f29       49065  Modules/Features/TreasuryExtended.lua
+9cee4b19905aca1186b740f9395638e67725d23ea3c2ca79b144c7119e2a7dc1       85836  Modules/Integration/Coordination.lua
+30e1ae51b5b7048da937b8ef17d58e4d9baa64e537774925f6ecf67d2a0e62ad      102885  Modules/Integration/Reliability.lua
+99e139f40c8584be782eeb6b2ab05a75152adba62e06682624d6d3a6332f07ce       74817  Modules/Network/Security.lua
+5d9fe907216c626164fc8f4388c4ce13a295896faf8480571a847e078391bf23       22579  Modules/Network/Transport.lua
+dcaa60c84f9e4226347a8de6b5b5e57b5c83f9d6cfac3e9ce9182aec302ec3f2       44443  Modules/Pages/GuildAdmin.lua
+ed1082dee76ce45f3bcb4456e297c656e182dde96548902b884b9ea154cc5701       98152  Modules/Pages/Home.lua
+81229d6ec6f59b959f4dda4be4b391974f8f4f435b89d16c8c1f79bf0a114f3f       91253  Modules/Pages/Professions.lua
+ba067dc9f96815cce5843b45c67f2b59c5bfb20dd6852f122e59d162857e7cc9      144396  Modules/Pages/Roster.lua
+32f8efa61c45b17ef88516a2cf92df0d338c75f32594c49f9a64f9f4378692b1       92810  Modules/Pages/Settings.lua
+9ed093c98da6196f245115088c334d38fe71e75135f7e6eda0d03e4eb8bfc2e9      153915  Modules/Roster/Roster.lua
+4e901d8f0ae85805e96093232f42063f305aff9d48212102721fa9ae34260c1e       46376  Modules/UI/Components.lua
+3828a984f53a6973a86319c3e9442c27681b9cb7e639647c2af35d43dc5fd2c4       65290  Modules/UI/Experience.lua
+af16d5cfbe5e7eef9442b8fe3c4b6dcb2dd5cfb34b872a7f5b344716b59a76a6       91998  Modules/UI/GuildProfile183.lua
+f6acad37ef2d231c84d5d0f7539f13c9a78ce581d5c2dc7431c096dcf246b1e8      369236  Modules/UI/Main.lua
+3e1ccb47dce63d734a505f3369ba7d85c50662d356f8b221851400a9da27c926        7361  Modules/UI/Minimap.lua
+005f239d4f568efc4c761ffc97c20803b81c6cfe4948b8bd7cb344db338ec791      376069  Modules/UI/NativePages.lua
+18d1b7432bae04049d9870f36c96762bd312512fb4b7941439a68c11b96dcfc4      133460  Modules/UI/Pages.lua
+814cc47fd94390d2eaf0d1651414c276959de9ccf5f21983b2d35e09157c9b33       48832  Modules/UI/QuickDock.lua
+f5c3393f81defa7e65fd672083485854655abe84eebc7a4b98ca44daee96b604      218880  Modules/UI/Shell.lua
+d8e60580e6d06dba07f450280abd1b18c4347fe28c6b98a473041b8c0604f769       12848  Modules/UI/Theme.lua
+97428fb8ec39f76d6d1beb6467453a5ed8013a903691b653f5c95eb993648373        1856  OrderOfTheLionGM.toc
+424231e1e9124a420f0e90400ba3e02f622e531e831839b4f5cce05176cca62c        6003  README.md
+23e3cc3209ce576c2011a12071da7aa53dcbbbef1f0981a3147d1bea400602ad        2047  RELEASE_BUILD_REPORT_1.8.3.md
+16c8e31a4e581067303bfcf0dc88d23c799b7bd066a4362ab33f71813e03e42a        3129  RELEASE_NOTES_1.8.3.md

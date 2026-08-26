@@ -246,16 +246,32 @@ end
 -- ---------------------------------------------------------------------------
 
 function OTLGM:IsGuildTabardEquipped175R4()
+    if self.IsVerifiedGuildTabardEquippedR13 then return self:IsVerifiedGuildTabardEquippedR13("player") end
     if GetGuildInfo and not GetGuildInfo("player") then return false end
-    local link = GetInventoryItemLink and GetInventoryItemLink("player", 19) or nil
-    local texture = GetInventoryItemTexture and GetInventoryItemTexture("player", 19) or nil
-    if link and link ~= "" then return true end
-    if texture and texture ~= "" then return true end
+    local slot = 19
+    if GetInventorySlotInfo then
+        local resolved = GetInventorySlotInfo("TabardSlot")
+        if tonumber(resolved) and tonumber(resolved) > 0 then slot = tonumber(resolved) end
+    end
+    local link = GetInventoryItemLink and GetInventoryItemLink("player", slot) or nil
+    if not link or link == "" then return false end
+    local _, _, itemId = string.find(link, "item:(%d+)")
+    if tonumber(itemId) == 5976 then return true end
+    if GetItemInfo then
+        local name = GetItemInfo(link)
+        local lowered = string.lower(tostring(name or ""))
+        if string.find(lowered, "guild tabard", 1, true) or string.find(lowered, "guildtabard", 1, true) then return true end
+    end
     return false
 end
 
 function OTLGM:CheckUnderBanner175R4(silent)
     if self:IsAchievementComplete174("UNDER_BANNER") then return true end
+    local db = self:EnsureAchievements174()
+    -- Current equipment seen before the release baseline is retrospective state.
+    -- Make the silence rule intrinsic here as a final guard, not dependent on
+    -- every caller correctly remembering the login/cold-start condition.
+    if not db.releaseBaseline175 then silent = true end
     if self:IsGuildTabardEquipped175R4() then return self:CompleteAchievement174("UNDER_BANNER", silent and true or false) end
     return false
 end
@@ -309,7 +325,8 @@ local PreviousRefreshAchievementsR4 = OTLGM.__impl180.RefreshAchievements174__im
 function OTLGM.__impl180.RefreshAchievements174__impl3(self)
     -- Safe recovery check. It is event-driven in normal play, but opening the
     -- page can repair a missed equipment event after a cache delay.
-    self:CheckUnderBanner175R4(false)
+    local achievementDb = self:EnsureAchievements174()
+    self:CheckUnderBanner175R4(not achievementDb.releaseBaseline175)
     PreviousRefreshAchievementsR4(self)
     local index, row, def, complete, current, required, human
     for index=1,table.getn(self.ui and self.ui.achievementRows174 or {}) do
@@ -377,8 +394,8 @@ local function SameChatGroupR4(previous, current)
     if NameKeyR4(previous.sender) ~= NameKeyR4(current.sender) then return false end
     local gap = (tonumber(current.ts) or 0) - (tonumber(previous.ts) or 0)
     if gap < 0 or gap > 120 then return false end
-    if string.find(tostring(previous.text or ""), "^%[Guild Achievement%]") then return false end
-    if string.find(tostring(current.text or ""), "^%[Guild Achievement%]") then return false end
+    if OTLGM:IsGuildAchievementChatMessage180(previous.text or "") then return false end
+    if OTLGM:IsGuildAchievementChatMessage180(current.text or "") then return false end
     return true
 end
 
@@ -397,16 +414,13 @@ function OTLGM.__impl180.RefreshGuildChatPage__impl2(self)
         if current then
             grouped = SameChatGroupR4(previous,current) and not row.separatorText:IsVisible() and not row.newLine:IsVisible()
             if row.messageFrame.SetJustifyV then row.messageFrame:SetJustifyV("TOP") end
-            local achievement = string.find(tostring(current.text or ""), "^%[Guild Achievement%]") ~= nil
-            local measuredWidth = achievement and 606 or (current.channel == "OFFICER" and 284 or 444)
-            row.messageFrame:SetHeight(MeasureChatHeightR4(self,current.text or "",measuredWidth)+3)
             if grouped then
                 row.timeText:Hide()
                 row.rankButton:Hide()
                 row.senderButton:Hide()
             else
                 row.timeText:Show()
-                if not string.find(tostring(current.text or ""), "^%[Guild Achievement%]") then
+                if not self:IsGuildAchievementChatMessage180(current.text or "") then
                     row.rankButton:Show()
                     row.senderButton:Show()
                 end
@@ -796,7 +810,7 @@ function OTLGM:BuildDarkmoonDialogR4()
     self.ui.darkmoonDialogR4=dialog
     if self.RegisterModal152 then self:RegisterModal152(dialog) end
     CreateTextR4(dialog,"GameFontNormalLarge","DARKMOON FAIRE STATUS",20,-18,420,"CENTER")
-    local note=CreateTextR4(dialog,"GameFontNormalSmall","OctoWoW does not expose a reliable world-wide Faire API. Leadership confirms the current state manually; the addon never guesses.",24,-56,412,"LEFT")
+    local note=CreateTextR4(dialog,"GameFontNormalSmall","The server does not provide a reliable world-wide Faire status. Leadership confirms the current state manually; the addon never guesses.",24,-56,412,"LEFT")
     note:SetHeight(42) note:SetTextColor(0.65,0.65,0.62)
     CreateButtonR4(dialog,"Goldshire",24,-112,92,30,function() OTLGM:SetDarkmoonStatusR4("GOLDSHIRE") end,"confirm")
     CreateButtonR4(dialog,"Mulgore",124,-112,92,30,function() OTLGM:SetDarkmoonStatusR4("MULGORE") end,"confirm")
@@ -843,12 +857,20 @@ end
 -- ---------------------------------------------------------------------------
 
 local PreviousRecruitmentPresetR4 = OTLGM.__impl180.GetRecruitmentPreset170__impl1
+local LEGACY_GUILD_DISCORD_DEFAULT_183 = "[Guild Info] Discord for news, groups, raids & help. No mic required: https://discord.gg/UNacDPrGt2"
+
 function OTLGM:GetRecruitmentPreset170(key)
     local base = PreviousRecruitmentPresetR4(self,key)
     if not base then return nil end
     if key == "GUILDINFO" or key == "ADDONINFO" then
         OTLGM_DB.settings.pinnedRecruitment175 = OTLGM_DB.settings.pinnedRecruitment175 or {}
         local override = OTLGM_DB.settings.pinnedRecruitment175[key]
+        -- 1.8.3 final: migrate only the exact addon-owned Discord text. A real
+        -- Leadership edit remains untouched even if it was created in an RC.
+        if key == "GUILDINFO" and override == LEGACY_GUILD_DISCORD_DEFAULT_183 then
+            OTLGM_DB.settings.pinnedRecruitment175[key] = nil
+            override = nil
+        end
         if override and override ~= "" then return {label=base.label,target=base.target,text=override} end
     end
     return base
@@ -900,7 +922,7 @@ function OTLGM:OpenPinnedRecruitmentEditorR4(key)
     self:BuildPinnedRecruitmentEditorR4()
     local preset=self:GetRecruitmentPreset170(key)
     self.ui.pinnedRecruitEditorR4.keyR4=key
-    self.ui.pinnedRecruitTitleR4:SetText(key=="GUILDINFO" and "EDIT GUILD INFO" or "EDIT SHARE ADDON")
+    self.ui.pinnedRecruitTitleR4:SetText(key=="GUILDINFO" and "EDIT SHARE DISCORD" or "EDIT SHARE ADDON")
     self.ui.pinnedRecruitEditR4:SetText(preset and preset.text or "")
     self:ShowModal152(self.ui.pinnedRecruitEditorR4)
 end
@@ -942,7 +964,7 @@ end
 -- ---------------------------------------------------------------------------
 
 local eventFrameR4 = CreateFrame("Frame","OTLGM_Release175R4Event")
-local eventsR4={"PLAYER_LOGIN","PLAYER_ENTERING_WORLD","PLAYER_EQUIPMENT_CHANGED","GUILD_ROSTER_UPDATE","PLAYER_GUILD_UPDATE"}
+local eventsR4={"PLAYER_LOGIN","PLAYER_ENTERING_WORLD","UNIT_INVENTORY_CHANGED","PLAYER_EQUIPMENT_CHANGED","GUILD_ROSTER_UPDATE","PLAYER_GUILD_UPDATE"}
 local eventIndexR4
 for eventIndexR4=1,table.getn(eventsR4) do pcall(eventFrameR4.RegisterEvent,eventFrameR4,eventsR4[eventIndexR4]) end
 eventFrameR4:SetScript("OnEvent",function()
@@ -952,15 +974,29 @@ eventFrameR4:SetScript("OnEvent",function()
         local baseline=not db.thresholdBaseline175r4
         EvaluateThresholdAchievementsR4(OTLGM,baseline)
         db.thresholdBaseline175r4=true
-        OTLGM:CheckUnderBanner175R4(false)
+        OTLGM:CheckUnderBanner175R4(true)
     elseif event=="PLAYER_ENTERING_WORLD" or event=="GUILD_ROSTER_UPDATE" or event=="PLAYER_GUILD_UPDATE" then
-        OTLGM:CheckUnderBanner175R4(false)
-    elseif event=="PLAYER_EQUIPMENT_CHANGED" then
-        if arg1==nil or tonumber(arg1)==19 then OTLGM:CheckUnderBanner175R4(false) end
+        local db=OTLGM:EnsureAchievements174()
+        OTLGM:CheckUnderBanner175R4(not db.releaseBaseline175)
+    elseif event=="UNIT_INVENTORY_CHANGED" or event=="PLAYER_EQUIPMENT_CHANGED" then
+        local relevant=false
+        local bulkRestore=false
+        if event=="UNIT_INVENTORY_CHANGED" then
+            relevant=(arg1=="player")
+        else
+            local slot=19
+            if GetInventorySlotInfo then local resolved=GetInventorySlotInfo("TabardSlot") if tonumber(resolved) and tonumber(resolved)>0 then slot=tonumber(resolved) end end
+            relevant=(arg1==nil or tonumber(arg1)==slot)
+            bulkRestore=(arg1==nil)
+        end
+        if relevant then
+            local quietUntil=tonumber(OTLGM.runtime and OTLGM.runtime.achievementLoginQuietUntil175) or 0
+            OTLGM:CheckUnderBanner175R4(bulkRestore or OTLGM:Now()<=quietUntil)
+        end
     end
 end)
 
-if OTLGM.RegisterModule then OTLGM:RegisterModule("CommunityEnhancements",{layer="feature",corrective=true,catalogAfterLayer=121,finalCatalog=146,eventDriven=true,noOnUpdate=true}) end
+if OTLGM.RegisterModule then OTLGM:RegisterModule("CommunityEnhancements",{layer="feature",corrective=true,catalogAfterLayer=122,finalCatalog=147,eventDriven=true,noOnUpdate=true}) end
 
 -- Direct-assignment trackers need one light post-action threshold evaluation.
 local PreviousUpdateGroupSessionR4 = OTLGM.__impl180.UpdateGroupSession174__impl2

@@ -247,10 +247,21 @@ function OTLGM:SetOperationState156(key, state, detail, duration, context)
     local states = self:EnsureOperationState156()
     context = type(context) == "table" and context or {}
     states[key] = { state = state or "IDLE", detail = detail or "", ts = self:Now(), untilTs = duration and (self:Now() + duration) or nil, source = context.source, manual = context.manual and true or false }
-    if state == "ERROR" and self.RecordInternalIssueRC3 then self:RecordInternalIssueRC3(tostring(key or "Operation"), detail or "Operation failed") end
+    -- A peer simply not answering a synchronization request is an expected
+    -- network outcome, not an addon defect.  Keep those results visible inside
+    -- the owning page without polluting the internal-issue log.
+    if state == "ERROR" and not context.expected and self.RecordInternalIssueRC3 then self:RecordInternalIssueRC3(tostring(key or "Operation"), detail or "Operation failed") end
     if self.WakeScheduler180 and (duration or state == "WORKING") then self:WakeScheduler180("operation-state:" .. tostring(key)) end
     if key == "CRAFTING" and not context.manual and (not self.ui or self.ui.currentPage ~= "professions") then
         if self.MarkPageDirty180 then self:MarkPageDirty180("professions") end
+        return
+    end
+    -- PvE synchronization is background metadata work.  It must not repaint
+    -- unrelated pages (Achievements/Treasury/Home) merely because a peer
+    -- answered or timed out.  The stored operation state is picked up when the
+    -- player actually opens PvE Hub or Settings.
+    if key == "PVE" and (not self.ui or (self.ui.currentPage ~= "pve" and self.ui.currentPage ~= "settings")) then
+        if self.MarkPageDirty180 then self:MarkPageDirty180("pve") end
         return
     end
     if self:IsUIVisible() then self:RefreshOperationButtons156() end
@@ -267,18 +278,18 @@ function OTLGM:RefreshOperationButtons156()
     if not self.ui then return end
     local scan = self:GetOperationState156("ROSTER")
     if self.ui.scanButton then
-        local label = "Update Roster"
+        local label = "Refresh Roster"
         if scan.state == "WORKING" then label = "Updating..." elseif scan.state == "DONE" then label = "Roster Updated" elseif scan.state == "ERROR" then label = "Retry Roster" end
         QSetOperationButton156(self.ui.scanButton, label, scan.state, scan.detail ~= "" and scan.detail or "Roster update is already running. Please wait.")
     end
     local craft = self:GetOperationState156("CRAFTING")
     if self.ui.craftingSyncButton then
-        local label = "Sync Now"
-        if craft.state == "WORKING" then label = "Syncing..." elseif craft.state == "DONE" then label = "Sync Complete" elseif craft.state == "ERROR" then label = "Retry Sync" end
-        QSetOperationButton156(self.ui.craftingSyncButton, label, craft.state, craft.detail ~= "" and craft.detail or "Crafting synchronization is already running.")
-        if self.ui.craftingNetworkText and craft.state == "WORKING" then self.ui.craftingNetworkText:SetText(self.colors.gold .. (craft.detail ~= "" and craft.detail or "Synchronizing profession data...") .. self.colors.reset) end
-        if self.ui.craftingNetworkText and craft.state == "DONE" then self.ui.craftingNetworkText:SetText(self.colors.green .. (craft.detail ~= "" and craft.detail or "Synchronization complete") .. self.colors.reset) end
-        if self.ui.craftingNetworkText and craft.state == "ERROR" then self.ui.craftingNetworkText:SetText(self.colors.red .. (craft.detail ~= "" and craft.detail or "Synchronization failed") .. self.colors.reset) end
+        local label = "Refresh Now"
+        if craft.state == "WORKING" then label = "Refreshing..." elseif craft.state == "DONE" then label = "Up to Date" elseif craft.state == "ERROR" then label = "Retry Refresh" end
+        QSetOperationButton156(self.ui.craftingSyncButton, label, craft.state, craft.detail ~= "" and craft.detail or "Profession sharing is already updating.")
+        if self.ui.craftingNetworkText and craft.state == "WORKING" then self.ui.craftingNetworkText:SetText(self.colors.gold .. (craft.detail ~= "" and craft.detail or "Updating profession information...") .. self.colors.reset) end
+        if self.ui.craftingNetworkText and craft.state == "DONE" then self.ui.craftingNetworkText:SetText(self.colors.green .. (craft.detail ~= "" and craft.detail or "Profession information updated") .. self.colors.reset) end
+        if self.ui.craftingNetworkText and craft.state == "ERROR" then self.ui.craftingNetworkText:SetText(self.colors.red .. (craft.detail ~= "" and craft.detail or "Profession update failed") .. self.colors.reset) end
     end
     local pve = self:GetOperationState156("PVE")
     local buttons = { self.ui.pveSyncButton, self.ui.guildBoardSync152 }
@@ -286,21 +297,21 @@ function OTLGM:RefreshOperationButtons156()
     for i = 1, table.getn(buttons) do
         button = buttons[i]
         if button then
-            local label = pve.state == "WORKING" and "Syncing..." or (pve.state == "DONE" and "Synced" or "Sync Now")
-            QSetOperationButton156(button, label, pve.state, pve.detail ~= "" and pve.detail or "PvE synchronization is already running.")
+            local label = pve.state == "WORKING" and "Refreshing..." or (pve.state == "DONE" and "Up to Date" or "Refresh Now")
+            QSetOperationButton156(button, label, pve.state, pve.detail ~= "" and pve.detail or "PvE information is already updating.")
         end
     end
-    if self.ui.pveNetworkText and pve.state == "WORKING" then self.ui.pveNetworkText:SetText(self.colors.gold .. (pve.detail ~= "" and pve.detail or "Synchronizing PvE data...") .. self.colors.reset) end
-    if self.ui.pveNetworkText and pve.state == "DONE" then self.ui.pveNetworkText:SetText(self.colors.green .. (pve.detail ~= "" and pve.detail or "PvE synchronization complete") .. self.colors.reset) end
-    if self.ui.pveNetworkText and pve.state == "ERROR" then self.ui.pveNetworkText:SetText(self.colors.red .. (pve.detail ~= "" and pve.detail or "PvE synchronization failed") .. self.colors.reset) end
+    if self.ui.pveNetworkText and pve.state == "WORKING" then self.ui.pveNetworkText:SetText(self.colors.gold .. (pve.detail ~= "" and pve.detail or "Updating PvE information...") .. self.colors.reset) end
+    if self.ui.pveNetworkText and pve.state == "DONE" then self.ui.pveNetworkText:SetText(self.colors.green .. (pve.detail ~= "" and pve.detail or "PvE information updated") .. self.colors.reset) end
+    if self.ui.pveNetworkText and pve.state == "ERROR" then self.ui.pveNetworkText:SetText(self.colors.red .. (pve.detail ~= "" and pve.detail or "PvE update failed") .. self.colors.reset) end
 
     local activity = self:GetOperationState156("ACTIVITY")
     if self.ui.activitySync156 then
-        local label = "Sync Shared Activity"
-        if activity.state == "WORKING" then label = "Syncing Activity..."
-        elseif activity.state == "DONE" then label = "Activity Synced"
-        elseif activity.state == "ERROR" then label = "Retry Activity Sync" end
-        QSetOperationButton156(self.ui.activitySync156, label, activity.state, activity.detail ~= "" and activity.detail or "Shared activity synchronization is already running.")
+        local label = "Refresh Shared Activity"
+        if activity.state == "WORKING" then label = "Refreshing Activity..."
+        elseif activity.state == "DONE" then label = "Activity Updated"
+        elseif activity.state == "ERROR" then label = "Retry Activity" end
+        QSetOperationButton156(self.ui.activitySync156, label, activity.state, activity.detail ~= "" and activity.detail or "Shared activity is already updating.")
     end
 end
 
@@ -308,7 +319,9 @@ function OTLGM.__impl180.RequestScan__impl1(self, reason)
     local mode = reason
     if reason == true then mode = "INTERNAL" end
     if reason == false or reason == nil then mode = "MANUAL" end
-    local manual = mode == "MANUAL" or mode == "CONFIRM"
+    -- CONFIRM is an automatic completeness pass scheduled by Core/Events, not
+    -- a user action. Treating it as manual caused unrelated global status bars.
+    local manual = mode == "MANUAL"
     if self.pendingScan or (self.runtime and self.runtime.rosterRead180) then
         if manual and self.SetStatus then self:SetStatus("Roster update is already in progress. Please wait.") end
         return false
@@ -322,7 +335,7 @@ function OTLGM.__impl180.RequestScan__impl1(self, reason)
     local before = self.pendingScan
     PreviousRequestScan156(self, mode)
     if self.pendingScan and not before then
-        self:SetOperationState156("ROSTER", "WORKING", manual and "Requesting guild roster" or "Refreshing guild roster in background", nil, { source = "roster", manual = manual })
+        self:SetOperationState156("ROSTER", "WORKING", manual and "Updating guild roster" or "Updating guild roster in background", nil, { source = "roster", manual = manual })
         return true
     end
     -- Throttle/coalescing is a neutral result. A fresh cached roster remains
@@ -332,7 +345,7 @@ function OTLGM.__impl180.RequestScan__impl1(self, reason)
     if manual and db and tonumber(db.lastScan) and self:Now() - tonumber(db.lastScan) < 30 then
         self:SetOperationState156("ROSTER", "DONE", "Roster already updated recently: " .. tostring(db.lastTotal or 0), 3, { source = "roster", manual = true })
     elseif manual then
-        self:SetOperationState156("ROSTER", "IDLE", "Roster request was coalesced; try again in a moment", nil, { source = "roster", manual = true })
+        self:SetOperationState156("ROSTER", "IDLE", "Roster was just requested. Try again in a moment.", nil, { source = "roster", manual = true })
     end
     return false
 end
@@ -360,34 +373,41 @@ end
 function OTLGM.__impl180.Stage_Quality156_RequestCraftingSync_2__impl1(self, force, manual)
     local state = self:GetOperationState156("CRAFTING")
     if state.state == "WORKING" then
-        if manual and self.SetStatus and self.ui and self.ui.currentPage == "professions" then self:SetStatus("Crafting synchronization is already running.") end
+        if manual and self.SetStatus and self.ui and self.ui.currentPage == "professions" then self:SetStatus("Profession sharing is already updating.") end
         return false
     end
     local ok = PreviousRequestCraftingSync156(self, force, manual)
     if ok then
-        self:SetOperationState156("CRAFTING", "WORKING", "Waiting for profession snapshots", nil, { source = "crafting", manual = manual })
+        self:SetOperationState156("CRAFTING", "WORKING", "Waiting for profession updates", nil, { source = "crafting", manual = manual })
     elseif manual then
         if self.HasCompatibleSyncPeerR2 and not self:HasCompatibleSyncPeerR2() then
-            self:SetOperationState156("CRAFTING", "IDLE", "No compatible 1.8 profession peer is online; cached recipes were kept", nil, { source = "crafting", manual = true })
+            self:SetOperationState156("CRAFTING", "IDLE", "No compatible guildmate with profession sharing is online; saved recipes were kept", nil, { source = "crafting", manual = true })
         else
-            self:SetOperationState156("CRAFTING", "IDLE", "Crafting synchronization was coalesced or throttled", nil, { source = "crafting", manual = true })
+            self:SetOperationState156("CRAFTING", "IDLE", "Profession information was just requested. Try again in a moment.", nil, { source = "crafting", manual = true })
         end
     end
     return ok
 end
 
-function OTLGM:RequestPveSync(force)
+function OTLGM:RequestPveSync(force, manual)
+    manual = manual and true or false
     local state = self:GetOperationState156("PVE")
-    if state.state == "WORKING" then if self.SetStatus then self:SetStatus("PvE synchronization is already running.") end return false end
-    local ok = PreviousRequestPveSync156(self, force)
+    if state.state == "WORKING" then
+        if manual and self.SetStatus and self.ui and self.ui.currentPage == "pve" then
+            self:SetStatus("PvE information is already updating.", 4, { source = "pve", manual = true })
+        end
+        return false
+    end
+    local ok = PreviousRequestPveSync156(self, force, manual)
     if ok then
-        self:SetOperationState156("PVE", "WORKING", "Syncing raid, group and application data")
+        self:SetOperationState156("PVE", "WORKING", "Updating raids, groups and applications", nil, { source = "pve", manual = manual })
     else
-        -- A throttled background request or a character outside a guild is a
-        -- neutral state, not a synchronization error and never a red badge.
+        -- A throttled/background request, or a character outside a guild, is a
+        -- neutral state.  It may update the PvE page's own button later, but it
+        -- must never create a global warning on unrelated pages.
         local pve = self:EnsurePveDB()
         if not pve or (tonumber(pve.lastConfirmedSync180) or 0) <= 0 then
-            self:SetOperationState156("PVE", "IDLE", "Not synchronized yet")
+            self:SetOperationState156("PVE", "IDLE", "No shared PvE update received yet", nil, { source = "pve", manual = manual })
         end
     end
     return ok
@@ -410,14 +430,24 @@ function OTLGM:ActivityBucket156(timestamp)
 end
 
 local function QMedianActivity156(item)
+    if not item then return 0 end
+    if item.medianR26 ~= nil then return tonumber(item.medianR26) or 0 end
+    local knownCount = tonumber(item.count) or 0
+    -- For the very common one/two-source buckets the median equals the stored
+    -- arithmetic mean, so no temporary table or sort is necessary.
+    if knownCount > 0 and knownCount <= 2 and item.sum ~= nil then
+        item.medianR26 = (tonumber(item.sum) or 0) / knownCount
+        return item.medianR26
+    end
     local values = {}
     local _, value
-    for _, value in pairs(item and item.values or {}) do table.insert(values, tonumber(value) or 0) end
-    if table.getn(values) == 0 then return 0 end
+    for _, value in pairs(item.values or {}) do table.insert(values, tonumber(value) or 0) end
+    if table.getn(values) == 0 then item.medianR26 = 0 return 0 end
     table.sort(values)
     local middle = math.floor((table.getn(values) + 1) / 2)
-    if math.mod(table.getn(values), 2) == 0 then return (values[middle] + values[middle + 1]) / 2 end
-    return values[middle]
+    if math.mod(table.getn(values), 2) == 0 then item.medianR26 = (values[middle] + values[middle + 1]) / 2
+    else item.medianR26 = values[middle] end
+    return item.medianR26
 end
 
 function OTLGM:StoreSharedActivity156(bucket, online, source, received, deferRefresh)
@@ -434,6 +464,7 @@ function OTLGM:StoreSharedActivity156(bucket, online, source, received, deferRef
     if not item then item = { ts = bucket, values = {}, sum = 0, count = 0, max = 0 } shared.buckets[bucket] = item end
     if item.values[source] == online then return true end
     item.values[source] = online
+    item.medianR26 = nil
     item.sum, item.count, item.max = 0, 0, 0
     local name, value
     for name, value in pairs(item.values) do
@@ -442,6 +473,7 @@ function OTLGM:StoreSharedActivity156(bucket, online, source, received, deferRef
         if (tonumber(value) or 0) > item.max then item.max = tonumber(value) or 0 end
     end
     shared.sources[source] = self:Now()
+    shared.revisionR26 = (tonumber(shared.revisionR26) or 0) + 1
     if received and not deferRefresh then
         self:SetOperationState156("ACTIVITY", "DONE", "Shared activity updated", 4)
         if self.ui and self.ui.currentPage == "activity" and self.RefreshActivityPage then self:RefreshActivityPage() end
@@ -468,8 +500,11 @@ function OTLGM:RecordSharedActivity156(force)
         end
     end
     local cutoff = self:Now() - (30 * 86400)
-    local key
-    for key in pairs(shared.buckets) do if tonumber(key) < cutoff then shared.buckets[key] = nil end end
+    local key, prunedR26
+    for key in pairs(shared.buckets) do
+        if tonumber(key) < cutoff then shared.buckets[key] = nil prunedR26 = true end
+    end
+    if prunedR26 then shared.revisionR26 = (tonumber(shared.revisionR26) or 0) + 1 end
     return true
 end
 
@@ -477,7 +512,7 @@ function OTLGM:RequestSharedActivitySync156(force)
     local shared = self:EnsureSharedActivity156()
     if not shared or not self.QueueCommunityPayload then return false end
     if self:GetOperationState156("ACTIVITY").state == "WORKING" then
-        if self.SetStatus then self:SetStatus("Shared activity synchronization is already running.") end
+        if self.SetStatus then self:SetStatus("Shared activity is already updating.") end
         return false
     end
     local now = self:Now()
@@ -582,29 +617,52 @@ function OTLGM:GetSharedActivityStats156(days)
 end
 
 function OTLGM:GetActivitySummary(days)
+    days = tonumber(days) or 7
+    self.runtime = self.runtime or {}
+    local db = self:GetGuildDB()
+    local shared = self:EnsureSharedActivity156()
+    local revisionR26 = tostring(tonumber(db and db.lastScan) or 0) .. ":"
+        .. tostring(tonumber(shared and shared.revisionR26) or 0) .. ":"
+        .. tostring(math.floor(self:Now() / 300)) .. ":" .. tostring(days)
+    local cacheR26 = self.runtime.activitySummaryCacheR26
+    if cacheR26 and cacheR26.revision == revisionR26 and cacheR26.value then return cacheR26.value end
+
     local result = PreviousGetActivitySummary156(self, days)
-    local shared = self:GetSharedActivityStats156(days or 7)
-    if shared.samples > 0 then
-        result.average = shared.average
-        result.samples = shared.samples
-        if shared.peak > (result.periodPeak or 0) then result.periodPeak = shared.peak result.periodPeakAt = nil end
-        result.sharedCoverage156 = shared.coverage
-        result.sharedSources156 = shared.sources
+    local sharedStats = self:GetSharedActivityStats156(days)
+    if sharedStats.samples > 0 then
+        result.average = sharedStats.average
+        result.samples = sharedStats.samples
+        if sharedStats.peak > (result.periodPeak or 0) then result.periodPeak = sharedStats.peak result.periodPeakAt = nil end
+        result.sharedCoverage156 = sharedStats.coverage
+        result.sharedSources156 = sharedStats.sources
     end
+    self.runtime.activitySummaryCacheR26 = { revision = revisionR26, value = result }
     return result
 end
 
 function OTLGM:GetActivityHeatmap()
-    local matrix, maxValue = PreviousGetActivityHeatmap156(self)
+    self.runtime = self.runtime or {}
+    local db = self:GetGuildDB()
     local shared = self:EnsureSharedActivity156()
-    if not shared then return matrix, maxValue end
+    local revisionR26 = tostring(tonumber(db and db.lastScan) or 0) .. ":"
+        .. tostring(tonumber(shared and shared.revisionR26) or 0) .. ":"
+        .. tostring(math.floor(self:Now() / 900))
+    local cacheR26 = self.runtime.activityHeatmapCacheR26
+    if cacheR26 and cacheR26.revision == revisionR26 and cacheR26.matrix then return cacheR26.matrix, cacheR26.maxValue end
+
+    local matrix, maxValue = PreviousGetActivityHeatmap156(self)
+    if not shared then
+        self.runtime.activityHeatmapCacheR26 = { revision = revisionR26, matrix = matrix, maxValue = maxValue }
+        return matrix, maxValue
+    end
     local sums, counts = {}, {}
-    local d, s
-    for d = 0, 6 do sums[d] = {} counts[d] = {} for s = 0, 7 do sums[d][s] = 0 counts[d][s] = 0 end end
+    local d, slotIndex
+    for d = 0, 6 do sums[d] = {} counts[d] = {} for slotIndex = 0, 7 do sums[d][slotIndex] = 0 counts[d][slotIndex] = 0 end end
     local ts, item, value, weekday, hour, slot
     local serverOffset180 = self.GetServerOffsetSeconds180 and self:GetServerOffsetSeconds180(self:Now()) or 0
+    local cutoffR26 = self:Now() - (30 * 86400)
     for ts, item in pairs(shared.buckets or {}) do
-        if tonumber(ts) >= self:Now() - (30 * 86400) and item.count and item.count > 0 then
+        if tonumber(ts) >= cutoffR26 and item.count and item.count > 0 then
             value = QMedianActivity156(item)
             local serverTs180 = tonumber(ts) + serverOffset180
             weekday = tonumber(date("%w", serverTs180)) or 0
@@ -615,17 +673,18 @@ function OTLGM:GetActivityHeatmap()
         end
     end
     for d = 0, 6 do
-        for s = 0, 7 do
-            if counts[d][s] > 0 then matrix[d][s] = sums[d][s] / counts[d][s] end
-            if matrix[d][s] > maxValue then maxValue = matrix[d][s] end
+        for slotIndex = 0, 7 do
+            if counts[d][slotIndex] > 0 then matrix[d][slotIndex] = sums[d][slotIndex] / counts[d][slotIndex] end
+            if matrix[d][slotIndex] > maxValue then maxValue = matrix[d][slotIndex] end
         end
     end
+    self.runtime.activityHeatmapCacheR26 = { revision = revisionR26, matrix = matrix, maxValue = maxValue }
     return matrix, maxValue
 end
 
 function OTLGM.__impl180.BuildActivityPage__impl1(self, page)
     PreviousBuildActivityPage156(self, page)
-    self.ui.activitySync156 = QButton(page, "Sync Shared Activity", 348, -502, 172, 28, function()
+    self.ui.activitySync156 = QButton(page, "Refresh Shared Activity", 348, -502, 172, 28, function()
         if OTLGM:RequestSharedActivitySync156(true) then
             OTLGM:SetOperationState156("ACTIVITY", "WORKING", "Requesting shared online intervals")
             OTLGM:SetStatus("Requesting shared activity samples from online addon users...")
@@ -645,7 +704,7 @@ function OTLGM.__impl180.RefreshActivityPage__impl1(self)
         self.ui.activityCards.average.sub:SetText(tostring(summary.samples or 0) .. " intervals  -  " .. tostring(coverage) .. "%  -  " .. tostring(sources) .. " sources")
         if self.ui.activitySync156 then
             local state = self:GetOperationState156("ACTIVITY")
-            QSetButton(self.ui.activitySync156, state.state == "WORKING" and "Syncing Activity..." or (state.state == "DONE" and "Activity Synced" or "Sync Shared Activity"), state.state ~= "WORKING", "A shared activity sync is already running.")
+            QSetButton(self.ui.activitySync156, state.state == "WORKING" and "Refreshing Activity..." or (state.state == "DONE" and "Activity Updated" or "Refresh Shared Activity"), state.state ~= "WORKING", "A shared activity sync is already running.")
         end
     end
 end
@@ -838,7 +897,7 @@ function OTLGM:BuildProfessionQOL156(page)
             more:Hide()
             local result = OTLGM.ui.craftingSelectedRecipeData
             local link = result and OTLGM:GetCraftingItemLink154(result.recipe)
-            if link then OTLGM:OpenGuildChatWithLink154(link) else OTLGM:ShowNotice("Item Link", "The item link is not cached yet.") end
+            if link then OTLGM:OpenGuildChatWithLink154(link) else OTLGM:ShowNotice("Item Link", "The item link is not available yet.") end
         end, "utility")
         self.ui.craftingMoreRecipe156 = QButton(more, "Link Recipe", 104, -38, 88, 24, function()
             more:Hide()
@@ -905,7 +964,7 @@ function OTLGM:RefreshProfessionQOL156()
     local recipeLink = selected and self.GetCraftingRecipeLink154 and self:GetCraftingRecipeLink154(selected.recipe)
     QSetButton(self.ui.craftingMore156, "More", selected ~= nil, "Select a recipe first.")
     QSetButton(self.ui.craftingMoreWhisper156, "Whisper Crafter", selected ~= nil and self.ui.craftingSelectedCrafter ~= nil, "No crafter is selected for this recipe.")
-    QSetButton(self.ui.craftingMoreItem156, "Link Item", itemLink ~= nil, "The item link is not cached yet.")
+    QSetButton(self.ui.craftingMoreItem156, "Link Item", itemLink ~= nil, "The item link is not available yet.")
     QSetButton(self.ui.craftingMoreRecipe156, "Link Recipe", recipeLink ~= nil, "The crafter must reopen this profession to share its recipe link.")
 end
 
@@ -915,9 +974,9 @@ function OTLGM.__impl180.Stage_Quality156_RefreshCraftingRecipesPanel_3__impl1(s
     if self.RefreshProfessionExperience170 then self:RefreshProfessionExperience170() end
     local craft = self:EnsureCraftingDB()
     if craft and craft.syncState and craft.syncState.active then
-        self:SetOperationState156("CRAFTING", "WORKING", "Received " .. tostring(craft.syncState.received or 0) .. " snapshots")
+        self:SetOperationState156("CRAFTING", "WORKING", "Received " .. tostring(craft.syncState.received or 0) .. " updates")
     elseif self:GetOperationState156("CRAFTING").state == "WORKING" then
-        self:SetOperationState156("CRAFTING", "DONE", "Received " .. tostring(craft and craft.syncState and craft.syncState.received or 0) .. " snapshots", 4)
+        self:SetOperationState156("CRAFTING", "DONE", "Received " .. tostring(craft and craft.syncState and craft.syncState.received or 0) .. " updates", 4)
     end
 end
 
@@ -1102,6 +1161,10 @@ end
 function OTLGM.__impl180.Stage_Quality156_GetRaidList156_1__impl1(self, filter)
     local pve = self:EnsureRaid156DB()
     local list = {}
+    -- The PvE page can still be opened while unguilded (for example directly
+    -- after leaving/transferring a guild). Treat the missing guild store as an
+    -- empty raid list instead of indexing nil during layout.
+    if not pve then return list end
     local source = filter == "CANCELLED" and pve.cancelledRaids156 or (filter == "PAST" and pve.pastRaids156 or pve.raids)
     local id, record
     for id, record in pairs(source or {}) do table.insert(list, record) end
@@ -1202,7 +1265,7 @@ function OTLGM:BuildRaidPlanner156(page)
         row.meta156:SetTextColor(0.60, 0.60, 0.58)
         self.ui.raidRows156[i] = row
     end
-    self.ui.raidListEmpty156 = QWrapped(list, "GameFontNormal", "No upcoming raids.\n\nCreate the first event or synchronize with online guild members.", 18, -120, 240, 90)
+    self.ui.raidListEmpty156 = QWrapped(list, "GameFontNormal", "No upcoming raids.\n\nCreate the first event or refresh shared guild data from online guild members.", 18, -120, 240, 90)
     self.ui.raidListEmpty156:SetTextColor(0.58, 0.58, 0.56)
     self.ui.raidListStatus156 = QText(list, "GameFontNormalSmall", "", 10, -342, 134, "LEFT")
     self.ui.raidListStatus156:SetTextColor(0.66, 0.66, 0.62)
@@ -1396,7 +1459,7 @@ function OTLGM.__impl180.Stage_Quality156_RefreshRaidPlanner156_1__impl1(self)
         self.ui.raidDetailGather156:SetText("Gathering: " .. string.format("%02d:%02d", tonumber(selected.gatherHour) or tonumber(selected.stHour) or 0, tonumber(selected.gatherMinute) or tonumber(selected.stMinute) or 0) .. " ST")
         self.ui.raidDetailLocation156:SetText(selected.location ~= "" and ("Meeting: " .. selected.location) or "Meeting point not specified")
         self.ui.raidDetailNote156:SetText(selected.note ~= "" and selected.note or "No additional notes.")
-        self.ui.raidDetailAuthor156:SetText("Published by " .. (selected.author or "Leadership") .. "  -  revision " .. tostring(selected.rev or 1))
+        self.ui.raidDetailAuthor156:SetText("Published by " .. (selected.author or "Leadership") .. "  -  version " .. tostring(selected.rev or 1))
         local summary = self.GetCommunityReactionSummary and self:GetCommunityReactionSummary("RAID", selected.id) or {}
         QSetButton(self.ui.raidSeen156, "Seen " .. tostring(summary.SEEN or 0), filter == "UPCOMING")
         QSetButton(self.ui.raidReady156, "Ready " .. tostring(summary.READY or 0), filter == "UPCOMING")
@@ -1460,11 +1523,11 @@ function OTLGM.__impl180.Stage_Quality156_ProcessQuality156Timers_1__impl1(self)
     local rosterState = self:GetOperationState156("ROSTER")
     if rosterState.state == "WORKING" and rosterState.ts and self:Now() - rosterState.ts >= 15 then
         local reason = tostring(self.pendingScanReason or "")
-        local manual = reason == "MANUAL" or reason == "CONFIRM"
+        local manual = reason == "MANUAL"
         self.pendingScan = false
         self.pendingScanReason = nil
         if manual then self:SetOperationState156("ROSTER", "ERROR", "Roster update timed out. Try again.", 6, { source = "roster", manual = true })
-        else self:SetOperationState156("ROSTER", "IDLE", "Background roster refresh timed out; cached roster kept", nil, { source = "roster", manual = false }) end
+        else self:SetOperationState156("ROSTER", "IDLE", "Background roster update timed out; the last saved roster was kept", nil, { source = "roster", manual = false }) end
     end
     -- RC3: PvE synchronization is truthful. A timer may keep the operation
     -- pending, but only ConfirmPveSyncResponse180 (SYNCACK or fresh remote PvE
@@ -1473,13 +1536,13 @@ function OTLGM.__impl180.Stage_Quality156_ProcessQuality156Timers_1__impl1(self)
     local shared = activityState.state == "WORKING" and self:EnsureSharedActivity156() or nil
     if shared and self:Now() - (shared.lastSync or 0) >= 8 then
         local received = tonumber(shared.syncReceived156) or 0
-        local detail = received > 0 and ("Activity sync complete: " .. tostring(received) .. " daily packet(s)") or "Activity sync complete - no new samples received"
+        local detail = received > 0 and ("Activity updated: " .. tostring(received) .. " day(s) of activity") or "Activity checked - no new activity was received"
         self:SetOperationState156("ACTIVITY", "DONE", detail, 4)
     end
     local state = self:GetOperationState156("CRAFTING")
     local craft = state.state == "WORKING" and self:EnsureCraftingDB() or nil
     if state.state == "WORKING" and craft and craft.syncState and not craft.syncState.active then
-        self:SetOperationState156("CRAFTING", "DONE", "Received " .. tostring(craft.syncState.received or 0) .. " profession snapshots", 4)
+        self:SetOperationState156("CRAFTING", "DONE", "Received " .. tostring(craft.syncState.received or 0) .. " profession updates", 4)
     end
     -- C5-R4 final: shared activity no longer uses a perpetual minute counter.
     -- Login/manual/event paths already publish meaningful changes; idle must sleep.

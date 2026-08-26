@@ -220,7 +220,7 @@ if PreviousBagSliceR5 then
         -- A new BAG_UPDATE request must not inherit a stale slice deadline from
         -- an older completed/cancelled scan and wake the scheduler pointlessly.
         if not active then
-            if dueAt and now < dueAt then return false end
+            if dueAt and preciseNow < dueAt then return false end
             self.runtime.nextBagSliceR5 = nil
         elseif tonumber(self.runtime.nextBagSliceR5 or 0) > preciseNow then
             R5.bagSlicesDeferred = R5.bagSlicesDeferred + 1
@@ -246,7 +246,11 @@ if PreviousBagSliceR5 then
             return false
         end
         if self.runtime.incrementalBagScan176 then
-            self.runtime.nextBagSliceR5 = preciseNow + BAG_SLICE_GAP_R5
+            -- The underlying pressure-aware scanner may deliberately request a
+            -- longer delay (cold login or severe FPS/weather pressure). Preserve
+            -- that deadline; this final public wrapper must only enforce its
+            -- own minimum gap, never shorten a safer one chosen below it.
+            self.runtime.nextBagSliceR5 = math.max(tonumber(self.runtime.nextBagSliceR5) or 0, preciseNow + BAG_SLICE_GAP_R5)
         else
             self.runtime.nextBagSliceR5 = nil
             self.runtime.incrementalBagFailuresR6 = 0
@@ -456,8 +460,8 @@ function OTLGM:InviteGuildCandidate180(name, source)
     if type(GuildInvite) == "function" then inviteFunction = GuildInvite
     elseif type(GuildInviteByName) == "function" then inviteFunction = GuildInviteByName end
     if not inviteFunction then
-        if self.ShowNotice then self:ShowNotice("Guild Invite", "Guild invitation API is unavailable on this client.") end
-        return false, "Guild invitation API is unavailable."
+        if self.ShowNotice then self:ShowNotice("Guild Invite", "Guild invitations are not available on this client.") end
+        return false, "Guild invitations are not available right now."
     end
     local ok, problem = pcall(inviteFunction, name)
     if not ok then
@@ -495,8 +499,8 @@ function OTLGM:InviteRecentWhisper176(name)
     elseif type(GuildInviteByName) == "function" then inviteFunction = GuildInviteByName end
     if not inviteFunction then
         R5.whisperInviteRejected = R5.whisperInviteRejected + 1
-        if self.ShowNotice then self:ShowNotice("Guild Invite", "Guild invitation API is unavailable on this client.") end
-        return false, "Invite API unavailable."
+        if self.ShowNotice then self:ShowNotice("Guild Invite", "Guild invitations are not available on this client.") end
+        return false, "Guild invitations are unavailable."
     end
     local ok, problem = pcall(inviteFunction, name)
     if not ok then
@@ -650,10 +654,10 @@ end
 
 local PreviousSetTreasuryGoalR5 = OTLGM.__impl180.SetTreasuryGoal170__impl1
 if PreviousSetTreasuryGoalR5 then
-    function OTLGM:SetTreasuryGoal170(id, name, current, target, category)
+    function OTLGM:SetTreasuryGoal170(id, name, current, target, category, expectedRevision)
         local old = self.GetTreasuryGoal170 and self:GetTreasuryGoal170(id) or nil
         local oldRevision = old and tonumber(old.revision) or 0
-        local ok, result = PreviousSetTreasuryGoalR5(self, id, name, current, target, category)
+        local ok, result, code = PreviousSetTreasuryGoalR5(self, id, name, current, target, category, expectedRevision)
         if ok and not (self.runtime and self.runtime.recordingContributionR5) then
             local goal = self:GetTreasuryGoal170(id)
             self:AddTreasuryActivityR5({
@@ -663,7 +667,7 @@ if PreviousSetTreasuryGoalR5 then
                 current = goal and goal.current or current, target = goal and goal.target or target,
             })
         end
-        return ok, result
+        return ok, result, code
     end
 end
 
@@ -751,10 +755,25 @@ if PreviousHandleTreasuryR5 then
 end
 
 function OTLGM:GetTreasuryGoalLedgerR5(goalId)
+    goalId = tostring(goalId or "")
     local goal = self.GetTreasuryGoal170 and self:GetTreasuryGoal170(goalId) or nil
     local entries = self.GetTreasuryContributions176 and self:GetTreasuryContributions176(goalId) or {}
+    self.runtime = self.runtime or {}
+    self.runtime.treasuryLedgerCacheR50 = self.runtime.treasuryLedgerCacheR50 or {}
+    local treasury = self.EnsureTreasury170 and self:EnsureTreasury170() or nil
+    local revision = table.concat({
+        tostring(tonumber(treasury and treasury.revision) or 0),
+        tostring(tonumber(self.runtime.treasuryDataRevisionRC5R3) or 0),
+        tostring(table.getn(entries))
+    }, ":")
+    local cached = self.runtime.treasuryLedgerCacheR50[goalId]
+    if cached and cached.revision == revision and cached.ledger then
+        self.runtime.treasuryLedgerCacheHitsR50 = (tonumber(self.runtime.treasuryLedgerCacheHitsR50) or 0) + 1
+        return cached.ledger
+    end
+
     local aggregate = {}
-    local sum = 0
+    local sum, lastAt = 0, 0
     local index, entry, key, row
     for index = 1, table.getn(entries) do
         entry = entries[index]
@@ -765,6 +784,7 @@ function OTLGM:GetTreasuryGoalLedgerR5(goalId)
         row.amount = row.amount + math.max(0, tonumber(entry.amount) or 0)
         row.count = row.count + 1
         row.lastAt = math.max(row.lastAt, tonumber(entry.ts) or 0)
+        lastAt = math.max(lastAt, tonumber(entry.ts) or 0)
         sum = sum + math.max(0, tonumber(entry.amount) or 0)
     end
     local contributors = {}
@@ -773,19 +793,22 @@ function OTLGM:GetTreasuryGoalLedgerR5(goalId)
         if left.amount ~= right.amount then return left.amount > right.amount end
         return string.lower(left.name or "") < string.lower(right.name or "")
     end)
-    return { goal = goal, entries = entries, contributors = contributors, recorded = sum }
+    local ledger = { goal = goal, entries = entries, contributors = contributors, recorded = sum, lastAt = lastAt }
+    self.runtime.treasuryLedgerCacheR50[goalId] = { revision = revision, ledger = ledger }
+    self.runtime.treasuryLedgerBuildsR50 = (tonumber(self.runtime.treasuryLedgerBuildsR50) or 0) + 1
+    return ledger
 end
 
 local function ActivityLineR5(self, entry)
-    local stamp = date("%d %b %H:%M", entry.ts or self:Now())
+    local stamp = ((self.FormatServerDate180 and self:FormatServerDate180(entry.ts or self:Now(), "%d %b") or date("%d %b", entry.ts or self:Now())) .. " " .. (self.FormatServerClock180 and self:FormatServerClock180(entry.ts or self:Now(), false) or date("%H:%M", entry.ts or self:Now())) .. " ST")
     local goalName = entry.goalName ~= "" and entry.goalName or entry.goalId
     if entry.kind == "CONTRIBUTION" then
         local note = entry.note and entry.note ~= "" and (" - " .. entry.note) or ""
-        return stamp .. "  " .. tostring(entry.contributor or "Anonymous") .. "  +" .. MoneyR5(entry.amount) .. "  -> " .. tostring(goalName or "Goal") .. "  by " .. tostring(entry.actor or "Leadership") .. note
+        return stamp .. "  " .. tostring(entry.contributor or "Anonymous") .. "  +" .. MoneyR5(entry.amount) .. "  -> " .. tostring(goalName or "Goal") .. "  by " .. (self.DisplayGuildActor180 and self:DisplayGuildActor180(entry.actor) or tostring(entry.actor or "Leadership")) .. note
     end
-    if entry.kind == "GOAL_DELETE" then return stamp .. "  " .. tostring(entry.actor or "Leadership") .. " removed " .. tostring(goalName or "Guild Goal") end
-    if entry.kind == "GOAL_CREATE" then return stamp .. "  " .. tostring(entry.actor or "Leadership") .. " created " .. tostring(goalName or "Guild Goal") end
-    return stamp .. "  " .. tostring(entry.actor or "Leadership") .. " updated " .. tostring(goalName or "Guild Goal") .. "  " .. MoneyR5(entry.current, true) .. " / " .. MoneyR5(entry.target, true)
+    if entry.kind == "GOAL_DELETE" then return stamp .. "  " .. (self.DisplayGuildActor180 and self:DisplayGuildActor180(entry.actor) or tostring(entry.actor or "Leadership")) .. " removed " .. tostring(goalName or "Guild Goal") end
+    if entry.kind == "GOAL_CREATE" then return stamp .. "  " .. (self.DisplayGuildActor180 and self:DisplayGuildActor180(entry.actor) or tostring(entry.actor or "Leadership")) .. " created " .. tostring(goalName or "Guild Goal") end
+    return stamp .. "  " .. (self.DisplayGuildActor180 and self:DisplayGuildActor180(entry.actor) or tostring(entry.actor or "Leadership")) .. " updated " .. tostring(goalName or "Guild Goal") .. "  " .. MoneyR5(entry.current, true) .. " / " .. MoneyR5(entry.target, true)
 end
 
 function OTLGM.__impl180.BuildTreasuryActivityR5__impl1(self)
@@ -1033,7 +1056,7 @@ function OTLGM.__impl180.RefreshTreasuryGoalLedgerR5__impl1(self)
         entry = ledger.entries[dialog.offsetR5 + index]
         if entry then
             note = entry.note and entry.note ~= "" and (" - " .. entry.note) or ""
-            row.textR5:SetText(date("%d %b %H:%M", entry.ts or self:Now()) .. "  " .. tostring(entry.contributor or "Anonymous") .. "  +" .. MoneyR5(entry.amount) .. "  by " .. tostring(entry.actor or "Leadership") .. note)
+            row.textR5:SetText(((self.FormatServerDate180 and self:FormatServerDate180(entry.ts or self:Now(), "%d %b") or date("%d %b", entry.ts or self:Now())) .. " " .. (self.FormatServerClock180 and self:FormatServerClock180(entry.ts or self:Now(), false) or date("%H:%M", entry.ts or self:Now())) .. " ST") .. "  " .. tostring(entry.contributor or "Anonymous") .. "  +" .. MoneyR5(entry.amount) .. "  by " .. (self.DisplayGuildActor180 and self:DisplayGuildActor180(entry.actor) or tostring(entry.actor or "Leadership")) .. note)
             row:Show()
         else row:Hide() end
     end
@@ -1210,7 +1233,7 @@ function OTLGM:ApplyGuildChatPolishR5()
             if row.pinButton170.text then row.pinButton170.text:SetFontObject("GameFontNormalSmall") end
         end
         if row.messageFrame and row.chatData then
-            local achievement = string.find(tostring(row.chatData.text or ""), "^%[Guild Achievement%]") ~= nil
+            local achievement = self:IsGuildAchievementChatMessage180(row.chatData.text or "")
             local measuredWidth
             if achievement then
                 measuredWidth = tonumber(self.ui.chatAchievementWidth180) or 590
@@ -1331,7 +1354,7 @@ end
 
 if OTLGM.RegisterModule then
     OTLGM:RegisterModule("RuntimeCoordination", {
-        layer = "stability", revision = 6, version = "1.8.0", noOnUpdate = true,
+        layer = "stability", revision = 8, version = "1.8.3", noOnUpdate = true,
         treasuryLedger = true, treasuryActivity = true, whisperInvite = true,
     })
 end

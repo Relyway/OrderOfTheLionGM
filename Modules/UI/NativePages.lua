@@ -113,14 +113,34 @@ local SEARCH_FILTER_ORDER = {
     { "GROUPS", "Groups" }, { "POSTS", "Posts" },
 }
 
-local function SearchFilterMatches(filterKey, resultType)
-    filterKey = filterKey or "ALL"
-    if filterKey == "ALL" then return true end
-    if filterKey == "MEMBERS" then return resultType == "MEMBER" end
-    if filterKey == "RECIPES" then return resultType == "RECIPE" end
-    if filterKey == "GROUPS" then return resultType == "GROUP" or resultType == "RAID" end
-    if filterKey == "POSTS" then return resultType == "ANNOUNCEMENT" or resultType == "BOARD" or resultType == "CRAFT REQUEST" end
-    return true
+local SEARCH_TYPE_LABELS_R51 = {
+    MEMBER = "Member",
+    RECIPE = "Recipe",
+    ["CRAFT REQUEST"] = "Craft Request",
+    GROUP = "Group",
+    RAID = "Raid",
+    BOARD = "Guild Post",
+    ANNOUNCEMENT = "Announcement",
+}
+
+local function SearchResultBucketsR51(results)
+    local buckets = { ALL = results or {}, MEMBERS = {}, RECIPES = {}, GROUPS = {}, POSTS = {} }
+    local counts = { ALL = table.getn(results or {}), MEMBERS = 0, RECIPES = 0, GROUPS = 0, POSTS = 0 }
+    local index, result, resultType, bucketKey
+    for index = 1, table.getn(results or {}) do
+        result = results[index]
+        resultType = tostring(result and result.type or "")
+        if resultType == "MEMBER" then bucketKey = "MEMBERS"
+        elseif resultType == "RECIPE" then bucketKey = "RECIPES"
+        elseif resultType == "GROUP" or resultType == "RAID" then bucketKey = "GROUPS"
+        elseif resultType == "ANNOUNCEMENT" or resultType == "BOARD" or resultType == "CRAFT REQUEST" then bucketKey = "POSTS"
+        else bucketKey = nil end
+        if bucketKey then
+            table.insert(buckets[bucketKey], result)
+            counts[bucketKey] = counts[bucketKey] + 1
+        end
+    end
+    return buckets, counts
 end
 
 local function ResolveSearchIcon(owner, result, texture)
@@ -210,13 +230,36 @@ end
 local function EnsureSearchRows(owner, capacity)
     local list = owner.ui.globalSearchList180
     if not list then return end
+    -- Pages.lua creates twelve legacy NButton rows before the native ContentHost
+    -- knows its responsive capacity. Mixing those buttons with later TableRow
+    -- objects made the bottom rows permanently darker. Retire the legacy pool
+    -- once and own one homogeneous native row contract from this point onward.
+    if not owner.ui.globalSearchRowsNative184 then
+        local legacy = owner.ui.globalSearchRows or {}
+        local index
+        for index = 1, table.getn(legacy) do if legacy[index] then legacy[index]:Hide() end end
+        owner.ui.globalSearchLegacyRows184 = legacy
+        owner.ui.globalSearchRows = {}
+        owner.ui.globalSearchRowsNative184 = true
+    end
     owner.ui.globalSearchRows = owner.ui.globalSearchRows or {}
     while table.getn(owner.ui.globalSearchRows) < capacity do
-        table.insert(owner.ui.globalSearchRows, CreateSearchRow(owner, list))
+        local row = CreateSearchRow(owner, list)
+        row.otlStyle = "inline"
+        table.insert(owner.ui.globalSearchRows, row)
     end
     local index
     for index = 1, table.getn(owner.ui.globalSearchRows) do
-        WireSearchRow(owner, owner.ui.globalSearchRows[index])
+        local row = owner.ui.globalSearchRows[index]
+        row.otlStyle = "inline"
+        WireSearchRow(owner, row)
+        -- Do NOT reset an already-bound row during a layout/capacity pass.
+        -- ResetReusableRow180 intentionally clears resultData and restores the
+        -- icon TexCoord to a generic crop. LayoutSearch can run after refresh
+        -- on Vanilla/Octo, which was why MEMBER rows showed the entire class
+        -- atlas squeezed into an 18px icon and also lost their click target.
+        -- The authoritative reset belongs only in RefreshSearchNative before a
+        -- new result is bound to the pooled row.
     end
 end
 
@@ -226,14 +269,16 @@ local function RefreshSearchNative(owner)
         or (OTLGM_DB.settings.globalSearch or "")
     local allResults = {}
     if string.len(query) >= 2 then allResults = owner:GetGlobalSearchResults(query) end
-    local results = {}
     local filterKey = owner.ui.globalSearchFilter180 or "ALL"
-    local resultIndex
-    for resultIndex = 1, table.getn(allResults) do
-        if SearchFilterMatches(filterKey, allResults[resultIndex].type) then
-            table.insert(results, allResults[resultIndex])
-        end
+    local categoryCacheR51 = owner.ui.globalSearchCategoryCacheR51
+    if not categoryCacheR51 or categoryCacheR51.source ~= allResults then
+        local bucketsR51, countsR51 = SearchResultBucketsR51(allResults)
+        categoryCacheR51 = { source = allResults, buckets = bucketsR51, counts = countsR51 }
+        owner.ui.globalSearchCategoryCacheR51 = categoryCacheR51
     end
+    local filterCountsR51 = categoryCacheR51.counts or { ALL = 0, MEMBERS = 0, RECIPES = 0, GROUPS = 0, POSTS = 0 }
+    owner.ui.globalSearchFilterCountsR51 = filterCountsR51
+    local results = categoryCacheR51.buckets and categoryCacheR51.buckets[filterKey] or allResults
     local capacity = math.max(6, tonumber(owner.ui.globalSearchCapacity180) or 6)
     EnsureSearchRows(owner, capacity)
     local maximum = math.max(0, table.getn(results) - capacity)
@@ -244,7 +289,12 @@ local function RefreshSearchNative(owner)
     for filterIndex = 1, table.getn(SEARCH_FILTER_ORDER) do
         filterDefinition = SEARCH_FILTER_ORDER[filterIndex]
         filterButton = owner.ui.globalSearchFilterButtons180 and owner.ui.globalSearchFilterButtons180[filterDefinition[1]]
-        if filterButton then UI:SetSelected(filterButton, filterDefinition[1] == filterKey) end
+        if filterButton then
+            UI:SetSelected(filterButton, filterDefinition[1] == filterKey)
+            local baseLabelR51 = filterDefinition[2]
+            local countR51 = tonumber(filterCountsR51[filterDefinition[1]]) or 0
+            UI:SetText(filterButton, string.len(query) >= 2 and (baseLabelR51 .. " " .. tostring(countR51)) or baseLabelR51)
+        end
     end
     local index, row, result
     for index = 1, table.getn(owner.ui.globalSearchRows) do
@@ -261,7 +311,7 @@ local function RefreshSearchNative(owner)
             -- Pooled rows must not inherit class/result colors from earlier occupants.
             -- Category is communicated by the icon and label, while the text palette
             -- remains stable across MEMBER / RECIPE / GROUP / POST results.
-            row.typeText:SetText(tostring(result.type or "RESULT"))
+            row.typeText:SetText(SEARCH_TYPE_LABELS_R51[tostring(result.type or "")] or "Result")
             row.typeText:SetTextColor(C.goldMuted[1], C.goldMuted[2], C.goldMuted[3])
             row.titleText:SetText(Short(result.title, 48))
             row.titleText:SetTextColor(0.94, 0.92, 0.87)
@@ -276,7 +326,11 @@ local function RefreshSearchNative(owner)
     if string.len(query) < 2 then
         owner.ui.globalSearchStatus:SetText("Enter at least two characters to search across the guild addon.")
     elseif table.getn(results) == 0 then
-        owner.ui.globalSearchStatus:SetText("No matching members, recipes, groups or posts were found.")
+        if table.getn(allResults) > 0 and filterKey ~= "ALL" then
+            owner.ui.globalSearchStatus:SetText("No results in this category. Try All or another filter.")
+        else
+            owner.ui.globalSearchStatus:SetText("No matching members, recipes, groups or posts were found.")
+        end
     else
         owner.ui.globalSearchStatus:SetText(tostring(table.getn(results)) .. " results")
     end
@@ -382,6 +436,27 @@ local function CreateAchievementRow(owner, list)
     row.description174:SetTextColor(0.66, 0.66, 0.63)
     row.status174 = UI.Text(row, "", "GameFontNormalSmall", "RIGHT")
     row.date174 = UI.Text(row, "", "GameFontNormalSmall", "RIGHT")
+    -- Persistent focus state is independent from Track/Untrack.  Native rows
+    -- replace the six legacy cards, so selection visuals must live here too.
+    row.selectedWash174 = row:CreateTexture(nil, "BACKGROUND")
+    row.selectedWash174:SetAllPoints(row)
+    row.selectedWash174:SetTexture(0.12, 0.38, 0.72, 0.16)
+    row.selectedWash174:Hide()
+    row.selectedRail174 = row:CreateTexture(nil, "ARTWORK")
+    row.selectedRail174:SetPoint("TOPLEFT", row, "TOPLEFT", 2, -3)
+    row.selectedRail174:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 2, 3)
+    row.selectedRail174:SetWidth(4)
+    row.selectedRail174:SetTexture(0.30, 0.72, 1, 0.96)
+    row.selectedRail174:Hide()
+    -- A quiet progress strip makes partially completed goals scannable without
+    -- adding another text column. It updates only on page refresh: no animation
+    -- and no additional OnUpdate work.
+    row.progressTrack184 = row:CreateTexture(nil, "ARTWORK")
+    row.progressTrack184:SetTexture(0.10, 0.09, 0.075, 1)
+    row.progressFill184 = row:CreateTexture(nil, "ARTWORK")
+    row.progressFill184:SetTexture(0.93, 0.68, 0.22, 0.86)
+    row.progressTrack184:Hide()
+    row.progressFill184:Hide()
     row:SetScript("OnEnter", function()
         if not this.achievement174 then return end
         this:SetBackdropBorderColor(0.34, 0.70, 1, 1)
@@ -406,6 +481,18 @@ end
 local function EnsureAchievementRows(owner, capacity)
     local list = owner.ui.achievementList174
     if not list then return end
+    -- AchievementRaidRuntime.lua builds six pre-native cards without progress
+    -- textures. A responsive seventh row was therefore the only row capable of
+    -- displaying a progress strip. Replace that mixed pool once instead of
+    -- trying to bolt native fields onto only the newly-created rows.
+    if not owner.ui.achievementRowsNative184 then
+        local legacy = owner.ui.achievementRows174 or {}
+        local index
+        for index = 1, table.getn(legacy) do if legacy[index] then legacy[index]:Hide() end end
+        owner.ui.achievementLegacyRows184 = legacy
+        owner.ui.achievementRows174 = {}
+        owner.ui.achievementRowsNative184 = true
+    end
     owner.ui.achievementRows174 = owner.ui.achievementRows174 or {}
     while table.getn(owner.ui.achievementRows174) < capacity do
         table.insert(owner.ui.achievementRows174, CreateAchievementRow(owner, list))
@@ -416,8 +503,43 @@ local function EnsureAchievementRows(owner, capacity)
     end
 end
 
+local function HumanAchievementProgressNative184(def, current, required)
+    if not def then return nil end
+    current = math.max(0, tonumber(current) or 0)
+    required = math.max(1, tonumber(required) or 1)
+    if def.progress == "groupSeconds" or def.progress == "longWatchSeconds" then
+        if required >= 3600 then
+            local currentHours = math.floor((current / 3600) * 10) / 10
+            local requiredHours = math.floor(required / 3600)
+            return tostring(currentHours) .. " / " .. tostring(requiredHours) .. " h"
+        end
+        return tostring(math.floor(current / 60)) .. " / " .. tostring(math.floor(required / 60)) .. " min"
+    elseif def.progress == "regularTableSeconds" or def.progress == "raidPresence" then
+        return tostring(math.floor(current / 60)) .. " / " .. tostring(math.floor(required / 60)) .. " min"
+    end
+    return nil
+end
+
+local function HideAchievementRowTooltipNative184(owner)
+    if not GameTooltip or not GameTooltip.GetOwner or not owner.ui or not owner.ui.achievementRows174 then return end
+    local ok, tooltipOwner = pcall(GameTooltip.GetOwner, GameTooltip)
+    if not ok or not tooltipOwner then return end
+    local index
+    for index = 1, table.getn(owner.ui.achievementRows174) do
+        if tooltipOwner == owner.ui.achievementRows174[index] then
+            GameTooltip:Hide()
+            return
+        end
+    end
+end
+
 RefreshAchievementsNative = function(owner, useCache)
     if not owner.ui or not owner.ui.achievementRows174 then return end
+    -- Recycled rows can move under the mouse while scrolling; a Vanilla
+    -- GameTooltip does not always receive OnLeave in that case and can display
+    -- the achievement that previously occupied the row. Clear only tooltips
+    -- owned by these recycled rows before rebinding them.
+    HideAchievementRowTooltipNative184(owner)
     local list
     if useCache and owner.ui.achievementFilteredCache180 then
         list = owner.ui.achievementFilteredCache180
@@ -472,21 +594,62 @@ RefreshAchievementsNative = function(owner, useCache)
                     row.status174:SetText(tostring(math.floor((current or 0) / 10000))
                         .. " / " .. tostring(math.floor((required or 0) / 10000)) .. "g")
                 else
-                    row.status174:SetText(required > 1
-                        and (tostring(math.floor(current)) .. " / " .. tostring(math.floor(required)))
-                        or "LOCKED")
+                    local humanProgress184 = HumanAchievementProgressNative184(def, current, required)
+                    if humanProgress184 then
+                        row.status174:SetText(humanProgress184)
+                    elseif (tonumber(current) or 0) > 0 then
+                        row.status174:SetText(tostring(math.floor(current)) .. " / " .. tostring(math.floor(required)))
+                    else
+                        row.status174:SetText("Not started")
+                    end
                 end
                 row.status174:SetTextColor(current > 0 and 1 or 0.72,
                     current > 0 and 0.78 or 0.72, current > 0 and 0.18 or 0.68)
                 row.date174:SetText("")
             end
+            if row.progressTrack184 and row.progressFill184 then
+                local progressCurrent = math.max(0, tonumber(current) or 0)
+                local progressRequired = math.max(0, tonumber(required) or 0)
+                if not complete and not secret and progressCurrent > 0 and progressRequired > 0 then
+                    local ratio184 = math.max(0, math.min(1, progressCurrent / progressRequired))
+                    row.otlProgressRatio184 = ratio184
+                    local trackWidth184 = math.max(1, tonumber(row.otlProgressWidth184) or 100)
+                    row.progressFill184:SetWidth(math.max(1, math.floor(trackWidth184 * ratio184)))
+                    row.progressTrack184:Show()
+                    row.progressFill184:Show()
+                else
+                    row.otlProgressRatio184 = nil
+                    row.progressTrack184:Hide()
+                    row.progressFill184:Hide()
+                end
+            end
+            local trackedR32 = not complete and owner.IsAchievementTracked183 and owner:IsAchievementTracked183(def.id)
+            if trackedR32 then
+                row.date174:SetText("MY GOAL")
+                row.date174:SetTextColor(C.orange[1], C.orange[2], C.orange[3])
+                if owner.ui.achievementFocus174 ~= def.id then
+                    row:SetBackdropBorderColor(C.orange[1], C.orange[2], C.orange[3], 0.82)
+                    row.otlBorder180 = { C.orange[1], C.orange[2], C.orange[3], 0.82 }
+                end
+            elseif not complete then
+                row.date174:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
+            end
             if owner.ui.achievementFocus174 == def.id then
                 row:SetBackdropBorderColor(0.30, 0.72, 1, 1)
                 row.otlBorder180 = { 0.30, 0.72, 1, 1 }
+                if row.selectedWash174 then row.selectedWash174:Show() end
+                if row.selectedRail174 then row.selectedRail174:Show() end
+            else
+                if row.selectedWash174 then row.selectedWash174:Hide() end
+                if row.selectedRail174 then row.selectedRail174:Hide() end
             end
             row:Show()
         else
             row.achievement174 = nil
+            if row.progressTrack184 then row.progressTrack184:Hide() end
+            if row.progressFill184 then row.progressFill184:Hide() end
+            if row.selectedWash174 then row.selectedWash174:Hide() end
+            if row.selectedRail174 then row.selectedRail174:Hide() end
             row:Hide()
         end
     end
@@ -499,6 +662,10 @@ RefreshAchievementsNative = function(owner, useCache)
     Hide(owner.ui.achievementPrev174)
     Hide(owner.ui.achievementNext174)
     SetScrollbar(owner.ui.achievementScrollbar180, offset, maximum)
+    -- Native scrolling recycles row frames. Refresh the optional Track control
+    -- after assigning achievement174 so a button can never remain attached to
+    -- the achievement that previously occupied this row.
+    if owner.RefreshAchievementTrackingButtons183 then owner:RefreshAchievementTrackingButtons183() end
 end
 
 local function LayoutAchievements(owner, page, width, height)
@@ -552,6 +719,26 @@ local function LayoutAchievements(owner, page, width, height)
             Move(row.description174, row, 58, -27, math.max(180, rowWidth - 200), 27)
             Move(row.status174, row, rowWidth - 132, -9, 122, 18)
             Move(row.date174, row, rowWidth - 132, -31, 122, 18)
+            -- Reserve the lower-right corner for SocialProfiles183's Track /
+            -- Untrack button. Progress used to occupy the same pixels and could
+            -- visually merge with the button after Overview/scroll row reuse.
+            -- Progress belongs to the text lane, not to the action corner.
+            -- Keeping a fixed gap before the right status/Track lane prevents
+            -- the thin bar from visually running into a recycled Track button.
+            local progressX184 = 58
+            local progressWidth184 = math.max(86, rowWidth - progressX184 - 174)
+            row.otlProgressWidth184 = progressWidth184
+            Move(row.progressTrack184, row, progressX184, -50, progressWidth184, 3)
+            local fillWidth184 = math.max(1, math.floor(progressWidth184 * (tonumber(row.otlProgressRatio184) or 0)))
+            Move(row.progressFill184, row, progressX184, -50, fillWidth184, 3)
+            if row.otlGoalButton183 then
+                row.otlGoalButton183:ClearAllPoints()
+                row.otlGoalButton183:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -8, 5)
+                row.otlGoalButton183:SetWidth(62) row.otlGoalButton183:SetHeight(20)
+                if row.otlGoalButton183.SetFrameLevel and row.GetFrameLevel then
+                    row.otlGoalButton183:SetFrameLevel(row:GetFrameLevel() + 12)
+                end
+            end
         else
             row:Hide()
         end
@@ -613,14 +800,35 @@ function OTLGM:LayoutChatRows180()
     local width = tonumber(list:GetWidth()) or 0
     local height = tonumber(list:GetHeight()) or 0
     local headerBottom = 30
-    local bottomInset = 8
-    local total, index, row = 0, 1, nil
+    local bottomInset = 3
+    local total, index, row, visibleCount = 0, 1, nil, 0
     for index = 1, table.getn(ui.chatRows or {}) do
         row = ui.chatRows[index]
-        if row and row:IsVisible() then total = total + (tonumber(row:GetHeight()) or 0) + 2 end
+        if row and row:IsVisible() then
+            total = total + (tonumber(row:GetHeight()) or 0)
+            visibleCount = visibleCount + 1
+        end
     end
-    local cursor = math.max(headerBottom, height - total - bottomInset)
+
     local visibleBottom = height - bottomInset
+    local available = math.max(0, visibleBottom - headerBottom)
+    local slack = math.max(0, available - total)
+    local channel = self.GetGuildChatChannel and self:GetGuildChatChannel() or "GUILD"
+    local offset = ui.chatOffsets and (tonumber(ui.chatOffsets[channel]) or 0) or 0
+    local messages = self.GetGuildChatMessages and self:GetGuildChatMessages(channel) or {}
+    local hasEarlierHistory = table.getn(messages or {}) > visibleCount
+
+    -- r28: short histories remain top-aligned.  Only the canonical Newest
+    -- window of a longer history consumes whole-row remainder at the top so
+    -- the last full row lands against the bottom inset.  Scroll-up keeps its
+    -- old top anchor and never jumps merely to hide pagination slack.
+    local anchorNewest = offset == 0 and hasEarlierHistory and visibleCount > 0
+    local cursor = headerBottom + (anchorNewest and slack or 0)
+    ui.chatContentHeight180 = total
+    ui.chatBottomSlackR28 = anchorNewest and math.max(0, visibleBottom - (cursor + total)) or slack
+    ui.chatBottomAnchoredR28 = anchorNewest and true or false
+    ui.chatHistoryBottomInsetR28 = bottomInset
+
     local laidOut = 0
     for index = 1, table.getn(ui.chatRows or {}) do
         row = ui.chatRows[index]
@@ -629,13 +837,13 @@ function OTLGM:LayoutChatRows180()
             row:SetWidth(math.max(1, width - 44))
             if row:IsVisible() then
                 local rowBottom = cursor + rowHeight
-                if cursor >= headerBottom and rowBottom <= visibleBottom then
+                if cursor >= headerBottom and rowBottom <= visibleBottom + 0.5 then
                     row:ClearAllPoints()
                     row:SetPoint("TOPLEFT", list, "TOPLEFT", 8, -cursor)
                     row.otlChatTop180 = cursor
                     row.otlChatBottom180 = rowBottom
                     laidOut = laidOut + 1
-                    cursor = rowBottom + 2
+                    cursor = rowBottom
                 else
                     row:Hide()
                     row.otlChatTop180 = nil
@@ -759,7 +967,7 @@ local function LayoutGuildBoard(owner, page, width, height, bodyY, bodyHeight)
     Move(panel, page, 0, -bodyY, width, bodyHeight)
     if not owner.ui.guildBoardEmpty180 then
         local state = UI:EmptyState(list, 420, 126, "No Guild Board posts",
-            "Create a compact community post below, or synchronize with online guild members.")
+            "Create a compact community post below, or use Check Updates to look for recent guild posts.")
         owner.ui.guildBoardEmpty180 = state
     end
     if empty then
@@ -829,12 +1037,16 @@ local function LayoutGuildBoard(owner, page, width, height, bodyY, bodyHeight)
         Move(owner.ui.guildBoardWhisper152, detail, 12, -actionY, 82, 28)
         Move(owner.ui.guildBoardShare152, detail, 102, -actionY, 104, 28)
         Move(owner.ui.guildBoardDelete152, detail, 214, -actionY, 78, 28)
-        Move(owner.ui.guildBoardSync152, detail, detailWidth - 80, -actionY, 68, 28)
+        Move(owner.ui.guildBoardSync152, detail, detailWidth - 110, -actionY, 98, 28)
         Hide(owner.ui.guildBoardInfo152)
     end
 end
 
 local function LayoutGuildChat(owner, page, width, height)
+    -- Deep links (notably mention notifications) can change the desired chat
+    -- channel before the lazily-built Guild Chat controls exist. Layout must not
+    -- dereference those controls until the page builder has completed.
+    if not owner or not owner.ui or not page or not owner.ui.chatChannelButtons or not owner.ui.chatList then return false end
     local previousViewportHeight = tonumber(owner.ui.chatViewportHeight180)
     local refs = page.otlSemanticRefs
     SuppressLegacy(refs)
@@ -872,7 +1084,7 @@ local function LayoutGuildChat(owner, page, width, height)
         owner:MarkLayoutDataRefresh180("guildchat")
     end
     if owner.ui.chatListHeader then Size(owner.ui.chatListHeader, chatWidth - 32, 20) end
-    if owner.ui.chatHeaderMessage then owner.ui.chatHeaderMessage:SetWidth(math.max(180, chatWidth - 246)) end
+    if owner.ui.chatHeaderMessage then owner.ui.chatHeaderMessage:SetWidth(math.max(172, chatWidth - 286)) end
     local available = bodyHeight - 38
     local total = 0
     local row
@@ -880,7 +1092,7 @@ local function LayoutGuildChat(owner, page, width, height)
         row = owner.ui.chatRows[index]
         Size(row, chatWidth - 44, row:GetHeight())
         if row:IsVisible() then total = total + row:GetHeight() + 2 end
-        if row.messageFrame then row.messageFrame:SetWidth(math.max(180, chatWidth - 254)) end
+        if row.messageFrame then row.messageFrame:SetWidth(math.max(172, chatWidth - 290)) end
     end
     owner:LayoutChatRows180()
     Move(owner.ui.chatSlider, owner.ui.chatList, chatWidth - 25, -28,
@@ -923,7 +1135,8 @@ local function LayoutGuildChat(owner, page, width, height)
     page.otlChatComposerGap180 = gap
     page.otlChatBottomInset180 = bottomInset
     page.otlChatComposerTop180 = composerTop
-    page.otlChatBottomAligned180 = total < available
+    page.otlChatBottomAligned180 = false
+    page.otlChatTopAligned180 = true
     page.otlNativeLayout = true
 end
 
@@ -1134,12 +1347,12 @@ local function EnsureRaidTeamsControls180(owner, root)
     ui.raidTeamArchive180 = UI:Button(panel, "Archive", 78, 28, function()
         local team = owner:GetRaidTeam180(ui.raidTeamSelectedId180) if not team then return end
         owner:ShowConfirm(team.status == "ARCHIVED" and "Restore Raid Team" or "Archive Raid Team",
-            team.status == "ARCHIVED" and "Restore this Raid Team for future events?" or "Archive this Raid Team? Existing event snapshots will remain unchanged.",
+            team.status == "ARCHIVED" and "Restore this Raid Team for future events?" or "Archive this Raid Team? Existing event rosters will remain unchanged.",
             team.status == "ARCHIVED" and "Restore" or "Archive", function() owner:ArchiveRaidTeam180(team.id, team.status ~= "ARCHIVED") owner:RefreshRaidTeamsPanel180() end)
     end, "utility")
     ui.raidTeamDelete180 = UI:Button(panel, "Delete", 72, 28, function()
         local team = owner:GetRaidTeam180(ui.raidTeamSelectedId180) if not team then return end
-        owner:ShowConfirm("Delete Raid Team", "Delete " .. (team.name or "this Raid Team") .. "? Published event snapshots will not be deleted.", "Delete", function() owner:DeleteRaidTeam180(team.id) ui.raidTeamSelectedId180=nil owner:RefreshRaidTeamsPanel180() end)
+        owner:ShowConfirm("Delete Raid Team", "Delete " .. (team.name or "this Raid Team") .. "? Existing event rosters will not be deleted.", "Delete", function() owner:DeleteRaidTeam180(team.id) ui.raidTeamSelectedId180=nil owner:RefreshRaidTeamsPanel180() end)
     end, "danger")
 
     ui.raidTeamListPanel180 = UI:Card(panel, 300, 330, "Raid Teams")
@@ -1253,13 +1466,13 @@ local function EnsureRaidTeamsControls180(owner, root)
     local raidEditor = ui.raidEditor156
     if raidEditor then
         raidEditor:SetHeight(610)
-        ui.raidRosterLabel180 = UI.Text(raidEditor, "EVENT ROSTER SNAPSHOT", "GameFontNormalSmall", "LEFT")
+        ui.raidRosterLabel180 = UI.Text(raidEditor, "EVENT ROSTER", "GameFontNormalSmall", "LEFT")
         ui.raidRosterModeCustom180 = UI:Button(raidEditor, "Custom / Keep", 122, 28, function() ui.raidRosterMode180="CUSTOM" ui.raidRosterSourceId180=nil owner:RefreshRaidRosterEditor180() end, "filter")
         ui.raidRosterModeTeam180 = UI:Button(raidEditor, "Use Raid Team", 122, 28, function() owner:OpenRaidRosterSourceSelector180("TEAM") end, "filter")
         ui.raidRosterModeClone180 = UI:Button(raidEditor, "Clone Previous", 122, 28, function() owner:OpenRaidRosterSourceSelector180("CLONE_PREVIOUS") end, "filter")
         ui.raidRosterSourceButton180 = UI:Button(raidEditor, "Custom roster", 382, 28, function() owner:CycleRaidRosterSource180() end, "utility")
         ui.raidRosterCustomEdit180 = UI:Button(raidEditor, "Edit Custom", 122, 28, function() owner:OpenCustomRaidRosterPicker180() end, "utility")
-        ui.raidRosterPreview180 = UI.Text(raidEditor, "Snapshot preview", "GameFontNormalSmall", "LEFT")
+        ui.raidRosterPreview180 = UI.Text(raidEditor, "Event roster preview", "GameFontNormalSmall", "LEFT")
         ui.raidRosterHelp180 = UI.Text(raidEditor, "The roster is copied into this event. Future team edits never rewrite the published event automatically.", "GameFontNormalSmall", "LEFT") ui.raidRosterHelp180:SetTextColor(C.grey[1],C.grey[2],C.grey[3])
     end
 
@@ -1270,7 +1483,7 @@ local function EnsureRaidTeamsControls180(owner, root)
             local event=owner:GetRaidEvent180(ui.raidSelected156) if not event or not event.teamId180 then return end
             local team=owner:GetRaidTeam180(event.teamId180) if not team then return end
             local total,assigned,reserve,guest=owner:GetRaidRosterSummary180((owner:BuildRaidRosterSnapshotFromTeam180(team.id)))
-            owner:ShowConfirm("Refresh Event Roster", "Replace this event snapshot with the current "..(team.name or "Raid Team").." roster ("..tostring(total).." members)? This does not modify the team or other events.", "Refresh", function() owner:RefreshRaidEventRosterFromTeam180(event.id) owner:RefreshRaidPlanner156() end)
+            owner:ShowConfirm("Refresh Event Roster", "Replace this event roster with the current "..(team.name or "Raid Team").." roster ("..tostring(total).." members)? This does not modify the team or other events.", "Refresh", function() owner:RefreshRaidEventRosterFromTeam180(event.id) owner:RefreshRaidPlanner156() end)
         end, "utility")
     end
 
@@ -1341,7 +1554,6 @@ function OTLGM:OpenGroupFinderComposer180(record)
     form:SetWidth(304)
     form:SetHeight(438)
     if self.ShowShellModal then self:ShowShellModal(form, false) else form:Show() end
-    if self.ui.pveRequestActivityEdit and self.ui.pveRequestActivityEdit.SetFocus then self.ui.pveRequestActivityEdit:SetFocus() end
     return true
 end
 
@@ -1429,14 +1641,14 @@ local function EnsurePveNativeControls(owner)
     end
     if ui.pveRaidsPanel180 and not ui.pveRaidEmpty180 then
         ui.pveRaidEmpty180 = UI:EmptyState(ui.pveRaidsPanel180, 520, 150, "No raids in this view",
-            "Create a raid event or synchronize with online guild members.")
+            "Create a raid event, or use Check Updates to look for recently shared raids.")
         ui.pveRaidEmpty180:Hide()
     end
     if ui.raidPlanner156 then EnsureRaidTeamsControls180(owner, ui.raidPlanner156) end
     if owner.EnsureRaidTeamPack2Controls180 and ui.raidTeamsPanel180 then owner:EnsureRaidTeamPack2Controls180() end
     if ui.pveGroupsPanel180 and not ui.pveGroupEmpty180 then
         ui.pveGroupEmpty180 = UI:EmptyState(ui.pveGroupsPanel180, 520, 150, "No open groups",
-            "Create a group when you are ready to lead, or synchronize and check again.")
+            "Create a group when you are ready to lead, or use Check Updates to look for open guild groups.")
         ui.pveGroupEmpty180:Hide()
     end
     if ui.pveGroupsPanel180 then
@@ -2184,71 +2396,137 @@ local function LayoutTreasury(owner, page, width, height)
     Move(ui.ledgerButtonR5, page, width - 280, 0, 100, 26)
     Move(ui.contributionButton176, page, width - 174, 0, 174, 26)
     Move(ui.banner, page, 0, -34, width, 86)
-    Move(ui.copyMorrow, ui.banner, width - 120, -10, 108, 28)
+    Move(ui.copyLucks, ui.banner, width - 120, -10, 108, 28)
     Move(ui.sync, ui.banner, width - 120, -46, 108, 28)
     if ui.contributionDetail then ui.contributionDetail:SetWidth(math.max(260, width - 210)) end
     if ui.bannerStatus then ui.bannerStatus:SetWidth(math.max(260, width - 210)) end
+
     local bodyY = 130
     local bodyHeight = math.max(300, height - bodyY)
-    local listWidth = math.max(410, math.floor(width * 0.61))
+    local listWidth = math.max(430, math.floor(width * 0.61))
     Move(ui.list, page, 0, -bodyY, listWidth, bodyHeight)
+    Move(ui.detail, page, listWidth + 10, -bodyY, width - listWidth - 10, bodyHeight)
     EnsureTreasuryGoalScrollbar180(owner)
-    local capacity = math.max(4, math.min(ui.rowPoolCount180 or table.getn(ui.rows or {}), math.floor((bodyHeight - 78) / 62)))
-    ui.visibleRows180 = capacity
-    Move(ui.detail, page, listWidth + 8, -bodyY, width - listWidth - 8, bodyHeight)
     Move(ui.newGoal, ui.list, listWidth - 132, -8, 112, 26)
+
+    -- Funding goals are cards, not table rows. The old 56px contract forced the
+    -- title, meta, amount, two action buttons and progress bar into nearly the
+    -- same line. Give every card a dedicated title lane, metadata lane and bar.
+    local rowHeight, rowPitch = 68, 76
+    local capacity = math.max(3, math.min(ui.rowPoolCount180 or table.getn(ui.rows or {}), math.floor((bodyHeight - 82) / rowPitch)))
+    ui.visibleRows180 = capacity
     local index, row
     for index = 1, table.getn(ui.rows or {}) do
         row = ui.rows[index]
+        local rowWidth = math.max(392, listWidth - 38)
         if index <= capacity then
-            Move(row, ui.list, 10, -42 - ((index - 1) * 62), listWidth - 38, 56)
+            Move(row, ui.list, 10, -44 - ((index - 1) * rowPitch), rowWidth, rowHeight)
         else
             row:Hide()
         end
-        local rowWidth = math.max(372, listWidth - 38)
+        if row.goalIconH1 then Move(row.goalIconH1, row, 10, -10, 24, 24) end
         if row.name then
             row.name:ClearAllPoints()
-            row.name:SetPoint("TOPLEFT", row, "TOPLEFT", 12, -8)
-            row.name:SetWidth(math.max(150, rowWidth - 178))
-        end
-        if row.amount then
-            row.amount:ClearAllPoints()
-            row.amount:SetPoint("TOPRIGHT", row, "TOPRIGHT", -12, -31)
-            row.amount:SetWidth(math.max(116, math.min(190, rowWidth - 250)))
+            row.name:SetPoint("TOPLEFT", row, "TOPLEFT", 42, -8)
+            row.name:SetWidth(math.max(150, rowWidth - 190))
         end
         if row.meta then
             row.meta:ClearAllPoints()
-            row.meta:SetPoint("TOPLEFT", row, "TOPLEFT", 12, -31)
-            row.meta:SetWidth(math.max(140, rowWidth - 246))
+            row.meta:SetPoint("TOPLEFT", row, "TOPLEFT", 42, -34)
+            row.meta:SetWidth(math.max(150, rowWidth - 220))
         end
-        local progressWidth = math.max(1, rowWidth - 20)
-        if row.progressBack then row.progressBack:SetWidth(progressWidth) end
+        if row.amount then
+            row.amount:ClearAllPoints()
+            row.amount:SetPoint("TOPRIGHT", row, "TOPRIGHT", -12, -34)
+            row.amount:SetWidth(math.max(120, math.min(170, rowWidth - 260)))
+        end
+        if row.ledgerButtonH1 then Move(row.ledgerButtonH1, row, rowWidth - 132, -6, 58, 24) end
+        if row.addButtonH1 then Move(row.addButtonH1, row, rowWidth - 68, -6, 58, 24) end
+        local progressWidth = math.max(1, rowWidth - 54)
+        row.otlTreasuryProgressWidth184 = progressWidth
+        if row.progressBack then
+            row.progressBack:ClearAllPoints()
+            row.progressBack:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 42, 7)
+            row.progressBack:SetWidth(progressWidth)
+            row.progressBack:SetHeight(4)
+        end
         if row.progress then
+            row.progress:ClearAllPoints()
+            row.progress:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 42, 7)
+            row.progress:SetHeight(4)
             local goal = row.goal170
             local ratio = goal and (tonumber(goal.target) or 0) > 0
                 and math.min(1, math.max(0, (tonumber(goal.current) or 0) / tonumber(goal.target))) or 0
             row.progress:SetWidth(math.max(1, math.floor(progressWidth * ratio)))
         end
-        if row.ledgerButtonH1 then Move(row.ledgerButtonH1, row, rowWidth - 124, -6, 58, 23) end
-        if row.addButtonH1 then Move(row.addButtonH1, row, rowWidth - 60, -6, 58, 23) end
     end
-    if ui.status then Move(ui.status, ui.list, 12, -(bodyHeight - 30), listWidth - 42, 20) end
+    if ui.status then Move(ui.status, ui.list, 12, -(bodyHeight - 28), listWidth - 42, 20) end
     Hide(ui.prev)
     Hide(ui.next)
     local goals = owner:GetTreasuryGoals170() or {}
     local maximum = math.max(0, table.getn(goals) - capacity)
     ui.goalMaximumOffset180 = maximum
     ui.offset = math.max(0, math.min(maximum, tonumber(ui.offset) or 0))
-    Move(ui.goalScrollbar180, ui.list, listWidth - 19, -42, 14, math.max(120, (capacity * 62) - 6))
+    Move(ui.goalScrollbar180, ui.list, listWidth - 19, -44, 14, math.max(120, (capacity * rowPitch) - 8))
     if ui.goalScrollbar180.SetScrollMetrics180 then
         ui.goalScrollbar180:SetScrollMetrics180(table.getn(goals), capacity, ui.offset)
     else
         SetScrollbar(ui.goalScrollbar180, ui.offset, maximum)
     end
+
     local detailWidth = ui.detail:GetWidth()
     if ui.serverTitle then ui.serverTitle:SetWidth(detailWidth - 24) end
     if ui.serverState then ui.serverState:SetWidth(detailWidth - 24) end
     if ui.detect then Size(ui.detect, detailWidth - 24, 26) end
+    -- Top Contributors keeps the existing data/interaction model but receives a
+    -- real full-width subtitle lane. This prevents long goal names from wrapping
+    -- into the donor rows while Full Ledger occupies the header's right side.
+    if ui.contributorSummaryH1 then
+        local card = ui.contributorSummaryH1
+        local cardWidth = math.max(220, detailWidth - 20)
+        local donorCapacity = bodyHeight >= 430 and 5 or 3
+        local previousDonorCapacity = ui.contributorVisibleRowsR25
+        ui.contributorVisibleRowsR25 = donorCapacity
+        if previousDonorCapacity and previousDonorCapacity ~= donorCapacity and owner.MarkLayoutDataRefresh180 then
+            owner:MarkLayoutDataRefresh180("treasury")
+        end
+        local cardHeight = donorCapacity == 5 and 150 or 116
+        Move(card, ui.detail, 10, -7, cardWidth, cardHeight)
+        Move(ui.contributorIcon184, card, 8, -7, 17, 17)
+        Move(ui.contributorTitleH1, card, 31, -8, math.max(90, cardWidth - 142), 18)
+        Move(ui.fullLedgerH1, card, cardWidth - 100, -6, 90, 24)
+        Move(ui.contributorGoalH1, card, 10, -31, cardWidth - 20, 18)
+        local donorRow
+        for index = 1, table.getn(ui.contributorRowsH1 or {}) do
+            donorRow = ui.contributorRowsH1[index]
+            Move(donorRow, card, 8, -48 - ((index - 1) * 17), cardWidth - 16, 16)
+            Move(donorRow.rank, donorRow, 0, -1, 18, 16)
+            Move(donorRow.name, donorRow, 21, -1, math.max(70, cardWidth - 126), 16)
+            Move(donorRow.amount, donorRow, cardWidth - 96, -1, 78, 16)
+            if index > donorCapacity then donorRow:Hide() end
+        end
+        Move(ui.contributorStatusH1, card, 8, -(donorCapacity == 5 and 133 or 99), cardWidth - 16, 16)
+
+        -- Keep editor and change history visually separate below the donor card.
+        -- Their data model/revision protection is unchanged; only hierarchy and
+        -- spacing are adjusted so Recent Changes cannot read like editor text.
+        local editorTop = cardHeight + 18
+        local half = math.max(88, math.floor((cardWidth - 36) / 2))
+        if ui.editorTitle then Move(ui.editorTitle, ui.detail, 12, -editorTop, cardWidth - 24, 20) end
+        if ui.nameLabelR25 then Move(ui.nameLabelR25, ui.detail, 12, -(editorTop + 28), 54, 18) end
+        if ui.nameEdit then Move(ui.nameEdit, ui.detail, 72, -(editorTop + 22), math.max(120, cardWidth - 84), 26) end
+        if ui.currentLabelR25 then Move(ui.currentLabelR25, ui.detail, 12, -(editorTop + 59), half, 18) end
+        if ui.targetLabelR25 then Move(ui.targetLabelR25, ui.detail, 24 + half, -(editorTop + 59), half, 18) end
+        if ui.currentEdit then Move(ui.currentEdit, ui.detail, 12, -(editorTop + 75), half, 26) end
+        if ui.targetEdit then Move(ui.targetEdit, ui.detail, 24 + half, -(editorTop + 75), half, 26) end
+        if ui.save then Move(ui.save, ui.detail, 12, -(editorTop + 111), math.min(152, cardWidth - 104), 28) end
+        if ui.delete then Move(ui.delete, ui.detail, cardWidth - 88, -(editorTop + 111), 76, 28) end
+        local historyTop = editorTop + 151
+        if ui.recentChangesTitleR25 then Move(ui.recentChangesTitleR25, ui.detail, 12, -historyTop, cardWidth - 24, 18) end
+        for index = 1, table.getn(ui.history or {}) do
+            Move(ui.history[index], ui.detail, 12, -(historyTop + 22 + ((index - 1) * 22)), cardWidth - 24, 20)
+        end
+    end
     page.otlNativeLayout = true
 end
 
@@ -2601,6 +2879,55 @@ local function LayoutOverview(owner, page, width, height)
     page.otlNativeLayout = true
 end
 
+local function SendGuildWelcomeR32(owner)
+    if not SendChatMessage then
+        if owner.ShowToast then owner:ShowToast("Guild chat is unavailable on this client.", "error") end
+        return false
+    end
+    local ok, problem = pcall(SendChatMessage, "Welcome!", "GUILD")
+    if not ok then
+        if owner.ShowToast then owner:ShowToast("Welcome message could not be sent: " .. tostring(problem or "client rejected it"), "error") end
+        return false
+    end
+    if owner.ShowToast then owner:ShowToast("Welcome! sent to guild chat.", "success") end
+    return true
+end
+
+local function EnsureRecruitmentR32Controls(owner, page)
+    if not owner.ui.recruitmentWelcomeR32 then
+        owner.ui.recruitmentWelcomeR32 = UI:Button(page, "Welcome!", 86, 28, function() SendGuildWelcomeR32(owner) end, "utility")
+        owner.ui.recruitmentWelcomeR32.otlTooltipTitle = "Quick guild welcome"
+        owner.ui.recruitmentWelcomeR32.otlTooltip = "Sends exactly: Welcome! to guild chat. It does not affect recruitment cooldowns or the Send Next message order."
+    end
+    if not owner.ui.recruitmentHelpR32 and UI.HelpIcon then
+        owner.ui.recruitmentHelpR32 = UI:ContextHelpIcon(page, "RECRUITMENT")
+    end
+end
+
+local function EnsureRecruitmentComposerPanelR25(owner, page)
+    local ui = owner.ui
+    if ui.recruitmentComposerPanelR25 then return ui.recruitmentComposerPanelR25 end
+    local panel = UI:Card(page, 680, 210, "Recruitment Composer")
+    panel:SetFrameLevel(page:GetFrameLevel())
+    panel:EnableMouse(false)
+    -- Keep the card as a border/title owner but draw its fill on BACKGROUND so
+    -- legacy page FontStrings (counter/status labels) remain above it.
+    if panel.SetBackdropColor then panel:SetBackdropColor(0, 0, 0, 0) end
+    panel.backingR25 = panel:CreateTexture(nil, "BACKGROUND")
+    panel.backingR25:SetPoint("TOPLEFT", panel, "TOPLEFT", 4, -4)
+    panel.backingR25:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -4, 4)
+    panel.backingR25:SetTexture(C.card[1], C.card[2], C.card[3], 0.72)
+    panel.helpR25 = UI.Text(panel, "Edit the message, choose where it should go, then open it in chat or send it directly.", "GameFontNormalSmall", "LEFT")
+    panel.helpR25:SetPoint("TOPLEFT", panel, "TOPLEFT", 16, -30)
+    panel.helpR25:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
+    panel.helpR25:SetWidth(620)
+    panel.separatorR25 = panel:CreateTexture(nil, "ARTWORK")
+    panel.separatorR25:SetTexture(C.goldDark[1], C.goldDark[2], C.goldDark[3], 0.52)
+    panel.separatorR25:SetHeight(1)
+    ui.recruitmentComposerPanelR25 = panel
+    return panel
+end
+
 local function LayoutRecruitment(owner, page, width, height)
     SuppressLegacy(page.otlSemanticRefs)
     local ui = owner.ui
@@ -2610,9 +2937,12 @@ local function LayoutRecruitment(owner, page, width, height)
     local medium = height >= 540 and height < 660
     local statusHeight = compact and 48 or (medium and 54 or 60)
     local rotationY = compact and 54 or (medium and 62 or 70)
-    local rotationGap = compact and 4 or (medium and 5 or 6)
-    local rotationHeight = compact and 30 or (medium and 36 or 40)
-    local order = { "BASE1", "BASE2", "GUILDINFO", "ADDONINFO" }
+    -- Six fixed presets now include two alternating raid-recruitment options. Keep
+    -- compact/medium rows intentionally tight so the editor and action footer do
+    -- not get pushed outside ContentHost at the minimum supported size.
+    local rotationGap = compact and 2 or (medium and 3 or 6)
+    local rotationHeight = compact and 28 or (medium and 30 or 40)
+    local order = { "BASE1", "RAID1", "BASE2", "RAID2", "GUILDINFO", "ADDONINFO" }
     -- BuildRecruitmentPage's status card was authored at 310px. Letting the
     -- responsive layout shrink it to 276 clipped the channel control and the
     -- elapsed/meta text at Compact scale. Keep the known-safe width; the left
@@ -2668,7 +2998,7 @@ local function LayoutRecruitment(owner, page, width, height)
             end
         end
     end
-    local slotsTitleY = rotationY + (4 * (rotationHeight + rotationGap)) + 2
+    local slotsTitleY = rotationY + (table.getn(order) * (rotationHeight + rotationGap)) + 2
     Move(ui.recruitmentCustomTitle180, page, margin, -slotsTitleY, 220, 20)
     local slotY = slotsTitleY + 24
     local slotWidth = math.floor((contentWidth - 24) / 3)
@@ -2715,6 +3045,145 @@ local function LayoutRecruitment(owner, page, width, height)
     page.otlNativeLayout = true
 end
 
+local PreviousLayoutRecruitment184 = LayoutRecruitment
+LayoutRecruitment = function(owner, page, width, height)
+    EnsureRecruitmentR32Controls(owner, page)
+    -- width/height are the usable ContentHost dimensions, not the whole addon
+    -- window. The old 900x620 gate kept the wide composition disabled at normal
+    -- live sizes even though it fits safely much earlier.
+    if width < 720 or height < 560 then
+        PreviousLayoutRecruitment184(owner, page, width, height)
+        local ui = owner.ui
+        local composer = EnsureRecruitmentComposerPanelR25(owner, page)
+        local flow = page.otlRecruitmentFlow180 or {}
+        local top = math.max(290, tonumber(flow.editorTop) and (tonumber(flow.editorTop) - 30) or 300)
+        local bottom = math.min(height - 4, tonumber(flow.footerTop) and (tonumber(flow.footerTop) + 26) or height - 4)
+        Move(composer, page, 6, -top, math.max(320, width - 12), math.max(180, bottom - top))
+        if composer.helpR25 then composer.helpR25:SetWidth(math.max(240, width - 44)) end
+        composer:Show()
+        if owner.ui.recruitmentHelpR32 then Move(owner.ui.recruitmentHelpR32, page, math.max(152, width - 28), -4, 22, 22) end
+        if owner.ui.recruitmentWelcomeR32 then
+            local flowR32 = page.otlRecruitmentFlow180 or {}
+            local yR32 = tonumber(flowR32.footerTop) or (height - 28)
+            Move(owner.ui.recruitmentWelcomeR32, page, math.max(166, width - 292), -yR32, 86, 28)
+        end
+        return
+    end
+    SuppressLegacy(page.otlSemanticRefs)
+    local ui = owner.ui
+    local margin, gap = 10, 12
+    local contentWidth = width - (margin * 2)
+    local leftWidth = math.floor(contentWidth * 0.60)
+    local rightWidth = contentWidth - leftWidth - gap
+    local rightX = margin + leftWidth + gap
+    local order = { "BASE1", "RAID1", "BASE2", "RAID2", "GUILDINFO", "ADDONINFO" }
+
+    Move(ui.recruitmentRotationTitle180, page, margin, -8, math.max(150, leftWidth - 196), 20)
+    if ui.recruitmentHelpR32 then Move(ui.recruitmentHelpR32, page, margin + leftWidth - 178, -6, 22, 22) end
+    Move(ui.recentWhisperButton176, page, margin + leftWidth - 150, -4, 150, 28)
+    UI:SetText(ui.recentWhisperButton176, "Recent Contacts")
+    Move(ui.worldRecruitmentCard, page, rightX, -2, rightWidth, 76)
+    if ui.worldRecruitmentCard then
+        local card = ui.worldRecruitmentCard
+        if card.meta then card.meta:Show() end
+        if card.autoText then card.autoText:Show() end
+        if card.detail then card.detail:SetWidth(math.max(110, rightWidth - 156)) end
+    end
+
+    local rowY, rowHeight, rowGap = 38, 38, 4
+    local index
+    for index = 1, table.getn(order) do
+        local row = ui.recruitmentPresetRows180 and ui.recruitmentPresetRows180[order[index]]
+        if not row then
+            local select = ui.recruitPresetButtons and ui.recruitPresetButtons[order[index]]
+            row = select and select:GetParent() or nil
+        end
+        if row then
+            Move(row, page, margin, -(rowY + ((index - 1) * (rowHeight + rowGap))), leftWidth, rowHeight)
+            local select = ui.recruitPresetButtons and ui.recruitPresetButtons[order[index]]
+            local badge = ui.recruitPresetBadges170 and ui.recruitPresetBadges170[order[index]]
+            local send = ui.presetSendButtons and ui.presetSendButtons[order[index]]
+            local edit = ui.presetEditButtons180 and ui.presetEditButtons180[order[index]]
+            Move(select, row, 8, -5, 96, 28)
+            Move(send, row, leftWidth - 126, -5, 116, 28)
+            if edit then Move(edit, row, leftWidth - 210, -5, 76, 28) end
+            if badge then Move(badge, row, 112, -3, math.max(100, leftWidth - 360), 14) end
+            local preview = ui.recruitPresetPreviews170 and ui.recruitPresetPreviews170[order[index]]
+            if preview then
+                local previewWidth = math.max(170, leftWidth - (edit and 344 or 252))
+                Move(preview, row, 112, -20, previewWidth, 14)
+                preview.otlPreviewChars180 = math.max(32, math.min(80, math.floor(previewWidth / 5.2)))
+                if owner.GetRecruitmentPreset170 and owner.GetRecruitmentPreview then
+                    local preset = owner:GetRecruitmentPreset170(order[index])
+                    if preset then preview:SetText(owner:GetRecruitmentPreview(preset.text, preview.otlPreviewChars180)) end
+                end
+            end
+        end
+    end
+
+    Move(ui.recruitmentCustomTitle180, page, rightX, -86, rightWidth, 20)
+    for index = 1, 3 do
+        Move(ui.customSlotButtons["CUSTOM" .. tostring(index)], page, rightX, -110 - ((index - 1) * 48), rightWidth, 42)
+    end
+
+    -- Keep rotation-replacement controls fully inside the left column and below
+    -- the last right-hand saved slot. The previous wide draft let button B cross
+    -- the column boundary and touch Custom Slot 3 at the smallest wide height.
+    local stateY = 300
+    local leftRight = margin + leftWidth
+    Move(ui.recruitmentState, page, margin, -stateY, math.max(180, leftWidth - 238), 20)
+    Move(ui.recruitRotationLabel170, page, leftRight - 224, -stateY, 132, 20)
+    Move(ui.saveCopyButtons[1], page, leftRight - 82, -(stateY - 4), 34, 25)
+    Move(ui.saveCopyButtons[2], page, leftRight - 40, -(stateY - 4), 34, 25)
+
+    -- r25: the lower half is one bounded Composer panel rather than a legacy
+    -- edit box stretched into whatever vertical space remains. This preserves
+    -- the successful two-column upper composition while giving Working Copy,
+    -- custom-slot controls, destination and send actions one visual hierarchy.
+    local composer = EnsureRecruitmentComposerPanelR25(owner, page)
+    local composerY = 326
+    local composerHeight = math.min(248, math.max(206, height - composerY - 10))
+    Move(composer, page, margin, -composerY, contentWidth, composerHeight)
+    if composer.helpR25 then composer.helpR25:SetWidth(math.max(240, contentWidth - 32)) end
+    if composer.separatorR25 then
+        composer.separatorR25:ClearAllPoints()
+        composer.separatorR25:SetPoint("BOTTOMLEFT", composer, "BOTTOMLEFT", 12, 48)
+        composer.separatorR25:SetPoint("BOTTOMRIGHT", composer, "BOTTOMRIGHT", -12, 48)
+    end
+
+    Move(ui.recruitmentComposerLabel180, page, margin + 16, -(composerY + 50), 120, 20)
+    local editorY = composerY + 68
+    local footerBand = 82
+    local editorHeight = math.min(126, math.max(72, composerHeight - 68 - footerBand))
+    Move(ui.recruitmentEdit, page, margin + 14, -editorY, contentWidth - 28, editorHeight)
+    Move(ui.recruitmentCount, page, margin + contentWidth - 100, -(editorY + editorHeight - 22), 82, 20)
+
+    local slotY = editorY + editorHeight + 8
+    Move(ui.recruitmentSlotLabel180, page, margin + 16, -(slotY + 7), 108, 20)
+    Move(ui.customNameEdit, page, margin + 126, -slotY, 160, 28)
+    Move(ui.renameCustomButton, page, margin + 294, -slotY, 72, 28)
+    Move(ui.saveSlotButton, page, margin + 374, -slotY, 82, 28)
+    Move(ui.clearSlotButton, page, margin + 464, -slotY, 58, 28)
+
+    local destinationX = margin + contentWidth - 138
+    Move(ui.customWorldButton, page, destinationX, -slotY, 62, 28)
+    Move(ui.customGuildButton, page, destinationX + 68, -slotY, 62, 28)
+    local footerY = composerY + composerHeight - 40
+    Move(ui.sendNextButton, page, margin + 14, -footerY, 150, 28)
+    Move(ui.recruitReadyText, page, margin + 174, -(footerY + 6), math.max(190, contentWidth - 390), 20)
+    Move(ui.workingTargetText, page, margin + 174, -(footerY + 24), math.max(190, contentWidth - 390), 18)
+    Move(ui.recruitmentWelcomeR32, page, margin + contentWidth - 292, -footerY, 86, 28)
+    Move(ui.openRecruitmentChatButton180, page, margin + contentWidth - 198, -footerY, 112, 28)
+    Move(ui.sendCurrentButton, page, margin + contentWidth - 78, -footerY, 78, 28)
+
+    page.otlRecruitmentFlow180 = {
+        status = 76, rotation = rowY, slots = 110, editorTop = editorY, editorHeight = editorHeight,
+        actions = slotY, actionBottom = composerY + composerHeight, footerTop = footerY,
+        compact = false, medium = false, wide184 = true, composerR25 = true,
+    }
+    page.otlNativeLayout = true
+end
+
 local function RecentContactShortName180(name)
     return string.gsub(tostring(name or ""), "%-.*$", "")
 end
@@ -2724,11 +3193,48 @@ local function RecentContactMember180(owner, name)
     return owner.GetMember and owner:GetMember(RecentContactShortName180(name)) or nil
 end
 
+function OTLGM:RemoveRecentRecruitmentContact180(name)
+    self.runtime = self.runtime or {}
+    local shortName = RecentContactShortName180(name)
+    if shortName == "" then return false end
+    local key = string.lower(shortName)
+    local source = self.runtime.recentWhispers176 or {}
+    local filtered = {}
+    local removed = false
+    local index, entry
+    for index = 1, table.getn(source) do
+        entry = source[index]
+        if entry and string.lower(RecentContactShortName180(entry.name)) == key then
+            removed = true
+        elseif entry then
+            table.insert(filtered, entry)
+        end
+    end
+    self.runtime.recentWhispers176 = filtered
+    self.runtime.dismissedRecruitmentContacts180 = self.runtime.dismissedRecruitmentContacts180 or {}
+    self.runtime.dismissedRecruitmentContacts180[key] = self:Now()
+    if self.ui then
+        local maximum = math.max(0, table.getn(filtered) - 1)
+        self.ui.recentRecruitmentContactsOffset180 = math.max(0, math.min(maximum, tonumber(self.ui.recentRecruitmentContactsOffset180) or 0))
+    end
+    if self.RefreshRecentWhispers180 then self:RefreshRecentWhispers180()
+    elseif self.RefreshRecentWhispers176 then self:RefreshRecentWhispers176() end
+    if self.MarkQuickDockDirty182 then self:MarkQuickDockDirty182("recruitment") end
+    if removed and self.SetStatus then self:SetStatus(shortName .. " removed from recent recruitment contacts.") end
+    return removed
+end
+
 function OTLGM:PruneRecentRecruitmentContacts180()
     self.runtime = self.runtime or {}
+    local dismissed = self.runtime.dismissedRecruitmentContacts180 or {}
+    local dismissedKey, dismissedAt
+    local now = self:Now()
+    for dismissedKey, dismissedAt in pairs(dismissed) do
+        if now - (tonumber(dismissedAt) or 0) > 7200 then dismissed[dismissedKey] = nil end
+    end
+    self.runtime.dismissedRecruitmentContacts180 = dismissed
     local source = self.runtime.recentWhispers176 or {}
     local filtered, index, entry = {}, 1, nil
-    local now = self:Now()
     for index = 1, table.getn(source) do
         entry = source[index]
         if entry and entry.name and now - (tonumber(entry.ts) or now) <= 7200 and table.getn(filtered) < 20 then
@@ -2760,7 +3266,7 @@ function OTLGM:SendRecentRecruitmentWelcome180(name)
     if not entry then return false, "Recent contact is no longer available." end
     local now = self:Now()
     if entry.welcomedAt176 and now - (tonumber(entry.welcomedAt176) or 0) < 10 then return false, "Welcome was just sent." end
-    if type(SendChatMessage) ~= "function" then return false, "Guild chat API is unavailable." end
+    if type(SendChatMessage) ~= "function" then return false, "Guild chat is not available right now." end
     local message = "Welcome [" .. shortName .. "] !"
     local ok, problem = pcall(SendChatMessage, message, "GUILD")
     if not ok then return false, tostring(problem or "Welcome could not be sent.") end
@@ -2778,7 +3284,7 @@ local function EnsureRecentWhispersDrawer180(owner)
     drawer.title = UI.Text(drawer, "Recent Recruitment Contacts", "GameFontNormalLarge", "LEFT")
     drawer.title:SetPoint("TOPLEFT", drawer, "TOPLEFT", 18, -18)
     drawer.title:SetWidth(410)
-    drawer.subtitle = UI.Text(drawer, "Recent candidates and joined recruits from this session. Private whisper text is never saved.", "GameFontNormalSmall", "LEFT")
+    drawer.subtitle = UI.Text(drawer, "Recent candidates and joined recruits from this session. Use X to dismiss unrelated whispers; private text is never saved.", "GameFontNormalSmall", "LEFT")
     drawer.subtitle:SetPoint("TOPLEFT", drawer, "TOPLEFT", 18, -46)
     drawer.subtitle:SetWidth(470)
     drawer.subtitle:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
@@ -2812,13 +3318,19 @@ local function EnsureRecentWhispersDrawer180(owner)
             if owner.InviteRecentWhisper176 then owner:InviteRecentWhisper176(entry.name) end
         end, "utility")
         row.action2:SetPoint("TOPLEFT", row, "TOPLEFT", 266, -10)
-        row.action3 = UI:Button(row, "Welcome", 92, 24, function()
+        row.action3 = UI:Button(row, "Welcome", 68, 24, function()
             local entry = captured.otlContact180
             if not entry then return end
             local ok, problem = owner:SendRecentRecruitmentWelcome180(entry.name)
             if not ok and owner.SetStatus then owner:SetStatus(problem or "Welcome was not sent.") end
         end, "utility")
         row.action3:SetPoint("TOPLEFT", row, "TOPLEFT", 366, -10)
+        row.remove = UI:Button(row, "X", 28, 24, function()
+            local entry = captured.otlContact180
+            if entry and owner.RemoveRecentRecruitmentContact180 then owner:RemoveRecentRecruitmentContact180(entry.name) end
+        end, "danger")
+        row.remove:SetPoint("TOPLEFT", row, "TOPLEFT", 438, -10)
+        row.remove.otlTooltipText = "Remove this contact from the recruitment list for this session."
         row:Hide()
         drawer.rows[index] = row
     end
@@ -3087,9 +3599,11 @@ local function BuildRefs(owner, root, key)
         if ui.achievementSearch174 then
             ui.achievementSearch174:SetScript("OnTextChanged", function()
                 ui.achievementSearchRuntime180 = this:GetText() or ""
-                ui.achievementSearchDirty180 = true
-                ui.achievementSearchElapsed180 = 0
-                if owner.WakeScheduler180 then owner:WakeScheduler180("ui-debounce:achievements") end
+                if not ui.achievementProgrammaticFocus180 then
+                    ui.achievementSearchDirty180 = true
+                    ui.achievementSearchElapsed180 = 0
+                    if owner.WakeScheduler180 then owner:WakeScheduler180("ui-debounce:achievements") end
+                end
                 if ui.achievementSearchPlaceholder175 then
                     if (this:GetText() or "") == "" then ui.achievementSearchPlaceholder175:Show()
                     else ui.achievementSearchPlaceholder175:Hide() end
@@ -3214,6 +3728,7 @@ local SOURCES = {
     search = {
         builder = "BuildSearchPage", sourceRefresh = "RefreshSearchPage",
         publicRefresh = "RefreshSearchPage", toolbar = { "search", "filters", "continuous-scroll" },
+        nativeOwnsRefresh = true,
     },
     pve = {
         builder = "BuildPvePage", sourceRefresh = "RefreshPvePage",
@@ -3292,7 +3807,14 @@ for key, definition in pairs(SOURCES) do
         function(owner, reason)
             owner[capturedDefinition.publicRefresh](owner, reason)
         end,
-        LAYOUTS[capturedKey],
+        function(owner, page, width, height)
+            -- Resolve the page layout at call time. NativePages deliberately
+            -- applies a few late compatibility wrappers after shell modules are
+            -- registered; capturing the current function here would freeze the
+            -- earlier implementation and silently bypass those wrappers.
+            local layout = LAYOUTS[capturedKey]
+            if layout then layout(owner, page, width, height) end
+        end,
         capturedDefinition.toolbar,
         { width = 720, height = 500 })
 end
@@ -3307,7 +3829,11 @@ for key, definition in pairs(SOURCES) do
         if owner.CanRefreshShellPage180 and not owner:CanRefreshShellPage180(capturedKey) then return false end
         local source = owner.nativePageSources[capturedDefinition.sourceRefresh]
         local result
-        if source then result = source(owner, value) end
+        -- Search has a complete native renderer. Running the retired legacy
+        -- renderer first rebuilt and sorted the same global result set a second
+        -- time on every scroll/filter refresh. Other pages still use their
+        -- source refresh for state that has not yet moved into the native layer.
+        if source and not capturedDefinition.nativeOwnsRefresh then result = source(owner, value) end
         local post = POST_REFRESH[capturedKey]
         if post then post(owner) end
         owner:LayoutShellPage180(capturedKey, "native-refresh")
@@ -3882,7 +4408,7 @@ function OTLGM.__impl180.EnsureNativeRaidEventEditorPack2__impl1(self)
     ui.raidNote156 = UI:EditBox(content, 646, 78, { placeholder = "Raid briefing and preparation notes", maxLetters = 220, multiline = true, changed = function() RaidEditorMarkDirtyPack2(self) end })
     Move(ui.raidNote156, content, 0, -212, 646, 78)
 
-    RaidEditorLabelPack2(content, "ROSTER SNAPSHOT", 0, -304, 300, true)
+    RaidEditorLabelPack2(content, "EVENT ROSTER", 0, -304, 300, true)
     ui.raidRosterMode180 = "CUSTOM"
     ui.raidRosterModeCustom180 = UI:Button(content, "Custom / Keep", 118, 28, function() ui.raidRosterMode180 = ui.raidEditor156.editId156 and "KEEP" or "CUSTOM" ui.raidRosterSourceId180 = nil RaidEditorMarkDirtyPack2(self) self:RefreshRaidRosterEditor180() end, "filter")
     ui.raidRosterModeTeam180 = UI:Button(content, "Use Raid Team", 118, 28, function()
@@ -3895,9 +4421,9 @@ function OTLGM.__impl180.EnsureNativeRaidEventEditorPack2__impl1(self)
     ui.raidRosterSourceButton180 = UI:Button(content, "Custom roster", 474, 28, function() self:CycleRaidRosterSource180() RaidEditorMarkDirtyPack2(self) end, "utility")
     ui.raidRosterCustomEdit180 = UI:Button(content, "Edit Custom Roster", 162, 28, function() self:OpenCustomRaidRosterPicker180() end, "utility")
     Move(ui.raidRosterSourceButton180, content, 0, -362, 474, 28) Move(ui.raidRosterCustomEdit180, content, 484, -362, 162, 28)
-    ui.raidRosterPreview180 = UI.Text(content, "Snapshot preview", "GameFontNormalSmall", "LEFT")
+    ui.raidRosterPreview180 = UI.Text(content, "Event roster preview", "GameFontNormalSmall", "LEFT")
     Move(ui.raidRosterPreview180, content, 0, -396, 646, 18)
-    ui.raidRosterHelp180 = UI.Text(content, "The selected roster is copied into this event. Future permanent-team edits do not rewrite the published snapshot.", "GameFontNormalSmall", "LEFT")
+    ui.raidRosterHelp180 = UI.Text(content, "The selected team roster is copied into this event. Later team changes do not update this event automatically.", "GameFontNormalSmall", "LEFT")
     ui.raidRosterHelp180:SetTextColor(C.grey[1], C.grey[2], C.grey[3]) ui.raidRosterHelp180:SetHeight(32) ui.raidRosterHelp180:SetJustifyV("TOP")
     Move(ui.raidRosterHelp180, content, 0, -418, 646, 32)
 
@@ -4290,7 +4816,7 @@ function OTLGM:RequestRaidTeamInvite180()
     local now = self:Now()
     local previous = tonumber(self.runtime.raidTeamInviteRequestCooldown180[key]) or 0
     if now - previous < 10 then return false, "An invite request was just sent." end
-    if type(SendChatMessage) ~= "function" then return false, "Whisper API is unavailable." end
+    if type(SendChatMessage) ~= "function" then return false, "Whispers are not available right now." end
     local text = "Hi, can I get an invite for " .. tostring(team.name or "this Raid Team") .. "?"
     local ok, errorText = pcall(SendChatMessage, text, "WHISPER", nil, target)
     if not ok then return false, tostring(errorText or "Invite request failed.") end
@@ -5482,74 +6008,166 @@ end
 -- Width-safe Guild/Officer Chat reflow --------------------------------------
 
 local PreviousGetGuildChatRowMetricsC5R4 = OTLGM.__impl180.GetGuildChatRowMetrics__impl4
-local C5R4_CHAT_MEASURE_LIMIT180 = 300
-local function C5R4ChatMeasureKey180(owner, info, width, achievement)
+local R23_CHAT_MEASURE_LIMIT180 = 300
+
+local function ChatNameKey184(value)
+    return string.lower(string.gsub(tostring(value or ""), "%-.*$", ""))
+end
+
+local function ChatUtf8Length184(text)
+    text = tostring(text or "")
+    local count, index, byte = 0, 1, nil
+    while index <= string.len(text) do
+        byte = string.byte(text, index) or 0
+        if byte < 128 then index = index + 1
+        elseif byte < 224 then index = index + 2
+        elseif byte < 240 then index = index + 3
+        else index = index + 4 end
+        count = count + 1
+    end
+    return count
+end
+
+local function SameChatGroup184(previous, current)
+    if not previous or not current then return false end
+    if tostring(previous.channel or "") ~= tostring(current.channel or "") then return false end
+    if ChatNameKey184(previous.sender or previous.author) ~= ChatNameKey184(current.sender or current.author) then return false end
+    local gap = (tonumber(current.ts) or 0) - (tonumber(previous.ts) or 0)
+    if gap < 0 or gap > 120 then return false end
+    if OTLGM:IsGuildAchievementChatMessage180(previous.text or "") then return false end
+    if OTLGM:IsGuildAchievementChatMessage180(current.text or "") then return false end
+    return true
+end
+
+local function EnsureCanonicalChatMeasureR23(owner)
+    owner.ui = owner.ui or {}
+    local label = owner.ui.chatMeasureR23
+    if label then
+        if owner.ApplyGuildChatMessageFont180 then owner:ApplyGuildChatMessageFont180(label) end
+        return label
+    end
+    local holder = CreateFrame("Frame", nil, UIParent)
+    holder:SetWidth(12) holder:SetHeight(12)
+    holder:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -3200, -3200)
+    if holder.SetAlpha then holder:SetAlpha(0) end
+    holder:Show()
+    label = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    label:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, 0)
+    label:SetJustifyH("LEFT")
+    if label.SetJustifyV then label:SetJustifyV("TOP") end
+    if owner.ApplyGuildChatMessageFont180 then owner:ApplyGuildChatMessageFont180(label) end
+    owner.ui.chatMeasureHolderR23 = holder
+    owner.ui.chatMeasureR23 = label
+    return label
+end
+
+local function ChatMeasureFontSignatureR23(label)
+    if not label or not label.GetFont then return "default:13" end
+    local ok, path, size, flags = pcall(label.GetFont, label)
+    if not ok then return "default:13" end
+    return tostring(path or "default") .. ":" .. tostring(math.floor((tonumber(size) or 13) * 10 + 0.5)) .. ":" .. tostring(flags or "")
+end
+
+local function ChatMeasureLineHeightR23(label)
+    if label and label.GetFont then
+        local ok, _, size = pcall(label.GetFont, label)
+        if ok and tonumber(size) then return math.max(12, math.floor(tonumber(size) + 2.5)) end
+    end
+    return 15
+end
+
+local function C5R4ChatMeasureKey180(owner, info, width, achievement, visible, fontSignature)
     local scale = 1
     if UIParent and UIParent.GetEffectiveScale then scale = tonumber(UIParent:GetEffectiveScale()) or 1 end
-    local widthBucket = math.floor((tonumber(width) or 0) / 8) * 8
+    local widthPixel = math.floor((tonumber(width) or 0) + 0.5)
     local stable = tostring(info.id or info.messageId or info.ts or "") .. ":" .. tostring(info.author or info.sender or "")
-    return stable .. ":" .. tostring(info.channel or "GUILD") .. ":" .. tostring(widthBucket) .. ":" .. tostring(math.floor(scale * 100 + 0.5)) .. ":" .. (achievement and "A" or "M") .. ":" .. tostring(info.text or "")
+    return stable .. ":" .. tostring(info.channel or "GUILD") .. ":" .. tostring(widthPixel) .. ":" .. tostring(math.floor(scale * 100 + 0.5)) .. ":" .. (achievement and "A" or "M") .. ":" .. tostring(fontSignature or "") .. ":" .. tostring(visible or "")
+end
+
+local function CountExplicitChatLinesR23(visible)
+    local count, startAt = 1, 1
+    while true do
+        local newlineAt = string.find(visible, "\n", startAt, true)
+        if not newlineAt then break end
+        count = count + 1
+        startAt = newlineAt + 1
+    end
+    return count
+end
+
+local function MeasureGuildChatTextR23(owner, info, width, achievement)
+    width = math.max(120, tonumber(width) or 120)
+    local visible = owner:GetGuildChatVisibleText(info and info.text or "")
+    local measure = EnsureCanonicalChatMeasureR23(owner)
+    local fontSignature = ChatMeasureFontSignatureR23(measure)
+    owner.runtime = owner.runtime or {}
+    local cache = owner.runtime.chatMeasureCacheR23
+    if type(cache) ~= "table" then
+        cache = { values = {}, order = {}, hits = 0, misses = 0 }
+        owner.runtime.chatMeasureCacheR23 = cache
+    end
+    local cacheKey = C5R4ChatMeasureKey180(owner, info or {}, width, achievement, visible, fontSignature)
+    local cached = cache.values[cacheKey]
+    if cached then
+        cache.hits = (tonumber(cache.hits) or 0) + 1
+        return cached.textHeight, cached.lines, visible
+    end
+
+    measure:SetWidth(width)
+    measure:SetText(visible)
+    local textHeight = measure.GetStringHeight and tonumber(measure:GetStringHeight()) or nil
+    local lineHeight = ChatMeasureLineHeightR23(measure)
+    local explicitLines = CountExplicitChatLinesR23(visible)
+
+    -- GetStringHeight is the primary authority.  Only if the 1.12-derived
+    -- client returns no usable value do we fall back to an UTF-8 character
+    -- estimate; raw byte length is never used as the normal line counter.
+    if not textHeight or textHeight < 8 then
+        local charsPerLine = math.max(12, math.floor(width / math.max(5.5, lineHeight * 0.47)))
+        local fallbackLines = math.max(explicitLines, math.max(1, math.ceil(ChatUtf8Length184(visible) / charsPerLine)))
+        textHeight = fallbackLines * lineHeight
+    end
+    textHeight = math.max(lineHeight - 2, math.min(240, math.ceil(textHeight)))
+    local lines = math.max(explicitLines, math.max(1, math.floor((textHeight + (lineHeight * 0.30)) / lineHeight)))
+    if lines > 16 then lines = 16 end
+
+    cache.values[cacheKey] = { textHeight = textHeight, lines = lines }
+    table.insert(cache.order, cacheKey)
+    cache.misses = (tonumber(cache.misses) or 0) + 1
+    while table.getn(cache.order) > R23_CHAT_MEASURE_LIMIT180 do
+        local expired = table.remove(cache.order, 1)
+        cache.values[expired] = nil
+    end
+    return textHeight, lines, visible
+end
+
+function OTLGM:GetGuildChatCanonicalTextMetricsR23(info, width, achievement)
+    return MeasureGuildChatTextR23(self, info or {}, width, achievement and true or false)
 end
 
 function OTLGM:GetGuildChatRowMetrics(messages, index, markerIndex)
     local info = messages and messages[index]
-    if not info then return 29, 1, nil, false end
-    local achievement = string.find(tostring(info.text or ""), "^%[Guild Achievement%]") ~= nil
+    if not info then return 29, 1, nil, false, 15 end
+    local achievement = self:IsGuildAchievementChatMessage180(info.text or "")
     local width = achievement and (self.ui and self.ui.chatAchievementWidth180) or (self.ui and self.ui.chatMessageWidth180)
     if not width or width < 120 then return PreviousGetGuildChatRowMetricsC5R4(self, messages, index, markerIndex) end
-    self.runtime = self.runtime or {}
-    local cache = self.runtime.chatMeasureCacheC5R4
-    if type(cache) ~= "table" then cache = { values = {}, order = {}, hits = 0, misses = 0 } self.runtime.chatMeasureCacheC5R4 = cache end
-    local cacheKey = C5R4ChatMeasureKey180(self, info, width, achievement)
-    local cached = cache.values[cacheKey]
-    local textHeight, lines
-    if cached then
-        textHeight, lines = cached.textHeight, cached.lines
-        cache.hits = (tonumber(cache.hits) or 0) + 1
-    else
-        local measure = self.ui and self.ui.chatMeasureR4
-        local visible = self:GetGuildChatVisibleText(info.text or "")
-        if measure then
-            measure:SetWidth(width) measure:SetText(visible)
-            textHeight = measure.GetStringHeight and tonumber(measure:GetStringHeight()) or nil
-        end
-        local perLine = math.max(18, math.floor(width / 7.7))
-        local explicitLines = 1
-        local scanStart = 1
-        while true do
-            local newlineAt = string.find(visible, "\n", scanStart, true)
-            if not newlineAt then break end
-            explicitLines = explicitLines + 1
-            scanStart = newlineAt + 1
-        end
-        local fallbackLines = math.max(explicitLines, math.max(1, math.ceil(string.len(visible) / perLine)))
-        if not textHeight or textHeight < 12 then
-            textHeight = fallbackLines * 15
-        else
-            -- Some 1.12-derived clients occasionally return a stale hidden
-            -- FontString height after a reused row. Refuse implausible heights
-            -- for short text while still allowing real multiline messages.
-            local measuredLines = math.max(1, math.ceil(textHeight / 15))
-            local plausibleMax = math.max(explicitLines, fallbackLines + 1)
-            if measuredLines > plausibleMax + 1 then textHeight = plausibleMax * 15 end
-        end
-        textHeight = math.min(220, math.ceil(textHeight + 2))
-        lines = math.max(1, math.ceil(textHeight / 15))
-        cache.values[cacheKey] = { textHeight = textHeight, lines = lines }
-        table.insert(cache.order, cacheKey)
-        cache.misses = (tonumber(cache.misses) or 0) + 1
-        while table.getn(cache.order) > C5R4_CHAT_MEASURE_LIMIT180 do
-            local expired = table.remove(cache.order, 1)
-            cache.values[expired] = nil
-        end
-    end
+    local textHeight, lines = MeasureGuildChatTextR23(self, info, width, achievement)
     local separator = self:GetGuildChatTimeSeparator(messages, index)
     local marker = markerIndex and markerIndex == index
-    local height = math.max(29, textHeight + 10)
+    local nextGrouped = SameChatGroup184(info, messages[index + 1])
+
+    -- Row ownership mirrors the renderer exactly: 3px top inset, explicit
+    -- separator/NEW blocks, actual measured message height, then a stable
+    -- bottom pad. Continuation changes header visibility and the inter-group
+    -- gap only; it never changes the base text box height.
+    local messageBlock = math.max(20, textHeight + 2)
+    local height = 3 + messageBlock + 3
     if separator then height = height + 17 end
     if marker then height = height + 9 end
-    return height, lines, separator, marker
+    if not nextGrouped then height = height + 3 end
+    return height, lines, separator, marker, textHeight
 end
+
 
 local PreviousLayoutGuildChatC5R4 = LayoutGuildChat
 LayoutGuildChat = function(owner, page, width, height)
@@ -5562,8 +6180,8 @@ LayoutGuildChat = function(owner, page, width, height)
         local chatWidth = width - (showOfficer and (officerWidth + gap) or 0)
         -- Reserve the row's pin affordance and scrollbar gutter instead of
         -- letting wrapped text run underneath them at compact widths.
-        local nextMessageWidth = math.max(180, chatWidth - 296)
-        local nextAchievementWidth = math.max(220, chatWidth - 130)
+        local nextMessageWidth = math.max(172, chatWidth - 332)
+        local nextAchievementWidth = math.max(210, chatWidth - 150)
         changed = owner.ui.chatMessageWidth180 ~= nextMessageWidth or owner.ui.chatAchievementWidth180 ~= nextAchievementWidth
         owner.ui.chatMessageWidth180 = nextMessageWidth
         owner.ui.chatAchievementWidth180 = nextAchievementWidth
@@ -5589,6 +6207,259 @@ LayoutGuildChat = function(owner, page, width, height)
                 end
             end, 20)
         end
+    end
+end
+
+-- The shell module resolves LAYOUTS dynamically. Publish this final wrapper so
+-- its width-aware reflow is the actual Guild Chat layout owner, rather than a
+-- dead late local reassignment.
+LAYOUTS.guildchat = LayoutGuildChat
+
+-- r23 Guild Chat runtime geometry finalizer ---------------------------------
+--
+-- Several older presentation layers still decorate Guild Chat after the base
+-- refresh and historically also changed ScrollingMessageFrame height using
+-- their own measurement FontStrings.  Keep those visual features, then restore
+-- one canonical width/font/height contract at the very end of the public
+-- refresh path.  This is intentionally event/refresh driven; no OnUpdate or
+-- polling loop is introduced.
+
+local function GuildChatDiagnosticPrintR23(text)
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffffcc33[Lion GM ChatDiag]|r " .. tostring(text or ""))
+    end
+end
+
+local function CurrentGuildChatRowsR23(owner)
+    local result = {}
+    local index, row
+    for index = 1, table.getn(owner.ui and owner.ui.chatRows or {}) do
+        row = owner.ui.chatRows[index]
+        if row and row:IsVisible() and row.chatData then table.insert(result, row) end
+    end
+    return result
+end
+
+function OTLGM:CaptureGuildChatDiagnosticsR23(reason)
+    local diag = self.runtime and self.runtime.guildChatDiagnosticsR23
+    if not diag or not diag.enabled or not self.ui then return nil end
+    local channel = self:GetGuildChatChannel()
+    local messages = self:GetGuildChatMessages(channel) or {}
+    local markerIndex = self:GetGuildChatMarkerIndex(messages, channel)
+    local totalHeight = 0
+    local index, height
+    for index = 1, table.getn(messages) do
+        height = self:GetGuildChatRowMetrics(messages, index, markerIndex)
+        totalHeight = totalHeight + (tonumber(height) or 0)
+    end
+    local minValue, maxValue = 0, 0
+    if self.ui.chatSlider and self.ui.chatSlider.GetMinMaxValues then minValue, maxValue = self.ui.chatSlider:GetMinMaxValues() end
+    local report = {
+        reason = tostring(reason or "refresh"),
+        channel = channel,
+        messageCount = table.getn(messages),
+        viewportHeight = self:GetGuildChatViewportHeight180(),
+        contentHeight = totalHeight,
+        offset = self.ui.chatOffsets and (tonumber(self.ui.chatOffsets[channel]) or 0) or 0,
+        scrollMin = tonumber(minValue) or 0,
+        scrollMax = tonumber(maxValue) or 0,
+        bottomSlackR28 = tonumber(self.ui.chatBottomSlackR28) or 0,
+        bottomAnchoredR28 = self.ui.chatBottomAnchoredR28 and true or false,
+        bottomInsetR28 = tonumber(self.ui.chatHistoryBottomInsetR28) or 0,
+        rows = {},
+    }
+    local rows = CurrentGuildChatRowsR23(self)
+    local previous = nil
+    for index = 1, math.min(20, table.getn(rows)) do
+        local row = rows[index]
+        local info = row.chatData
+        local achievement = self:IsGuildAchievementChatMessage180(info.text or "")
+        local width = achievement and (tonumber(self.ui.chatAchievementWidth180) or 0) or (tonumber(self.ui.chatMessageWidth180) or 0)
+        local textHeight, lines, visible = self:GetGuildChatCanonicalTextMetricsR23(info, width, achievement)
+        local grouped = SameChatGroup184(previous, info)
+            and not (row.separatorText and row.separatorText:IsVisible())
+            and not (row.newLine and row.newLine:IsVisible())
+        table.insert(report.rows, {
+            width = width,
+            textHeight = textHeight,
+            lines = lines,
+            rowHeight = tonumber(row:GetHeight()) or 0,
+            top = tonumber(row.otlChatTop180) or -1,
+            bottom = tonumber(row.otlChatBottom180) or -1,
+            grouped = grouped and true or false,
+            separator = row.separatorText and row.separatorText:IsVisible() and true or false,
+            marker = row.newLine and row.newLine:IsVisible() and true or false,
+            visibleChars = ChatUtf8Length184(visible or ""),
+            achievement = achievement and true or false,
+        })
+        previous = info
+    end
+    diag.last = report
+    return report
+end
+
+function OTLGM:PrintGuildChatDiagnosticsR23(reason)
+    local report = self:CaptureGuildChatDiagnosticsR23(reason or "manual-dump")
+    if not report then GuildChatDiagnosticPrintR23("Diagnostics are off. Use /otl chatdiag on first.") return false end
+    GuildChatDiagnosticPrintR23("reason=" .. report.reason .. " channel=" .. tostring(report.channel)
+        .. " messages=" .. tostring(report.messageCount) .. " viewport=" .. tostring(math.floor(report.viewportHeight + 0.5))
+        .. " content=" .. tostring(math.floor(report.contentHeight + 0.5)) .. " offset=" .. tostring(report.offset)
+        .. " scroll=" .. tostring(report.scrollMin) .. ".." .. tostring(report.scrollMax)
+        .. " bottomSlack=" .. tostring(math.floor((report.bottomSlackR28 or 0) + 0.5))
+        .. " anchored=" .. tostring(report.bottomAnchoredR28 and 1 or 0)
+        .. " inset=" .. tostring(report.bottomInsetR28 or 0))
+    local index, row
+    for index = 1, table.getn(report.rows or {}) do
+        row = report.rows[index]
+        GuildChatDiagnosticPrintR23("row" .. tostring(index)
+            .. " w=" .. tostring(math.floor((row.width or 0) + 0.5))
+            .. " textH=" .. tostring(math.floor((row.textHeight or 0) + 0.5))
+            .. " rowH=" .. tostring(math.floor((row.rowHeight or 0) + 0.5))
+            .. " y=" .. tostring(math.floor((row.top or 0) + 0.5)) .. ".." .. tostring(math.floor((row.bottom or 0) + 0.5))
+            .. " lines=" .. tostring(row.lines or 1) .. " chars=" .. tostring(row.visibleChars or 0)
+            .. " group=" .. tostring(row.grouped and 1 or 0)
+            .. " sep=" .. tostring(row.separator and 1 or 0)
+            .. " new=" .. tostring(row.marker and 1 or 0)
+            .. " ach=" .. tostring(row.achievement and 1 or 0))
+    end
+    return true
+end
+
+function OTLGM:ApplyCanonicalGuildChatGeometryR23(reason)
+    if not self.ui or not self.ui.chatRows then return false end
+    if (OTLGM_DB.settings.guildChatView or "GUILD") == "BOARD" then return false end
+    local previous = nil
+    local index, row, info, achievement, width, textHeight, grouped
+    for index = 1, table.getn(self.ui.chatRows) do
+        row = self.ui.chatRows[index]
+        info = row and row:IsVisible() and row.chatData or nil
+        if info then
+            achievement = self:IsGuildAchievementChatMessage180(info.text or "")
+            width = achievement and (tonumber(self.ui.chatAchievementWidth180) or 210)
+                or (tonumber(self.ui.chatMessageWidth180) or 172)
+            textHeight = self:GetGuildChatCanonicalTextMetricsR23(info, width, achievement)
+            if row.messageFrame then
+                row.messageFrame:SetWidth(math.max(achievement and 210 or 172, width))
+                row.messageFrame:SetHeight(math.max(18, (tonumber(textHeight) or 15) + 2))
+                if row.messageFrame.SetInsertMode then row.messageFrame:SetInsertMode("TOP") end
+                if row.messageFrame.SetJustifyV then row.messageFrame:SetJustifyV("TOP") end
+                if row.messageFrame.ScrollToTop then row.messageFrame:ScrollToTop() end
+            end
+            grouped = SameChatGroup184(previous, info)
+                and not (row.separatorText and row.separatorText:IsVisible())
+                and not (row.newLine and row.newLine:IsVisible())
+            if achievement then
+                row.timeText:Show()
+                row.rankButton:Hide()
+                row.senderButton:Hide()
+                if row.continuationR5 then row.continuationR5:Hide() end
+            elseif grouped then
+                row.timeText:Hide()
+                row.rankButton:Hide()
+                row.senderButton:Hide()
+                if row.continuationR5 then
+                    row.continuationR5:ClearAllPoints()
+                    row.continuationR5:SetPoint("TOPLEFT", row, "TOPLEFT", 214, -2)
+                    row.continuationR5:SetHeight(math.max(12, row:GetHeight() - 6))
+                    row.continuationR5:Show()
+                end
+            else
+                row.timeText:Show()
+                row.rankButton:Show()
+                row.senderButton:Show()
+                if row.continuationR5 then row.continuationR5:Hide() end
+            end
+            if row.newLine and row.newLine:IsVisible() then
+                local markerY = -3
+                if row.separatorText and row.separatorText:IsVisible() then markerY = markerY - 17 end
+                row.newLine:ClearAllPoints()
+                row.newLine:SetPoint("TOPLEFT", row, "TOPLEFT", 0, markerY - 2)
+                if row.newText then
+                    row.newText:ClearAllPoints()
+                    row.newText:SetPoint("TOPLEFT", row, "TOPLEFT", math.max(120, (tonumber(row:GetWidth()) or 1) - 64), markerY - 1)
+                end
+            end
+            if row.channelAccent then row.channelAccent:SetHeight(row:GetHeight()) end
+            previous = info
+        else
+            if row and row.continuationR5 then row.continuationR5:Hide() end
+        end
+    end
+    self:LayoutChatRows180()
+    self:CaptureGuildChatDiagnosticsR23(reason or "refresh")
+    return true
+end
+
+local PreviousRefreshGuildChatR23 = OTLGM.RefreshGuildChatPage
+if PreviousRefreshGuildChatR23 then
+    function OTLGM:RefreshGuildChatPage(reason)
+        local page = self.ui and self.ui.pages and self.ui.pages.guildchat
+        local view = OTLGM_DB.settings.guildChatView or "GUILD"
+        local pageWidth = page and page.GetWidth and tonumber(page:GetWidth()) or 0
+        local pageHeight = page and page.GetHeight and tonumber(page:GetHeight()) or 0
+        local state = self.ui and self.ui.chatGeometryStateR23
+        local pageReadyR54 = page and not page.otlLazyShell and page.otlBuilt
+            and self.ui and self.ui.chatChannelButtons and self.ui.chatList
+        local needsPreLayout = pageReadyR54 and view ~= "BOARD" and (not self.ui.chatMessageWidth180
+            or not state or state.view ~= view
+            or math.abs((tonumber(state.width) or 0) - pageWidth) > 1
+            or math.abs((tonumber(state.height) or 0) - pageHeight) > 1)
+        if needsPreLayout then LayoutGuildChat(self, page, pageWidth, pageHeight) end
+
+        -- NativePages' registered public wrapper performs the source refresh and
+        -- then a dynamic LayoutShellPage180 pass, so at return time responsive
+        -- row widths are authoritative again.  Finalize only text geometry here
+        -- instead of redundantly running a second full page layout every refresh.
+        local result = PreviousRefreshGuildChatR23(self, reason)
+        if result ~= false then
+            if view ~= "BOARD" then self:ApplyCanonicalGuildChatGeometryR23(reason or "refresh") end
+            self.ui.chatGeometryStateR23 = { view = view, width = pageWidth, height = pageHeight }
+        end
+        return result
+    end
+end
+
+-- Temporary, opt-in live instrumentation requested by the r23 geometry stage.
+-- It stores only the latest compact metrics snapshot and performs no work while
+-- disabled.  Nothing is written to SavedVariables.
+local PreviousGuildChatSlashR23 = SlashCmdList and SlashCmdList["OTLGM"]
+if SlashCmdList then
+    SlashCmdList["OTLGM"] = function(message)
+        local raw = tostring(message or "")
+        local normalized = string.lower(string.gsub(string.gsub(raw, "^%s+", ""), "%s+$", ""))
+        if normalized == "enchantdiag on" then
+            if OTLGM.SetEnchantDiagnosticsR24 then OTLGM:SetEnchantDiagnosticsR24(true) end
+            if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage("|cffffcc33[Lion GM EnchantDiag]|r Enabled for this session. Select an enchant, hover its result icon if needed, then use /otl enchantdiag dump.") end
+            return
+        elseif normalized == "enchantdiag off" then
+            if OTLGM.SetEnchantDiagnosticsR24 then OTLGM:SetEnchantDiagnosticsR24(false) end
+            if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage("|cffffcc33[Lion GM EnchantDiag]|r Disabled.") end
+            return
+        elseif normalized == "enchantdiag dump" then
+            if OTLGM.PrintEnchantDiagnosticsR24 then OTLGM:PrintEnchantDiagnosticsR24() end
+            return
+        elseif normalized == "enchantdiag" then
+            if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage("|cffffcc33[Lion GM EnchantDiag]|r Use /otl enchantdiag on | /otl enchantdiag dump | /otl enchantdiag off") end
+            return
+        elseif normalized == "chatdiag on" then
+            OTLGM.runtime = OTLGM.runtime or {}
+            OTLGM.runtime.guildChatDiagnosticsR23 = OTLGM.runtime.guildChatDiagnosticsR23 or {}
+            OTLGM.runtime.guildChatDiagnosticsR23.enabled = true
+            GuildChatDiagnosticPrintR23("Enabled for this session. Reproduce the chat layout, then use /otl chatdiag dump.")
+            if OTLGM.RefreshGuildChatPage then OTLGM:RefreshGuildChatPage("diag-enable") end
+            return
+        elseif normalized == "chatdiag off" then
+            if OTLGM.runtime and OTLGM.runtime.guildChatDiagnosticsR23 then OTLGM.runtime.guildChatDiagnosticsR23.enabled = nil end
+            GuildChatDiagnosticPrintR23("Disabled.")
+            return
+        elseif normalized == "chatdiag dump" then
+            OTLGM:PrintGuildChatDiagnosticsR23("manual-dump")
+            return
+        elseif normalized == "chatdiag" then
+            GuildChatDiagnosticPrintR23("Use /otl chatdiag on | /otl chatdiag dump | /otl chatdiag off")
+            return
+        end
+        if PreviousGuildChatSlashR23 then return PreviousGuildChatSlashR23(message) end
     end
 end
 

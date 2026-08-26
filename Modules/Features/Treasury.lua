@@ -265,7 +265,7 @@ local function TQueueDelete(self, id, record, target)
     return self:QueueNetworkPayload(payload, target and "WHISPER" or "GUILD", target, target and 2 or 3, "treasury", "treasury:" .. tostring(target or "guild") .. ":deleted:" .. tostring(id))
 end
 
-function OTLGM.__impl180.SetTreasuryGoal170__impl1(self, id, name, current, target, category)
+function OTLGM.__impl180.SetTreasuryGoal170__impl1(self, id, name, current, target, category, expectedRevision)
     if not self:CanEditTreasury170() then return false, "Only guild leadership can edit treasury goals." end
     id = string.upper(TTrim(id))
     if not self:IsValidID(id, 32) then return false, "The goal ID is invalid." end
@@ -275,6 +275,17 @@ function OTLGM.__impl180.SetTreasuryGoal170__impl1(self, id, name, current, targ
     if not treasury then return false, "Guild data is not ready yet. Try again after the guild roster loads." end
     if not treasury.goals[id] and TGoalCount(treasury.goals) >= TREASURY_MAX_GOALS then return false, "The treasury supports up to eight active goals." end
     local old = treasury.goals[id]
+    -- Release hardening: an editor can stay open while another leadership client
+    -- updates the same shared goal.  Reject a stale save instead of silently
+    -- overwriting the newer guild state.  Existing internal callers omit the
+    -- optional expectedRevision and keep their previous behavior.
+    if expectedRevision ~= nil then
+        local expected = math.max(0, math.floor(tonumber(expectedRevision) or 0))
+        local actual = old and math.max(0, math.floor(tonumber(old.revision) or 0)) or 0
+        if expected ~= actual then
+            return false, "This goal changed while you were editing it. The latest values were loaded; review them and save again.", "STALE"
+        end
+    end
     local now = self:Now()
     local goal = old or { id = id, order = TGoalCount(treasury.goals) + 1 }
     local deletedRevision = tonumber(treasury.deleted[id] and treasury.deleted[id].revision) or 0
@@ -355,20 +366,24 @@ function OTLGM:RequestTreasurySync170(force)
     local peers = self:GetCompatibleTreasuryPeersR2(600)
     if table.getn(peers) == 0 then
         self.runtime.treasurySync170 = { active = false, started = now, received = 0, noPeerR2 = true }
-        if force and self.SetStatus then self:SetStatus("No compatible 1.8 leadership peer is online. The local Treasury ledger was kept.", nil, { source = "treasury", manual = true }) end
+        if force and self.SetStatus then self:SetStatus("No compatible Leadership member with the addon is online. Your saved Treasury ledger was kept.", nil, { source = "treasury", manual = true }) end
         if self.RefreshTreasuryPage170 and self.ui and self.ui.currentPage == "treasury" then self:RefreshTreasuryPage170() end
         return false
     end
     local queued = 0
+    local requestedPeerKeysR13 = {}
     local index, target
     for index = 1, math.min(3, table.getn(peers)) do
         target = peers[index]
-        if self:QueueNetworkPayload(table.concat({ self.treasuryProtocol170, "SYNC", self.version, tostring(now) }, "^"), "WHISPER", target, 2, "treasury", "treasury:sync:" .. self:NormalizeName(target)) then queued = queued + 1 end
+        if self:QueueNetworkPayload(table.concat({ self.treasuryProtocol170, "SYNC", self.version, tostring(now) }, "^"), "WHISPER", target, 2, "treasury", "treasury:sync:" .. self:NormalizeName(target)) then
+            queued = queued + 1
+            requestedPeerKeysR13[self:NormalizeName(target)] = true
+        end
     end
     if queued == 0 then return false end
     self.lastTreasurySync170 = now
-    self.runtime.treasurySync170 = { active = true, started = now, received = 0, requestedPeersR2 = queued, manualR2 = force and true or false }
-    if force and self.SetStatus then self:SetStatus("Requesting Treasury ledger from compatible online leadership...", nil, { source = "treasury", manual = true }) end
+    self.runtime.treasurySync170 = { active = true, started = now, received = 0, requestedPeersR2 = queued, requestedPeerKeysR13 = requestedPeerKeysR13, manualR2 = force and true or false }
+    if force and self.SetStatus then self:SetStatus("Checking for the latest Treasury contributions from online officers...", nil, { source = "treasury", manual = true }) end
     if self.RefreshTreasuryPage170 and self.ui and self.ui.currentPage == "treasury" then self:RefreshTreasuryPage170() end
     return true
 end
@@ -399,8 +414,16 @@ function OTLGM.__impl180.ProcessTreasuryTimers170__impl1(self)
     end
     local sync = self.runtime and self.runtime.treasurySync170
     if sync and sync.active and self:Now() - (tonumber(sync.started) or self:Now()) >= 15 then
+        -- No answer is not a successful synchronization.  Keep the requested
+        -- peer set briefly so a genuinely late WHISPER END from a peer we asked
+        -- can still complete this request, but never manufacture `completed`.
         sync.active = false
-        sync.completed = self:Now()
+        sync.timedOutR13 = self:Now()
+        sync.completed = nil
+        if sync.manualR2 and self.SetStatus then
+            self:SetStatus("No online officer answered the Treasury refresh; your saved ledger was kept.", nil, { source="treasury", manual=true })
+        end
+        if self.RefreshTreasuryPage170 and self.ui and self.ui.currentPage == "treasury" then self:RefreshTreasuryPage170() end
     end
 end
 
@@ -435,8 +458,12 @@ function OTLGM.__impl180.HandleTreasuryMessage170__impl1(self, message, channel,
         treasury.deleted[id] = nil
         treasury.revision = math.max(treasury.revision or 0, revision)
         TAddHistory(treasury, { ts = updatedAt, id = id, name = name, actor = updatedBy, kind = old and "SYNC UPDATE" or "SYNC ADD" })
-        self.runtime.treasurySync170 = self.runtime.treasurySync170 or { active = true, started = self:Now(), received = 0 }
-        self.runtime.treasurySync170.received = (tonumber(self.runtime.treasurySync170.received) or 0) + 1
+        local sync = self.runtime and self.runtime.treasurySync170
+        local senderKey = sender and self:NormalizeName(sender) or ""
+        if sync and type(sync.requestedPeerKeysR13) == "table" and sync.requestedPeerKeysR13[senderKey]
+            and (sync.active or (sync.timedOutR13 and self:Now() - sync.timedOutR13 <= 60)) then
+            sync.received = (tonumber(sync.received) or 0) + 1
+        end
         if self.RefreshTreasuryPage170 and self.ui and self.ui.currentPage == "treasury" then self:RefreshTreasuryPage170() end
         return true
     end
@@ -459,12 +486,20 @@ function OTLGM.__impl180.HandleTreasuryMessage170__impl1(self, message, channel,
         return true
     end
     if kind == "END" then
-        self.runtime.treasurySync170 = self.runtime.treasurySync170 or {}
-        self.runtime.treasurySync170.active = false
-        self.runtime.treasurySync170.completed = self:Now()
-        self.runtime.treasurySync170.lastPeerR2 = sender
-        self.runtime.treasurySync170.remoteLedgerRowsR2 = math.max(0, tonumber(fields[5]) or 0)
-        self.runtime.treasurySync170.noPeerR2 = nil
+        local sync = self.runtime and self.runtime.treasurySync170
+        local senderKey = sender and self:NormalizeName(sender) or ""
+        local requestAge = sync and (self:Now() - (tonumber(sync.started) or self:Now())) or 999999
+        local requested = sync and type(sync.requestedPeerKeysR13) == "table" and sync.requestedPeerKeysR13[senderKey]
+        local eligible = requested and channel == "WHISPER" and requestAge <= 75 and (sync.active or sync.timedOutR13)
+        self.runtime = self.runtime or {}
+        self.runtime.lastTreasuryEndAcceptedR13 = eligible and self:Now() or nil
+        if not eligible then return true end
+        sync.active = false
+        sync.completed = self:Now()
+        sync.timedOutR13 = nil
+        sync.lastPeerR2 = sender
+        sync.remoteLedgerRowsR2 = math.max(0, tonumber(fields[5]) or 0)
+        sync.noPeerR2 = nil
         if self.RefreshTreasuryPage170 and self.ui and self.ui.currentPage == "treasury" then self:RefreshTreasuryPage170() end
         return true
     end

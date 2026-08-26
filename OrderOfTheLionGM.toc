@@ -2,8 +2,8 @@
 ## Title: |cffffcc66Order of the Lion|r |cffffffffGuild Manager|r |cff75d66bOctoWoW|r
 ## Notes: |cffffffffGuild chat, Guild Achievements, roster, Crafting Network, PvE coordination, activity and officer tools.|r
 ## Author: |cffffcc66Hikol|r |cffaaaaaa(mrhikol / Lucks)|r, |cffffffffOrder of the Lion|r
-## Version: 1.8.0
-## X-Build: final-public-20260808
+## Version: 1.8.3
+## X-Build: release-1.8.3-20260827
 ## X-License: MIT
 ## X-Website: https://github.com/Relyway/OrderOfTheLionGM
 ## SavedVariables: OTLGM_DB
@@ -39,8 +39,16 @@ Modules\Core\RuntimeCoordination.lua
 Modules\Features\TreasuryExtended.lua
 Modules\UI\Components.lua
 Modules\UI\Shell.lua
+Modules\UI\QuickDock.lua
+Modules\UI\GuildProfile183.lua
 Modules\Pages\Home.lua
 Modules\Pages\Roster.lua
 Modules\Pages\Professions.lua
 Modules\Pages\Settings.lua
+Modules\Pages\GuildAdmin.lua
 Modules\UI\NativePages.lua
+Modules\Features\SocialProfiles183.lua
+Modules\Features\CharacterIdentity184.lua
+Modules\Features\ProfileDetailsR42.lua
+Modules\Features\CommunityExperience183.lua
+Modules\Features\Moderation183.lua

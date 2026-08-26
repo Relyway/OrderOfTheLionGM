@@ -48,28 +48,93 @@ OTLGM.professionDefinitions = {
 
 
 
+local LEGACY_RECRUIT_BASE1_180 = "[ENG/EU] <Order of the Lion> is looking for new, returning and casual players for relaxed PvE, leveling, dungeons, professions and future raids. Active Discord. Formed guild Lions Pride"
+local LEGACY_RECRUIT_BASE2_180 = "No one has to level alone. Looking for players who want a calm guild, dungeons, farm, professions and future PvE plans. Formed \"Lion's Pride\", <Order of the Lion> [ENG/EU]"
+-- CP7: these are the exact addon-owned social defaults observed in the live CP6
+-- SavedVariables. Older builds stamped updatedAt even when the text was still the
+-- built-in default, so updatedAt cannot be used as proof of a Leadership edit.
+local LEGACY_RECRUIT_BASE1_LIVE_CP7 = "[ENG/EU] Crossfaction <Order of the Lion> is looking for new, returning and casual players for relaxed PvE, leveling, dungeons, professions and future raids. Active Discord + Own Guild Addon. Formed guild Lions Pride."
+local LEGACY_RECRUIT_BASE2_LIVE_CP7 = "No one has to level alone. Looking for SOCIAL players (both factions) who want a calm guild, dungeons, farm, professions and future PvE plans. Live Discord and own guild addon. Formed \"Lion's Pride\", <Order of the Lion> [ENG/EU]"
+local R59_RECRUIT_BASE1_180 = "[ENG/EU] <Order of the Lion> is looking for new, returning and casual players for relaxed PvE, leveling, dungeons, professions and more. Weekly Sunday raids at 20:00 ST, 2SR > MS > OS. Active Discord + guild addon. Former Lion's Pride."
+local R59_RECRUIT_BASE2_180 = "No one has to level alone. <Order of the Lion> welcomes social and casual players for leveling, dungeons, professions and relaxed PvE. Sunday raids 20:00 ST, 2SR > MS > OS. Active Discord + guild addon. Former Lion's Pride. [ENG/EU]"
+-- r53 temporarily replaced World Message 2 with a raid-specific line. r54 restored
+-- both established social messages. r55 keeps them intact and inserts the protected
+-- raid preset between them in the confirmed Send Next queue.
+local R53_RECRUIT_BASE1_180 = "[ENG/EU] <Order of the Lion> - friendly PvE guild for leveling, dungeons, professions & weekly raids. New/returning players welcome. Discord: https://discord.gg/UNacDPrGt2"
+local R53_RECRUIT_BASE2_180 = "[ENG/EU] <Order of the Lion> recruiting raiders for Sundays 20:00 ST. Reliable lvl 60 players wanted; all roles/classes welcome. 2SR > MS > OS. Discord: https://discord.gg/UNacDPrGt2"
+local R54_RECRUIT_RAID_180 = "[ENG/EU] <Order of the Lion> recruiting for our raid roster. Looking for lvl 60 players for regular guild raids and endgame PvE. All classes welcome. Discord: https://discord.gg/UNacDPrGt2"
+local R55_RECRUIT_RAID_180 = "[ENG/EU] <Order of the Lion> recruiting for Sunday raids at 20:00 ST. Steady guild roster, 2SR > MS > OS. Sign-ups & raid info: https://discord.gg/UNacDPrGt2"
+local R56_RECRUIT_RAID1_180 = "[ENG/EU] <Order of the Lion> recruiting for our Sunday raid roster - 20:00 ST, 2SR > MS > OS. Looking especially for Rogues, Mages and 1-2 more healers; Hpala/Rdruid priority. /w for info"
+local R56_RECRUIT_RAID2_180 = "[ENG/EU] <Order of the Lion> filling our Sunday 20:00 ST raid roster. 2SR > MS > OS. Need a few more solid players - healers are the main priority, with room for Rogue/Mage as well. /w for info"
+
+local function IsAddonOwnedSocialDefaultCP7(index, text)
+    text = tostring(text or "")
+    if index == 1 then
+        return text == LEGACY_RECRUIT_BASE1_180 or text == LEGACY_RECRUIT_BASE1_LIVE_CP7 or text == R53_RECRUIT_BASE1_180
+    end
+    return text == LEGACY_RECRUIT_BASE2_180 or text == LEGACY_RECRUIT_BASE2_LIVE_CP7 or text == R53_RECRUIT_BASE2_180
+end
+
+-- Send Next intentionally alternates ordinary/social recruitment with two raid
+-- messages without adding another background rotation system. The established
+-- social messages remain editable World Message 1/2; the two raid presets are
+-- fixed current guild defaults: Social 1 -> Raid 1 -> Social 2 -> Raid 2.
+local RECRUITMENT_SEND_QUEUE_R56 = { "BASE1", "RAID1", "BASE2", "RAID2" }
+
 OTLGM.recruitmentPresets = {
     BASE1 = {
         label = "Recruit 1",
         target = "WORLD",
-        text = "[ENG/EU] <Order of the Lion> is looking for new, returning and casual players for relaxed PvE, leveling, dungeons, professions and future raids. Active Discord. Formed guild Lions Pride",
+        text = R59_RECRUIT_BASE1_180,
     },
     BASE2 = {
         label = "Recruit 2",
         target = "WORLD",
-        text = "No one has to level alone. Looking for players who want a calm guild, dungeons, farm, professions and future PvE plans. Formed \"Lion's Pride\", <Order of the Lion> [ENG/EU]",
+        text = R59_RECRUIT_BASE2_180,
+    },
+    RAID1 = {
+        label = "Raid 1",
+        target = "WORLD",
+        text = R56_RECRUIT_RAID1_180,
+    },
+    RAID2 = {
+        label = "Raid 2",
+        target = "WORLD",
+        text = R56_RECRUIT_RAID2_180,
     },
     GUILDINFO = {
-        label = "Guild Info",
+        label = "Share Discord",
         target = "GUILD",
-        text = "[G-Info] Join Discord for news, help, groups & future raids. No mic needed. Discord join = first promotion from starter rank: https://discord.gg/UNacDPrGt2",
+        text = "[Guild Discord] Join for guides, raid info, announcements, help, events and guild chat. Stay connected outside the game if the server is unavailable. Discord also counts as your first guild rank promotion. https://discord.gg/UNacDPrGt2",
     },
     ADDONINFO = {
         label = "Share Addon",
         target = "GUILD",
-        text = "[Guild Addon] Install OrderOfTheLionGM for improved Guild Chat, member and profession search, Crafting Network, Group Finder, raid alerts and achievements. More users improve shared data. Download: https://github.com/Relyway/OrderOfTheLionGM",
+        text = "[Lion Addon] OrderOfTheLionGM - our guild addon for profiles, professions, groups & achievements. Download: https://github.com/Relyway/OrderOfTheLionGM",
     },
 }
+
+function OTLGM:GetRecruitmentQueueStepR56(index)
+    index = math.floor(tonumber(index) or 1)
+    if index < 1 or index > table.getn(RECRUITMENT_SEND_QUEUE_R56) then index = 1 end
+    local key = RECRUITMENT_SEND_QUEUE_R56[index]
+    local marker = key == "RAID1" and "R1" or key == "RAID2" and "R2" or (key == "BASE2" and "S2" or "S1")
+    return key, index, marker
+end
+
+function OTLGM:AdvanceRecruitmentQueueR56()
+    if not OTLGM_DB or not OTLGM_DB.settings then return 1 end
+    local _, index = self:GetRecruitmentQueueStepR56(OTLGM_DB.settings.nextRecruitIndex)
+    index = index + 1
+    if index > table.getn(RECRUITMENT_SEND_QUEUE_R56) then index = 1 end
+    OTLGM_DB.settings.nextRecruitIndex = index
+    return index
+end
+
+-- Compatibility aliases for r55 callers that may still exist in SavedVariables-era
+-- callbacks during an in-place upgrade. New code uses the r56 names above.
+OTLGM.GetRecruitmentQueueStepR55 = OTLGM.GetRecruitmentQueueStepR56
+OTLGM.AdvanceRecruitmentQueueR55 = OTLGM.AdvanceRecruitmentQueueR56
 
 local function Trim(text)
     if not text then return "" end
@@ -88,7 +153,9 @@ end
 -- still use the live guild APIs/rank flags below and are never granted merely
 -- because a character name matches this list.
 local CANONICAL_GUILD_LEADERS180 = {
-    morrow = true,
+    -- Live/current guild-leader identity is intentionally strict. Historical
+    -- Morrow records remain readable through display/history compatibility,
+    -- but must never grant current GL presentation, permissions or conditions.
     lucks = true,
 }
 
@@ -97,29 +164,15 @@ function OTLGM:IsCanonicalGuildLeaderName180(name)
 end
 
 function OTLGM:GetCanonicalGuildLeaderName180()
-    -- Prefer whichever canonical character is currently represented by the
-    -- committed roster as rank 0.  If rank data is stale/missing, prefer an
-    -- online canonical character, then any present canonical character.
-    local db = self.GetGuildDB and self:GetGuildDB() or nil
-    local roster = db and db.roster or nil
-    local onlineName, storedName
-    local key, member
-    for key, member in pairs(roster or {}) do
-        local name = member and member.name or key
-        if self:IsCanonicalGuildLeaderName180(name) then
-            if tonumber(member and (member.rankIndex or member.guildRankIndex)) == 0 then return name end
-            if member and member.online and not onlineName then onlineName = name end
-            if not storedName then storedName = name end
-        end
-    end
-    if onlineName then return onlineName end
-    if storedName then return storedName end
-    local player = UnitName and UnitName("player") or ""
-    if self:IsCanonicalGuildLeaderName180(player) then return player end
-    -- Even before the first committed roster arrives, a user-facing leader
-    -- target must stay inside the canonical pair rather than falling back to an
-    -- unrelated rank-0 cache row. Morrow is the stable default contact.
-    return "Morrow"
+    -- Lucks is the only current user-facing/canonical guild leader. Historical
+    -- Morrow records are handled by display/history compatibility, not this live helper.
+    return "Lucks"
+end
+
+function OTLGM:DisplayGuildActor180(value)
+    local raw = tostring(value or "Leadership")
+    if NormalizeName(raw) == "morrow" then return "Lucks" end
+    return raw
 end
 
 local function SafeBooleanFunction(fn)
@@ -182,12 +235,51 @@ function OTLGM:ApplyCoreDefaults()
             settings.windowSizePreset180 = "CUSTOM"
         end
     end
-    if settings.keepWindowInsideScreen180 == nil then settings.keepWindowInsideScreen180 = false end
+    if settings.keepWindowInsideScreen180 == nil then
+        -- r59: safe fresh-install default. Existing users keep their explicit
+        -- saved choice, including false, so upgrades never move a window
+        -- against the player's preference.
+        settings.keepWindowInsideScreen180 = true
+    end
     if settings.customMessageNames == nil then settings.customMessageNames = { "Custom 1", "Custom 2", "Custom 3" } end
     if settings.recruitmentLastSent == nil then settings.recruitmentLastSent = {} end
     if settings.recruitmentReminderSeconds == nil then settings.recruitmentReminderSeconds = 300 end
-    if settings.worldRecruitmentMinSeconds == nil then settings.worldRecruitmentMinSeconds = 600 end
-    if settings.worldRecruitmentRecommendedSeconds == nil then settings.worldRecruitmentRecommendedSeconds = 900 end
+    if settings.worldRecruitmentMinSeconds == nil then settings.worldRecruitmentMinSeconds = 480 end
+    if settings.worldRecruitmentRecommendedSeconds == nil then settings.worldRecruitmentRecommendedSeconds = 600 end
+    -- r59: the previous built-in 10/15 recommendation was never a user-facing
+    -- custom value. Migrate that exact legacy pair to the agreed 8/10 window;
+    -- any genuinely custom interval is preserved untouched.
+    if not settings.worldRecruitmentWindowR59Migrated then
+        if tonumber(settings.worldRecruitmentMinSeconds) == 600 and tonumber(settings.worldRecruitmentRecommendedSeconds) == 900 then
+            settings.worldRecruitmentMinSeconds = 480
+            settings.worldRecruitmentRecommendedSeconds = 600
+        end
+        settings.worldRecruitmentWindowR59Migrated = true
+    end
+    -- r55 expands the two-step A/B order into Social -> Raid -> Social -> Raid.
+    -- Preserve the previously pending social message on upgrade: old index 2
+    -- meant BASE2, which is step 3 in the new queue.
+    if not settings.recruitmentAlternatingQueueR55Migrated then
+        local oldNext = tonumber(settings.nextRecruitIndex) or 1
+        settings.nextRecruitIndex = oldNext == 2 and 3 or 1
+        settings.recruitmentAlternatingQueueR55Migrated = true
+    end
+    if not settings.recruitmentDualRaidQueueR56Migrated then
+        if settings.selectedRecruitment == "RAID" then settings.selectedRecruitment = "RAID1" end
+        if settings.recruitmentMessage == R54_RECRUIT_RAID_180 or settings.recruitmentMessage == R55_RECRUIT_RAID_180 then
+            settings.recruitmentMessage = R56_RECRUIT_RAID1_180
+        end
+        settings.recruitmentDualRaidQueueR56Migrated = true
+    end
+    -- CP7 live migration: replace only exact historical addon-owned Social 1/2
+    -- copies. This deliberately ignores their stale updatedAt marker because CP6
+    -- proved that old builds could stamp the built-in text as if it were edited.
+    -- Arbitrary Leadership text is never matched or rewritten.
+    if IsAddonOwnedSocialDefaultCP7(1, settings.recruitmentMessage) and (settings.selectedRecruitment == nil or settings.selectedRecruitment == "BASE1") then
+        settings.recruitmentMessage = R59_RECRUIT_BASE1_180
+    elseif IsAddonOwnedSocialDefaultCP7(2, settings.recruitmentMessage) and settings.selectedRecruitment == "BASE2" then
+        settings.recruitmentMessage = R59_RECRUIT_BASE2_180
+    end
     if settings.guildChatChannel == nil then settings.guildChatChannel = "GUILD" end
     if settings.guildChatDrafts == nil then settings.guildChatDrafts = { GUILD = "", OFFICER = "" } end
     if settings.guildChatDrafts.GUILD == nil then settings.guildChatDrafts.GUILD = "" end
@@ -250,17 +342,40 @@ function OTLGM:EnsureRecruitmentRotation170()
         local key = index == 1 and "BASE1" or "BASE2"
         local original = self.recruitmentPresets[key]
         local slot = settings.recruitmentRotation170[index]
+        local legacyText = index == 1 and LEGACY_RECRUIT_BASE1_180 or LEGACY_RECRUIT_BASE2_180
+        local r53Text = index == 1 and R53_RECRUIT_BASE1_180 or R53_RECRUIT_BASE2_180
+        local addonDefaultMigratedR59 = false
         if type(slot) ~= "table" or type(slot.text) ~= "string" or slot.text == "" then
             settings.recruitmentRotation170[index] = {
-                key = key, label = index == 1 and "Recruit A" or "Recruit B", target = "WORLD",
+                key = key, label = original and original.label or (index == 1 and "Recruit 1" or "Recruit 2"), target = "WORLD",
                 text = original and original.text or "", updatedAt = 0, revision = 1,
             }
+            addonDefaultMigratedR59 = true
         else
             slot.key = key
-            slot.label = slot.label or (index == 1 and "Recruit A" or "Recruit B")
+            -- Restore only exact addon-owned historical defaults. CP6 live data
+            -- showed that old builds could stamp updatedAt on an untouched default,
+            -- so that timestamp is not a safe ownership signal. Unknown/custom text
+            -- remains byte-for-byte untouched.
+            if IsAddonOwnedSocialDefaultCP7(index, slot.text) then
+                slot.text = original and original.text or slot.text
+                slot.label = original and original.label or slot.label
+                addonDefaultMigratedR59 = true
+            end
+            if not slot.label or slot.label == "Recruit A" or slot.label == "Recruit B" or slot.label == "Guild Recruitment" or slot.label == "Raid Recruitment" then
+                slot.label = original and original.label or (index == 1 and "Recruit 1" or "Recruit 2")
+            end
             slot.target = "WORLD"
             slot.revision = tonumber(slot.revision) or 1
         end
+        if addonDefaultMigratedR59 and IsAddonOwnedSocialDefaultCP7(index, settings.recruitmentMessage) then
+            settings.recruitmentMessage = original and original.text or settings.recruitmentMessage
+        end
+    end
+    if settings.selectedRecruitment == "BASE1" and IsAddonOwnedSocialDefaultCP7(1, settings.recruitmentMessage) then
+        settings.recruitmentMessage = self.recruitmentPresets.BASE1.text
+    elseif settings.selectedRecruitment == "BASE2" and IsAddonOwnedSocialDefaultCP7(2, settings.recruitmentMessage) then
+        settings.recruitmentMessage = self.recruitmentPresets.BASE2.text
     end
     return settings.recruitmentRotation170
 end
@@ -279,13 +394,14 @@ function OTLGM:ReplaceRecruitmentRotation170(index, text)
         return false, "Only guild leadership can change the recruitment rotation."
     end
     index = tonumber(index)
-    if index ~= 1 and index ~= 2 then return false, "Choose rotation A or B." end
+    if index ~= 1 and index ~= 2 then return false, "Choose World Message 1 or 2." end
     text = self:SafeText(text, 240, false, false)
     if text == "" then return false, "The recruitment message cannot be empty." end
     local rotation = self:EnsureRecruitmentRotation170()
     local old = rotation[index]
+    local original = self.recruitmentPresets[index == 1 and "BASE1" or "BASE2"]
     rotation[index] = {
-        key = index == 1 and "BASE1" or "BASE2", label = index == 1 and "Recruit A" or "Recruit B", target = "WORLD",
+        key = index == 1 and "BASE1" or "BASE2", label = original and original.label or (index == 1 and "Recruit 1" or "Recruit 2"), target = "WORLD",
         text = text, updatedAt = self:Now(), updatedBy = string.gsub(UnitName("player") or "Leadership", "%-.*$", ""),
         revision = (tonumber(old and old.revision) or 0) + 1,
     }
@@ -426,6 +542,110 @@ function OTLGM:GuildKey()
     return realm .. "::" .. guildName
 end
 
+function OTLGM:RecountHistoryUnreadR59(db, markRepair)
+    if type(db) ~= "table" then return 0 end
+    db.log = type(db.log) == "table" and db.log or {}
+    local unreadR59 = 0
+    local iR59
+    for iR59 = 1, table.getn(db.log) do
+        if db.log[iR59] and db.log[iR59].reviewed ~= true then unreadR59 = unreadR59 + 1 end
+    end
+    db.unread = unreadR59
+    if markRepair ~= false then db.historyUnreadRecountR59 = true end
+    return unreadR59
+end
+
+-- 1.8.3 final one-time recovery for the live-confirmed pre-CP7 roster burst.
+-- A bad same-size roster snapshot could fill the retained History with hundreds
+-- of JOIN/LEAVE rows even though the guild had not actually churned. The final
+-- repair is intentionally strict: it only touches a history that is already
+-- dominated by a near-balanced JOIN/LEAVE burst and only removes dense
+-- short-window clusters. Ordinary joins/leaves and every other history kind are
+-- preserved. The repair never needs a schema bump and runs at most once/guild.
+function OTLGM:RepairSyntheticHistoryBurst183(db)
+    if type(db) ~= "table" then return 0 end
+    if db.historySyntheticBurstRepair183 then
+        local state = db.historySyntheticBurstRepair183
+        return type(state) == "table" and (tonumber(state.removed) or 0) or 0
+    end
+
+    db.log = type(db.log) == "table" and db.log or {}
+    local total = table.getn(db.log)
+    local joinTotal, leaveTotal = 0, 0
+    local i, entry, kind
+    for i = 1, total do
+        entry = db.log[i]
+        kind = tostring(entry and entry.kind or "")
+        if kind == "JOIN" then joinTotal = joinTotal + 1
+        elseif kind == "LEAVE" then leaveTotal = leaveTotal + 1 end
+    end
+
+    local jlTotal = joinTotal + leaveTotal
+    local balanceLimit = math.max(12, math.floor(math.min(joinTotal, leaveTotal) * 0.08))
+    local eligible = total >= 300 and joinTotal >= 100 and leaveTotal >= 100
+        and jlTotal >= math.floor(total * 0.80)
+        and math.abs(joinTotal - leaveTotal) <= balanceLimit
+
+    local repair = { at = self:Now(), removed = 0, clusters = 0, join = joinTotal, leave = leaveTotal }
+    db.historySyntheticBurstRepair183 = repair
+    if not eligible then return 0 end
+
+    local clusters = {}
+    local current = nil
+    local lastTs = nil
+    for i = 1, total do
+        entry = db.log[i]
+        kind = tostring(entry and entry.kind or "")
+        if kind == "JOIN" or kind == "LEAVE" then
+            local ts = tonumber(entry and entry.ts) or 0
+            if not current or not lastTs or ts <= 0 or math.abs(lastTs - ts) > 15 then
+                current = { indices = {}, join = 0, leave = 0, newest = ts, oldest = ts }
+                table.insert(clusters, current)
+            end
+            table.insert(current.indices, i)
+            if kind == "JOIN" then current.join = current.join + 1 else current.leave = current.leave + 1 end
+            if ts > 0 then
+                if not current.newest or current.newest <= 0 or ts > current.newest then current.newest = ts end
+                if not current.oldest or current.oldest <= 0 or ts < current.oldest then current.oldest = ts end
+                lastTs = ts
+            end
+        end
+    end
+
+    local remove = {}
+    local baselines = {}
+    local c, cluster, clusterTotal, clusterLimit, idx
+    for c = 1, table.getn(clusters) do
+        cluster = clusters[c]
+        clusterTotal = (tonumber(cluster.join) or 0) + (tonumber(cluster.leave) or 0)
+        clusterLimit = math.max(8, math.floor(math.min(tonumber(cluster.join) or 0, tonumber(cluster.leave) or 0) * 0.10))
+        if (tonumber(cluster.join) or 0) >= 40 and (tonumber(cluster.leave) or 0) >= 40
+            and clusterTotal >= 100
+            and math.abs((tonumber(cluster.join) or 0) - (tonumber(cluster.leave) or 0)) <= clusterLimit then
+            for idx = 1, table.getn(cluster.indices) do remove[cluster.indices[idx]] = true end
+            repair.clusters = repair.clusters + 1
+            repair.removed = repair.removed + clusterTotal
+            table.insert(baselines, {
+                ts = tonumber(cluster.newest) or self:Now(),
+                kind = "BASELINE", name = "Guild", reviewed = true,
+                detail = "Recovered roster baseline: removed a synthetic mass JOIN/LEAVE history burst ("
+                    .. tostring(cluster.join) .. "/" .. tostring(cluster.leave) .. ")",
+                actor = "", source = "1.8.3 history repair",
+            })
+        end
+    end
+
+    if repair.removed <= 0 then return 0 end
+
+    for i = total, 1, -1 do
+        if remove[i] then table.remove(db.log, i) end
+    end
+    for i = 1, table.getn(baselines) do table.insert(db.log, 1, baselines[i]) end
+    while table.getn(db.log) > 500 do table.remove(db.log) end
+    self:RecountHistoryUnreadR59(db, true)
+    return repair.removed
+end
+
 function OTLGM:GetOrCreateGuildDB()
     self:EnsureDB()
     local key = self:GuildKey()
@@ -458,6 +678,11 @@ function OTLGM:GetOrCreateGuildDB()
     if not db.pendingActions then db.pendingActions = {} end
     if db.unread == nil then db.unread = 0 end
     self:MigrateGuildDB(db)
+    -- r59 repair: older builds incremented unread when adding a History row but
+    -- did not decrement it when the 500-row retention cap removed an unread
+    -- row. Repair each guild database once without deleting SavedVariables.
+    if db.historyUnreadRecountR59 ~= true then self:RecountHistoryUnreadR59(db, true) end
+    if not db.historySyntheticBurstRepair183 then self:RepairSyntheticHistoryBurst183(db) end
     return db
 end
 
@@ -796,6 +1021,223 @@ local function ReadRosterMember180(owner, index, now)
     }, isOnline and true or false
 end
 
+
+-- r59 presence lane ---------------------------------------------------------
+-- GUILD_ROSTER_UPDATE fires for ordinary login/logout presence changes as well
+-- as real membership/rank/note changes. The lightweight lane below stages only
+-- volatile online/zone/index data and publishes it atomically after the entire
+-- roster cache has been validated. It never writes partial presence into the
+-- committed roster. Any durable/structural difference discards the staged data
+-- and immediately escalates to the existing authoritative full scan.
+local function ScheduleRosterPresenceSliceR59(owner, delay)
+    if not owner or not owner.ScheduleAfter180 then return false end
+    return owner:ScheduleAfter180("roster-presence-slice-r59", math.max(0, tonumber(delay) or 0), function(current)
+        local ok, problem = pcall(current.ProcessRosterPresenceSliceR59, current)
+        if ok then return end
+        current.runtime = current.runtime or {}
+        current.runtime.rosterPresenceR59 = nil
+        current.runtime.rosterDataDirty180 = true
+        if current.RecordInternalIssueRC3 then pcall(current.RecordInternalIssueRC3, current, "Roster/PRESENCE_SLICE", problem) end
+        -- Fail closed: preserve the last committed roster and let the normal
+        -- bounded authoritative path reconcile it on the next safe opportunity.
+        if current.RequestScan and not current.pendingScan and not current.runtime.rosterRead180 then
+            current:RequestScan("GUILD_EVENT_STRUCTURE")
+        end
+    end, 58)
+end
+
+local function EscalateRosterPresenceR59(owner, reason, detail)
+    owner.runtime = owner.runtime or {}
+    owner.runtime.rosterPresenceR59 = nil
+    owner.runtime.rosterDataDirty180 = true
+    owner.runtime.rosterPresenceMetricsR59 = owner.runtime.rosterPresenceMetricsR59 or { runs = 0, slices = 0, escalations = 0, restarts = 0 }
+    owner.runtime.rosterPresenceMetricsR59.escalations = (tonumber(owner.runtime.rosterPresenceMetricsR59.escalations) or 0) + 1
+    owner.runtime.rosterPresenceMetricsR59.lastEscalationReason = tostring(reason or "STRUCTURE")
+    owner.runtime.rosterPresenceMetricsR59.lastEscalationDetail = detail and tostring(detail) or nil
+    if owner.RequestScan and not owner.pendingScan and not owner.runtime.rosterRead180 then
+        owner:RequestScan("GUILD_EVENT_STRUCTURE")
+    end
+    return true
+end
+
+function OTLGM:BeginRosterPresenceRefreshR59(reason)
+    self.runtime = self.runtime or {}
+    if self.pendingScan or self.runtime.rosterRead180 then return false end
+    local db = self.GetGuildDB and self:GetGuildDB() or nil
+    if not db or not db.initialized or type(db.roster) ~= "table" then return false end
+    local total = GetNumGuildMembers and (tonumber(GetNumGuildMembers(true)) or 0) or 0
+    if total <= 0 then return false end
+    if tonumber(db.lastTotal) and tonumber(db.lastTotal) > 0 and total ~= tonumber(db.lastTotal) then
+        return EscalateRosterPresenceR59(self, "COUNT_CHANGED")
+    end
+    local state = self.runtime.rosterPresenceR59
+    if state then
+        -- Never publish an already half-read cache after a second roster event.
+        -- Finish/discard this pass and immediately reread from row 1.
+        state.restartRequested = true
+        state.reason = tostring(reason or state.reason or "GUILD_EVENT")
+        return true
+    end
+    self.runtime.rosterPresenceR59 = {
+        reason = tostring(reason or "GUILD_EVENT"), total = total, index = 1,
+        online = 0, rows = 0, startedAt = self:Now(), restartRequested = false,
+        staged = {},
+    }
+    self.runtime.rosterPresenceMetricsR59 = self.runtime.rosterPresenceMetricsR59 or { runs = 0, slices = 0, escalations = 0, restarts = 0 }
+    return ScheduleRosterPresenceSliceR59(self, 0)
+end
+
+function OTLGM:ProcessRosterPresenceSliceR59()
+    local state = self.runtime and self.runtime.rosterPresenceR59
+    if not state then return false end
+    local db = self.GetGuildDB and self:GetGuildDB() or nil
+    if not db or type(db.roster) ~= "table" then self.runtime.rosterPresenceR59 = nil return false end
+
+    local liveTotal = GetNumGuildMembers and (tonumber(GetNumGuildMembers(true)) or 0) or 0
+    if liveTotal <= 0 or liveTotal ~= tonumber(state.total) or (tonumber(db.lastTotal) or liveTotal) ~= liveTotal then
+        return EscalateRosterPresenceR59(self, "COUNT_CHANGED_DURING_PRESENCE")
+    end
+
+    local startedProfile
+    if debugprofilestop then local ok, value = pcall(debugprofilestop) if ok then startedProfile = tonumber(value) end end
+    local maximum, budgetMs = 96, 2.0
+    local pressure = self.GetClientPressure181 and self:GetClientPressure181() or nil
+    if pressure and tonumber(pressure.level) >= 2 then maximum, budgetMs = 48, 1.25 end
+    if self.IsPerformanceGuardActive181 and self:IsPerformanceGuardActive181() then maximum, budgetMs = 32, 0.9 end
+
+    local processed = 0
+    while state.index <= math.max(0, tonumber(state.total) or 0) and processed < maximum do
+        local ok, name, rank, rankIndex, level, class, zone, note, officerNote, isOnline = pcall(GetGuildRosterInfo, state.index)
+        if not ok then
+            self.runtime.rosterPresenceR59 = nil
+            self.runtime.rosterDataDirty180 = true
+            if self.RecordInternalIssueRC3 then pcall(self.RecordInternalIssueRC3, self, "Roster/PRESENCE_ROW", name) end
+            if self.RequestScan and not self.pendingScan then self:RequestScan("GUILD_EVENT_STRUCTURE") end
+            return false
+        end
+        if not name then return EscalateRosterPresenceR59(self, "MISSING_ROW") end
+
+        local member = db.roster[name]
+        if not member then return EscalateRosterPresenceR59(self, "UNKNOWN_MEMBER") end
+
+        -- Durable fields are validation-only here. A mismatch belongs to the
+        -- canonical full scan so History/authority/first-seen/backups stay exact.
+        local durableFieldR59, savedValueR59, liveValueR59
+        if tostring(member.rank or "") ~= tostring(rank or "") then
+            durableFieldR59, savedValueR59, liveValueR59 = "rank", member.rank, rank
+        elseif tonumber(member.rankIndex or 99) ~= tonumber(rankIndex or 99) then
+            durableFieldR59, savedValueR59, liveValueR59 = "rankIndex", member.rankIndex, rankIndex
+        elseif tonumber(member.level or 0) ~= tonumber(level or 0) then
+            durableFieldR59, savedValueR59, liveValueR59 = "level", member.level, level
+        elseif tostring(member.class or "") ~= tostring(class or "") then
+            durableFieldR59, savedValueR59, liveValueR59 = "class", member.class, class
+        elseif tostring(member.note or "") ~= tostring(note or "") then
+            durableFieldR59, savedValueR59, liveValueR59 = "note", member.note, note
+        elseif tostring(member.officerNote or "") ~= tostring(officerNote or "") then
+            durableFieldR59, savedValueR59, liveValueR59 = "officerNote", member.officerNote, officerNote
+        end
+        if durableFieldR59 then
+            local detailR59 = tostring(name or "?") .. " field=" .. tostring(durableFieldR59)
+            -- Notes can contain private guild text. Keep their values out of the
+            -- support export while still naming the field that forced the safe
+            -- authoritative scan. Non-note scalar fields are safe and useful.
+            if durableFieldR59 ~= "note" and durableFieldR59 ~= "officerNote" then
+                detailR59 = detailR59 .. " saved=" .. tostring(savedValueR59 or "") .. " live=" .. tostring(liveValueR59 or "")
+            end
+            return EscalateRosterPresenceR59(self, "DURABLE_FIELD_CHANGED", detailR59)
+        end
+
+        state.staged[name] = {
+            online = isOnline and true or false,
+            zone = zone or member.zone or "",
+            rosterIndex = state.index,
+        }
+        if isOnline then state.online = state.online + 1 end
+        state.rows = state.rows + 1
+        state.index = state.index + 1
+        processed = processed + 1
+        if startedProfile and debugprofilestop and processed >= 16 then
+            local okNow, nowValue = pcall(debugprofilestop)
+            if okNow and tonumber(nowValue) and tonumber(nowValue) - startedProfile >= budgetMs then break end
+        end
+    end
+
+    local metrics = self.runtime.rosterPresenceMetricsR59 or { runs = 0, slices = 0, escalations = 0, restarts = 0 }
+    self.runtime.rosterPresenceMetricsR59 = metrics
+    metrics.slices = (tonumber(metrics.slices) or 0) + 1
+    metrics.lastSliceRows = processed
+    if startedProfile and debugprofilestop then
+        local okNow, nowValue = pcall(debugprofilestop)
+        if okNow and tonumber(nowValue) then
+            metrics.lastSliceMs = math.max(0, tonumber(nowValue) - startedProfile)
+            metrics.maxSliceMs = math.max(tonumber(metrics.maxSliceMs) or 0, tonumber(metrics.lastSliceMs) or 0)
+        end
+    end
+
+    if state.index <= math.max(0, tonumber(state.total) or 0) then
+        ScheduleRosterPresenceSliceR59(self, 0.02)
+        return false
+    end
+
+    -- A second GUILD_ROSTER_UPDATE arrived while this pass was in flight. The
+    -- cache may have changed behind already-read rows, so discard the whole pass
+    -- instead of briefly publishing stale/half-coherent presence.
+    if state.restartRequested then
+        metrics.restarts = (tonumber(metrics.restarts) or 0) + 1
+        local reason = tostring(state.reason or "GUILD_EVENT_COALESCED")
+        self.runtime.rosterPresenceR59 = nil
+        return self:BeginRosterPresenceRefreshR59(reason)
+    end
+
+    -- Atomic publication: only after all rows validated do volatile fields move
+    -- into the committed roster. No structural path above can leave half the
+    -- roster showing new presence and half showing the previous snapshot.
+    local nameR59, updateR59
+    for nameR59, updateR59 in pairs(state.staged or {}) do
+        local member = db.roster[nameR59]
+        if member then
+            member.online = updateR59.online and true or false
+            member.zone = updateR59.zone or member.zone or ""
+            member.rosterIndex = tonumber(updateR59.rosterIndex) or member.rosterIndex
+            if updateR59.online then
+                member.offlineHours = 0
+                member.offlineDays = 0
+                member.lastOnlineText = "Online"
+            elseif member.lastOnlineText == "Online" or not member.lastOnlineText or member.lastOnlineText == "" then
+                -- Presence intentionally does not call GetGuildRosterLastOnline;
+                -- the next canonical scan fills the exact offline duration.
+                member.lastOnlineText = "Offline"
+            end
+        end
+    end
+
+    local online = tonumber(state.online) or 0
+    self.runtime.rosterPresenceR59 = nil
+    metrics.runs = (tonumber(metrics.runs) or 0) + 1
+    metrics.lastRows = tonumber(state.rows) or 0
+    metrics.lastOnline = online
+    metrics.lastReason = tostring(state.reason or "GUILD_EVENT")
+    db.lastOnline = online
+    -- CP7: Presence changes member.online in-place without changing db.lastScan.
+    -- Any cache keyed only by the canonical scan timestamp would otherwise keep
+    -- the previous Online/Shown composition for several seconds. Publish one
+    -- volatile revision and invalidate only the online-dependent view caches.
+    self.runtime.rosterPresenceRevisionR59 = (tonumber(self.runtime.rosterPresenceRevisionR59) or 0) + 1
+    self.runtime.sortedRosterView184 = nil
+    self.runtime.rosterSummaryCounts184 = nil
+    self.runtime.compositionCache180 = nil
+    self.runtime.rosterPresenceLastAtR59 = self:Now()
+    self.runtime.rosterPresenceLastRowsR59 = tonumber(state.rows) or 0
+    if self.RefreshHeaderOnlineIndicator183 then pcall(self.RefreshHeaderOnlineIndicator183, self) end
+    if self.UpdateMinimapBadge then pcall(self.UpdateMinimapBadge, self) end
+    local page = self.ui and self.ui.currentPage or nil
+    if self.ui and self.ui.main and self.ui.main.IsVisible and self.ui.main:IsVisible()
+        and (page == "roster" or page == "home" or page == "overview") and self.RefreshVisiblePage then
+        pcall(self.RefreshVisiblePage, self)
+    end
+    return true
+end
+
 function OTLGM:ReadRoster()
     local override = self.runtime and self.runtime.rosterReadOverride180
     if override then return override.snapshot or {}, tonumber(override.total) or 0, tonumber(override.online) or 0 end
@@ -850,7 +1292,7 @@ function OTLGM:BeginRosterScan180(reason)
     local total = GetNumGuildMembers and (tonumber(GetNumGuildMembers(true)) or 0) or 0
     self.runtime.rosterRead180 = {
         reason = tostring(reason or "INTERNAL"), total = total, index = 1,
-        online = 0, snapshot = {}, startedAt = self:Now(), restarts = 0,
+        online = 0, snapshot = {}, lookupByKeyR26 = {}, startedAt = self:Now(), restarts = 0,
     }
     self.runtime.rosterMetrics180 = self.runtime.rosterMetrics180 or { fullScans = 0, targetedRefreshes = 0, reasons = {} }
     if self.ScheduleAfter180 then
@@ -860,7 +1302,7 @@ function OTLGM:BeginRosterScan180(reason)
     -- Never fall back to a synchronous 780+ member scan. Without the shared
     -- scheduler the safe behavior is an explicit error and no partial commit.
     self.runtime.rosterRead180 = nil
-    if self.SetOperationState156 then self:SetOperationState156("ROSTER", "ERROR", "Bounded roster scheduler is unavailable", 6) end
+    if self.SetOperationState156 then self:SetOperationState156("ROSTER", "ERROR", "Guild roster update is temporarily unavailable", 6) end
     return false
 end
 
@@ -868,6 +1310,11 @@ function OTLGM:ProcessRosterScanSlice180(forceAll)
     local state = self.runtime and self.runtime.rosterRead180
     if not state then return false end
     if self.InCombat and self:InCombat() and state.reason ~= "MANUAL" then
+        if self.ScheduleAfter180 then ScheduleRosterScanSliceSafe180(self, 1) end
+        return false
+    end
+    if state.reason ~= "MANUAL" and self.runtime and self.runtime.transitionActive176 then
+        self.runtime.rosterTransitionDeferrals181 = (tonumber(self.runtime.rosterTransitionDeferrals181) or 0) + 1
         if self.ScheduleAfter180 then ScheduleRosterScanSliceSafe180(self, 1) end
         return false
     end
@@ -886,7 +1333,7 @@ function OTLGM:ProcessRosterScanSlice180(forceAll)
             end
             self.runtime.rosterRead180 = nil
             self.runtime.rosterReadOverride180 = nil
-            if self.SetOperationState156 then self:SetOperationState156("ROSTER", "ERROR", "Roster API could not be read safely", 6) end
+            if self.SetOperationState156 then self:SetOperationState156("ROSTER", "ERROR", "Guild roster could not be read safely", 6) end
             return false
         end
     end
@@ -896,6 +1343,7 @@ function OTLGM:ProcessRosterScanSlice180(forceAll)
         state.index = 1
         state.online = 0
         state.snapshot = {}
+        state.lookupByKeyR26 = {}
         state.restarts = (tonumber(state.restarts) or 0) + 1
     else
         state.total = liveTotal
@@ -908,14 +1356,49 @@ function OTLGM:ProcessRosterScanSlice180(forceAll)
     end
     local processed = 0
     -- A 788+ member OctoWoW guild must never monopolize one rendered frame.
-    -- Spread the scan over smaller slices; total scan latency grows slightly,
-    -- but foreground frame-time spikes are materially lower.
+    -- 1.8.1 also adapts the slice to current client pressure: rain, cities and
+    -- dense scenes leave less frame budget for Lua even when addon work itself
+    -- has not changed.
+    local pressureState = self.GetClientPressure181 and self:GetClientPressure181() or nil
+    local fps = pressureState and tonumber(pressureState.fps) or nil
+    if not fps and GetFramerate then
+        local fpsOk, fpsValue = pcall(GetFramerate)
+        if fpsOk then fps = tonumber(fpsValue) end
+    end
+    local profile = OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.performanceProfile181 or "AUTO"
+    local guardActive = pressureState and pressureState.guard and true or (self.IsPerformanceGuardActive181 and self:IsPerformanceGuardActive181() or false)
+    local sliceBudgetMs = 4.0
     local maximum = forceAll and math.max(1, state.total) or 50
+    if not forceAll and profile == "SMOOTH" then
+        maximum = 30
+        sliceBudgetMs = 2.5
+    elseif not forceAll and profile == "FRESH" then
+        maximum = 64
+        sliceBudgetMs = 4.5
+    end
+    -- FPS protection overrides the preference when the renderer is already
+    -- struggling. This is deliberately conservative for dense cities/weather.
+    if not forceAll and fps and fps < 30 then
+        maximum = math.min(maximum, 24)
+        sliceBudgetMs = math.min(sliceBudgetMs, 2.0)
+    elseif not forceAll and fps and fps < 45 then
+        maximum = math.min(maximum, 36)
+        sliceBudgetMs = math.min(sliceBudgetMs, 3.0)
+    end
+    if not forceAll and guardActive then
+        maximum = math.min(maximum, 18)
+        sliceBudgetMs = math.min(sliceBudgetMs, 1.5)
+    end
+    if not forceAll and pressureState and tonumber(pressureState.level) >= 2 and not guardActive then
+        maximum = math.min(maximum, 24)
+        sliceBudgetMs = math.min(sliceBudgetMs, 2.0)
+    end
     state.snapshot = type(state.snapshot) == "table" and state.snapshot or {}
     state.online = tonumber(state.online) or 0
     state.index = math.max(1, tonumber(state.index) or 1)
+    local sliceNow = self:Now()
     while state.index <= state.total and processed < maximum do
-        local rowOk, member, isOnline = pcall(ReadRosterMember180, self, state.index, self:Now())
+        local rowOk, member, isOnline = pcall(ReadRosterMember180, self, state.index, sliceNow)
         if not rowOk then
             state.rowFailures180 = (tonumber(state.rowFailures180) or 0) + 1
             if self.RecordInternalIssueRC3 then pcall(self.RecordInternalIssueRC3, self, "Roster/SLICE_ROW", member) end
@@ -935,13 +1418,16 @@ function OTLGM:ProcessRosterScanSlice180(forceAll)
         state.rowFailures180 = 0
         if member then
             state.snapshot[member.name] = member
+            state.lookupByKeyR26 = type(state.lookupByKeyR26) == "table" and state.lookupByKeyR26 or {}
+            local normalizedR26 = self:NormalizeName(member.name or "")
+            if normalizedR26 ~= "" then state.lookupByKeyR26[normalizedR26] = member end
             if isOnline then state.online = state.online + 1 end
         end
         state.index = state.index + 1
         processed = processed + 1
-        if not forceAll and startedProfile and debugprofilestop and processed >= 16 then
+        if not forceAll and startedProfile and debugprofilestop and processed >= 12 then
             local ok, current = pcall(debugprofilestop)
-            if ok and tonumber(current) and (tonumber(current) - startedProfile) >= 4 then break end
+            if ok and tonumber(current) and (tonumber(current) - startedProfile) >= sliceBudgetMs then break end
         end
     end
 
@@ -953,9 +1439,15 @@ function OTLGM:ProcessRosterScanSlice180(forceAll)
     metrics.readSlices = (tonumber(metrics.readSlices) or 0) + 1
     metrics.rowsRead = (tonumber(metrics.rowsRead) or 0) + processed
     metrics.lastSliceRows = processed
+    metrics.lastSliceFps181 = fps
+    if fps and fps < 45 then metrics.lowFpsSlices181 = (tonumber(metrics.lowFpsSlices181) or 0) + 1 end
+    if guardActive then metrics.guardSlices181 = (tonumber(metrics.guardSlices181) or 0) + 1 end
     if startedProfile and debugprofilestop then
         local ok, current = pcall(debugprofilestop)
-        if ok and tonumber(current) then metrics.lastSliceMs = math.max(0, tonumber(current) - startedProfile) end
+        if ok and tonumber(current) then
+            metrics.lastSliceMs = math.max(0, tonumber(current) - startedProfile)
+            metrics.maxSliceMs181 = math.max(tonumber(metrics.maxSliceMs181) or 0, tonumber(metrics.lastSliceMs) or 0)
+        end
     end
 
     if state.index <= state.total then
@@ -963,20 +1455,77 @@ function OTLGM:ProcessRosterScanSlice180(forceAll)
         return false
     end
 
+    -- The comparison/commit walks the old and new roster and can be the largest
+    -- remaining single callback for a 700+ member guild. Hold that atomic step
+    -- through transient city/weather/transition pressure, with a bounded maximum
+    -- wait so sustained low FPS cannot leave the roster pipeline locked forever.
+    local pressureLevel = pressureState and tonumber(pressureState.level) or 0
+    if not forceAll and state.reason ~= "MANUAL" and pressureLevel >= 2 then
+        state.commitWaitStarted181 = tonumber(state.commitWaitStarted181) or self:Now()
+        local maximumWait = pressureLevel >= 3 and 30 or 15
+        if self:Now() - state.commitWaitStarted181 < maximumWait then
+            metrics.commitPressureDeferrals181 = (tonumber(metrics.commitPressureDeferrals181) or 0) + 1
+            if self.ScheduleAfter180 then ScheduleRosterScanSliceSafe180(self, pressureLevel >= 3 and 2 or 1) end
+            return false
+        end
+    end
+    state.commitWaitStarted181 = nil
+
     self.runtime.rosterRead180 = nil
     self.runtime.rosterDataDirty180 = nil
+    -- r26: publish the normalized sender/member index produced by the same
+    -- bounded roster slices. Scan() atomically adopts it with the snapshot, so
+    -- the first addon packet after commit never rebuilds ~800 names in one frame.
+    self.runtime.pendingRosterMemberLookupR26 = { roster = state.snapshot, byKey = state.lookupByKeyR26 or {} }
     self.runtime.rosterReadOverride180 = { snapshot = state.snapshot, total = state.total, online = state.online }
+    local commitStarted
+    if debugprofilestop then local profileOk, value = pcall(debugprofilestop) if profileOk then commitStarted = tonumber(value) end end
     local ok, problem = pcall(function() self:Scan(state.reason) end)
     self.runtime.rosterReadOverride180 = nil
-    if self.RefreshSenderRosterCache then self:RefreshSenderRosterCache(true) end
+    if commitStarted and debugprofilestop then
+        local profileOk, value = pcall(debugprofilestop)
+        if profileOk and tonumber(value) then
+            local commitMs = math.max(0, tonumber(value) - commitStarted)
+            self.runtime.rosterMetrics180 = self.runtime.rosterMetrics180 or {}
+            self.runtime.rosterMetrics180.lastCommitMs181 = commitMs
+            self.runtime.rosterMetrics180.maxCommitMs181 = math.max(tonumber(self.runtime.rosterMetrics180.maxCommitMs181) or 0, commitMs)
+            if self.EndPerformanceSample180 and commitMs >= 8 and self.ActivatePerformanceGuard181 then
+                self:ActivatePerformanceGuard181("roster commit", math.min(20, math.max(8, commitMs)), commitMs, fps)
+            end
+        end
+    end
     if not ok then
+        self.runtime.pendingRosterMemberLookupR26 = nil
         if self.SetOperationState156 then self:SetOperationState156("ROSTER", "ERROR", tostring(problem or "Roster commit failed"), 6) end
-        if self.SetStatus then self:SetStatus("Roster snapshot could not be committed: " .. tostring(problem or "unknown error")) end
+        if self.SetStatus then self:SetStatus("Guild roster update could not be saved: " .. tostring(problem or "unknown error")) end
         return false
     end
-    -- RC5: privileged packets deferred while authority was stale are replayed
-    -- only after a successful committed roster snapshot refreshed the allow-list.
-    if self.ReplayAuthorityPacketsRC5 then self:ReplayAuthorityPacketsRC5() end
+
+    -- The bounded reader already produced the normalized sender/member lookup.
+    -- RefreshSenderRosterCache(force=true) therefore adopts that committed table
+    -- in O(1); this delayed step only refreshes authority state and replays any
+    -- packets that were quarantined while the roster commit was pending.
+    local authorityRefreshStarted181 = self:Now()
+    local function RefreshAuthorityAfterCommit181(current)
+        local pressure = current.GetClientPressure181 and current:GetClientPressure181() or nil
+        if pressure and tonumber(pressure.level) >= 2 and current.ScheduleAfter180 and current:Now() - authorityRefreshStarted181 < 20 then
+            current.runtime = current.runtime or {}
+            current.runtime.rosterPostCommitDeferrals181 = (tonumber(current.runtime.rosterPostCommitDeferrals181) or 0) + 1
+            current:ScheduleAfter180("roster-post-commit-authority", 2, RefreshAuthorityAfterCommit181, 60)
+            return
+        end
+        if current.__impl180 and current.__impl180.RefreshSenderRosterCache__impl1 then
+            pcall(current.__impl180.RefreshSenderRosterCache__impl1, current, true)
+        elseif current.RefreshSenderRosterCache then
+            pcall(current.RefreshSenderRosterCache, current, true)
+        end
+        if current.ReplayAuthorityPacketsRC5 then pcall(current.ReplayAuthorityPacketsRC5, current) end
+    end
+    if self.ScheduleAfter180 then
+        self:ScheduleAfter180("roster-post-commit-authority", 0.12, RefreshAuthorityAfterCommit181, 60)
+    else
+        RefreshAuthorityAfterCommit181(self)
+    end
     return true
 end
 
@@ -1077,7 +1626,7 @@ end
 function OTLGM:IsGuildLeader170()
     -- Guild-leader identity is guild-specific and must never be inferred for an
     -- unrelated character merely because a stale/custom-server API reports
-    -- rank index 0.  Morrow/Lucks still have to pass the live server leader
+    -- rank index 0.  Lucks still has to pass the live server leader
     -- signal before this *permission* helper grants leader-level capabilities.
     -- Other officers continue through the normal live rank-flag checks below.
     local playerName = UnitName and UnitName("player") or ""
@@ -1105,13 +1654,13 @@ function OTLGM:GetGuildPermissionFlags170(force)
 
     local flags = {
         checkedAt = now,
-        promote = false, demote = false, remove = false,
-        editPublic = false, viewOfficer = false, editOfficer = false,
+        promote = false, demote = false, remove = false, invite = false, setMotd = false,
+        editPublic = false, viewOfficer = false, editOfficer = false, modifyGuildInfo = false,
         source = "unavailable",
     }
     if self:IsGuildLeader170() then
-        flags.promote, flags.demote, flags.remove = true, true, true
-        flags.editPublic, flags.viewOfficer, flags.editOfficer = true, true, true
+        flags.promote, flags.demote, flags.remove, flags.invite, flags.setMotd = true, true, true, true, true
+        flags.editPublic, flags.viewOfficer, flags.editOfficer, flags.modifyGuildInfo = true, true, true, true
         flags.source = "guild-leader"
         self.runtime.guildPermissionFlags170 = flags
         return flags
@@ -1123,14 +1672,17 @@ function OTLGM:GetGuildPermissionFlags170(force)
         if selected then
             local ok, guildListen, guildSpeak, officerListen, officerSpeak,
                 promote, demote, inviteMember, removeMember, setMotd,
-                editPublic, viewOfficer, editOfficer = pcall(GuildControlGetRankFlags)
+                editPublic, viewOfficer, editOfficer, modifyGuildInfo = pcall(GuildControlGetRankFlags)
             if ok then
                 flags.promote = promote and true or false
                 flags.demote = demote and true or false
                 flags.remove = removeMember and true or false
+                flags.invite = inviteMember and true or false
+                flags.setMotd = setMotd and true or false
                 flags.editPublic = editPublic and true or false
                 flags.viewOfficer = viewOfficer and true or false
                 flags.editOfficer = editOfficer and true or false
+                flags.modifyGuildInfo = modifyGuildInfo and true or false
                 flags.source = "rank-flags"
             end
         end
@@ -1291,22 +1843,26 @@ function OTLGM:GetWorldRecruitmentInfo()
     self:EnsureDB()
     local settings = OTLGM_DB.settings
     local timestamp = tonumber(settings.lastWorldRecruitmentAt)
+    local minimum = tonumber(settings.worldRecruitmentMinSeconds) or 480
+    local recommended = tonumber(settings.worldRecruitmentRecommendedSeconds) or 600
+    if recommended < minimum then recommended = minimum end
+    local minimumMinutes = math.max(1, math.floor((minimum + 59) / 60))
+    local recommendedMinutes = math.max(minimumMinutes, math.floor((recommended + 59) / 60))
     local info = {
         timestamp = timestamp,
         label = settings.lastWorldRecruitmentLabel or "World recruitment",
         channel = settings.lastWorldRecruitmentChannel or tostring(settings.worldChannel or "6"),
         value = "NEVER",
-        detail = "No world recruitment post recorded yet.",
+        detail = "No world recruitment post recorded yet. Preferred interval: " .. tostring(minimumMinutes) .. "-" .. tostring(recommendedMinutes) .. " min.",
         state = "NEVER",
         elapsed = nil,
+        minimum = minimum, recommended = recommended,
+        minimumMinutes = minimumMinutes, recommendedMinutes = recommendedMinutes,
     }
     if not timestamp then return info end
 
     local elapsed = self:Now() - timestamp
     if elapsed < 0 then elapsed = 0 end
-    local minimum = tonumber(settings.worldRecruitmentMinSeconds) or 600
-    local recommended = tonumber(settings.worldRecruitmentRecommendedSeconds) or 900
-    if recommended < minimum then recommended = minimum end
 
     info.elapsed = elapsed
     info.value = self:FormatWorldRecruitmentElapsed(elapsed)
@@ -1317,10 +1873,11 @@ function OTLGM:GetWorldRecruitmentInfo()
         info.detail = "Wait " .. tostring(waitMinutes) .. "m before posting again."
     elseif elapsed < recommended then
         info.state = "WINDOW"
-        info.detail = "Recommended 10-15 min window."
+        info.detail = tostring(minimumMinutes) .. "-" .. tostring(recommendedMinutes) .. " min window; "
+            .. tostring(recommendedMinutes) .. "m+ is the preferred green-ready point."
     else
         info.state = "READY"
-        info.detail = "Safe to post in world again."
+        info.detail = "Preferred interval reached; safe to post in world again."
     end
     return info
 end
@@ -1336,6 +1893,7 @@ function OTLGM:MarkRecruitmentSent(key, target, label)
     OTLGM_DB.settings.lastWorldRecruitmentChannel = tostring(self:GetWorldChannelNumber() or OTLGM_DB.settings.worldChannel or "6")
     if self.RefreshWorldRecruitmentIndicator then self:RefreshWorldRecruitmentIndicator() end
     if self.RefreshRecruitmentPage then self:RefreshRecruitmentPage() end
+    if self.MarkQuickDockDirty182 then self:MarkQuickDockDirty182("recruitment") end
 end
 
 function OTLGM:GetGuildChatMessages(channel)
@@ -1470,9 +2028,21 @@ function OTLGM.__impl180.CaptureGuildChatMessage__impl1(self, channel, message, 
     end
 
     if self.ui and self.ui.main and self.ui.main:IsVisible() and self.ui.currentPage == "guildchat" and self.RefreshGuildChatPage then
-        self:RefreshGuildChatPage()
+        -- RC4-r9: a busy guild channel can deliver several messages inside one
+        -- render slice.  Rebuilding the complete chat page for each line causes
+        -- needless layout churn.  Collapse a burst into one keyed refresh while
+        -- keeping the delay below a perceptible chat latency.
+        if self.ScheduleAfter180 then
+            self:ScheduleAfter180("guild-chat-visible-refresh-184", 0.05, function(owner)
+                if owner and owner.ui and owner.ui.main and owner.ui.main:IsVisible() and owner.ui.currentPage == "guildchat"
+                    and owner.RefreshGuildChatPage then owner:RefreshGuildChatPage("chat-burst") end
+            end, 76)
+        else
+            self:RefreshGuildChatPage()
+        end
     end
     if self.RefreshGuildChatNavigationBadge then self:RefreshGuildChatNavigationBadge() elseif self.RefreshNavigation then self:RefreshNavigation() end
+    if self.MarkQuickDockDirty182 then self:MarkQuickDockDirty182("chat") end
     return true
 end
 
@@ -1501,24 +2071,28 @@ function OTLGM:ClearGuildChatNewMarkers()
     self.guildChatNewMarker = {}
 end
 
-function OTLGM:SendGuildChatMessage(message, channel)
+function OTLGM:SendGuildChatMessage(message, channel, quietFeedback)
     message = Trim(message or "")
     channel = channel == "OFFICER" and "OFFICER" or "GUILD"
     if message == "" then
-        if self.Notify then self:Notify("Message Empty", "Write a message before sending.") end
-        return false
+        if not quietFeedback and self.Notify then self:Notify("Message Empty", "Write a message before sending.") end
+        return false, "Write a message before sending."
+    end
+    if not GetGuildInfo or not GetGuildInfo("player") then
+        if not quietFeedback and self.Notify then self:Notify("Guild Chat Unavailable", "You are not currently in a guild.") end
+        return false, "You are not currently in a guild."
     end
     if channel == "OFFICER" and (not self.IsOfficerMode or not self:IsOfficerMode()) then
-        if self.Notify then self:Notify("Officer Chat Unavailable", "Your current guild rank cannot use the officer chat page.") end
-        return false
+        if not quietFeedback and self.Notify then self:Notify("Officer Chat Unavailable", "Your current guild rank cannot use the officer chat page.") end
+        return false, "Your current guild rank cannot use officer chat."
     end
 
     local ok, err = pcall(SendChatMessage, message, channel)
     if not ok then
-        if self.Notify then self:Notify("Chat Message Failed", tostring(err)) end
-        return false
+        if not quietFeedback and self.Notify then self:Notify("Chat Message Failed", tostring(err)) end
+        return false, tostring(err or "The game client rejected the message.")
     end
-    if self.SetStatus then
+    if not quietFeedback and self.SetStatus then
         self:SetStatus(channel == "OFFICER" and "Message sent to officer chat." or "Message sent to guild chat.")
     end
     return true

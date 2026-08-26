@@ -19,11 +19,20 @@ local BASE_CLASSES_175 = {
     SHAMAN=true, MAGE=true, WARLOCK=true, DRUID=true,
 }
 local FINAL_DUNGEON_BOSSES_175 = {
+    -- Preserve every legacy key accepted before r40, then add canonical keys.
+    -- This avoids turning a boss-detection repair into a regression for older
+    -- Octo/Turtle encounter names while fixing obvious typo/name gaps.
     bazilthredd=true, arugalfinal=true, archmagearugal=true, mutanus=true,
     akumaifinal=true, akumai=true, charlgarazorflank=true, princesstheradras=true,
     emperorandagranthaurissan=true, generaldrakkisath=true, darkmastergandling=true,
     baronrivendare=true, kinggordok=true, alzzinthewiildshaper=true,
     highinquisitorwhitemane=true, mutanusdevourer=true, vanefist=true,
+
+    mutanusthedevourer=true, edwinvancleef=true, amnennarthecoldbringer=true,
+    archaedas=true, chiefukorzsandscalp=true, shadeoferanikus=true,
+    emperordagranthaurissan=true, overlordwyrmthalak=true, balnazzar=true,
+    alzzinthewildshaper=true, princetortheldrin=true, antnormi=true,
+    arctiras=true, hargeshdoomcaller=true, genngreymane=true,
 }
 local HOSTILE_CAPITALS_175 = {
     ALLIANCE = { orgrimmar=true, thunderbluff=true, undercity=true },
@@ -79,6 +88,12 @@ local function AddSet175(self, key, value, maximum)
     if set[value] then return false end
     if Count175(set) >= (maximum or MAX_NAMES_175) then return false end
     set[value] = true
+    -- Performance176 caches set cardinalities. AchievementRaidRuntime predates
+    -- the public AddAchievementSetValue174 helper, so invalidate that cache for
+    -- every direct set write and immediately reconcile C-series thresholds.
+    self.runtime = self.runtime or {}
+    if self.runtime.achievementSetCounts176 then self.runtime.achievementSetCounts176[key] = nil end
+    if self.EvaluateAchievementThresholdProgress176 then self:EvaluateAchievementThresholdProgress176(key, false) end
     return true
 end
 
@@ -114,7 +129,13 @@ end
 local function IsGuildLeaderName175(self, name)
     if self.IsCanonicalGuildLeaderName180 then return self:IsCanonicalGuildLeaderName180(name) end
     local key = NameKey175(name)
-    return key == "morrow" or key == "lucks"
+    return key == "lucks"
+end
+
+local function IsLucksName175(name)
+    -- Achievements whose published condition explicitly says "Lucks" must not
+    -- inherit a broader leadership alias.  Normalize realm/case exactly once.
+    return NameKey175(name) == "lucks"
 end
 
 local function FullGuildParty175(self)
@@ -247,10 +268,10 @@ local ADDITIONS_175 = {
     { id="B052", category="SOCIAL", name="Family Resemblance", description="Form a full guild party where every member is the same race.", icon="Interface\\Icons\\Spell_Holy_PrayerOfSpirit", progress="sameRaceParty", required=5 },
     { id="B053", category="SOCIAL", name="The Regular Table", description="Spend ten uninterrupted minutes at the same inn with four other guild members.", icon="Interface\\Icons\\INV_Drink_03", progress="regularTableSeconds", required=600 },
     { id="B054", category="DUNGEONS", name="Level Bridge", description="Defeat a dungeon boss with a level gap of at least twenty among the guild members present.", icon="Interface\\Icons\\INV_Misc_Map_01", progress="levelBridge", required=1 },
-    { id="B055", category="SECRETS", name="Proper Respect", description="The title is your clue.", revealed="Target Morrow or Lucks and use /salute.", icon="Interface\\Icons\\Ability_Warrior_Salute", progress="properRespect", required=1, secret=true },
-    { id="B056", category="SOCIAL", name="Trial by Combat", description="Defeat Morrow or Lucks in a friendly duel.", icon="Interface\\Icons\\Ability_DualWield", progress="leaderDuelWin", required=1 },
-    { id="B057", category="SECRETS", name="Know Your Place", description="The title is your clue.", revealed="Lose a friendly duel to Morrow or Lucks.", icon="Interface\\Icons\\INV_Shield_05", progress="leaderDuelLoss", required=1, secret=true },
-    { id="B058", category="DUNGEONS", name="Royal Escort", description="Defeat a dungeon boss while grouped with Morrow or Lucks.", icon="Interface\\Icons\\Spell_Holy_DevotionAura", progress="royalEscort", required=1 },
+    { id="B055", category="SECRETS", name="Proper Respect", description="The title is your clue.", revealed="Target Lucks and use /salute.", icon="Interface\\Icons\\Ability_Warrior_Salute", progress="properRespect", required=1, secret=true },
+    { id="B056", category="SOCIAL", name="Trial by Combat", description="Defeat Lucks in a friendly duel.", icon="Interface\\Icons\\Ability_DualWield", progress="leaderDuelWin", required=1 },
+    { id="B057", category="SECRETS", name="Know Your Place", description="The title is your clue.", revealed="Lose a friendly duel to Lucks.", icon="Interface\\Icons\\INV_Shield_05", progress="leaderDuelLoss", required=1, secret=true },
+    { id="B058", category="DUNGEONS", name="Royal Escort", description="Defeat a dungeon boss while grouped with Lucks.", icon="Interface\\Icons\\Spell_Holy_DevotionAura", progress="royalEscort", required=1 },
     { id="B059", category="SOCIAL", name="Friendly Rivalry", description="Win and lose a duel against the same guild member.", icon="Interface\\Icons\\Ability_Warrior_Challange", progress="friendlyRivalry", required=1 },
     { id="B060", category="SOCIAL", name="Class Challenger", description="Defeat a guild member of every supported class in a duel.", icon="Interface\\Icons\\INV_Sword_04", progress="duelClasses", required=9 },
     { id="B061", category="DUNGEONS", name="Clean Comeback", description="After a failed attempt, defeat the same boss on the very next pull without losing a guild member.", icon="Interface\\Icons\\Spell_Holy_Renew", progress="cleanComeback", required=1 },
@@ -278,7 +299,7 @@ local ADDITIONS_175 = {
     { id="B083", category="SECRETS", name="Proud Lion", description="The title is your clue.", revealed="Have a full guild party salute in Goldshire.", icon="Interface\\Icons\\Ability_Warrior_Salute", progress="proudLion", required=5, secret=true },
     { id="B084", category="SECRETS", name="Dragon's Bane", description="The title is your clue.", revealed="Use /joke or /rude while targeting Lady Katrana Prestor or Onyxia.", icon="Interface\\Icons\\INV_Misc_Head_Dragon_01", progress="dragonsBane", required=1, secret=true },
     { id="B085", category="SECRETS", name="Run, Rabbit, Run!", description="The title is your clue.", revealed="Personally defeat a rabbit or hare critter.", icon="Interface\\Icons\\INV_Misc_Food_54", progress="rabbitRun", required=1, secret=true },
-    { id="B086", category="SECRETS", name="This Was a Mistake", description="The title is your clue.", revealed="Target Morrow or Lucks and use /bonk.", icon="Interface\\Icons\\INV_Hammer_04", progress="leaderBonk", required=1, secret=true },
+    { id="B086", category="SECRETS", name="This Was a Mistake", description="The title is your clue.", revealed="Target Lucks and use /bonk.", icon="Interface\\Icons\\INV_Hammer_04", progress="leaderBonk", required=1, secret=true },
 }
 
 local function RegisterAchievements175()
@@ -533,16 +554,19 @@ function OTLGM.__impl180.BuildAchievementsPage174__impl2(self, page)
     self.ui.achievementSearch174:SetScript("OnTextChanged",function()
         OTLGM.ui.achievementSearchRuntime180=this:GetText() or ""
         if OTLGM.ui.achievementSearchPlaceholder175 then if this:GetText()=="" then OTLGM.ui.achievementSearchPlaceholder175:Show() else OTLGM.ui.achievementSearchPlaceholder175:Hide() end end
-        OTLGM.ui.achievementOffset174=0
-        OTLGM.ui.achievementSearchDirty180=true
-        if OTLGM.WakeScheduler180 then OTLGM:WakeScheduler180("ui-debounce:achievements") end
+        if not OTLGM.ui.achievementProgrammaticFocus180 then
+            OTLGM.ui.achievementOffset174=0
+            OTLGM.ui.achievementSearchDirty180=true
+            OTLGM.ui.achievementSearchElapsed180=0
+            if OTLGM.WakeScheduler180 then OTLGM:WakeScheduler180("ui-debounce:achievements") end
+        end
     end)
     self.ui.achievementSearch174:SetScript("OnEditFocusGained",function() if OTLGM.ui.achievementSearchPlaceholder175 then OTLGM.ui.achievementSearchPlaceholder175:Hide() end end)
     self.ui.achievementSearch174:SetScript("OnEditFocusLost",function() if this:GetText()=="" and OTLGM.ui.achievementSearchPlaceholder175 then OTLGM.ui.achievementSearchPlaceholder175:Show() end end)
     self.ui.achievementSearch174:SetScript("OnEscapePressed",function() if this:GetText()~="" then this:SetText("") else this:ClearFocus() end end)
 
     self.ui.achievementFilterButtons174 = {}
-    local filters={{"ALL","All"},{"COMPLETE","Completed"},{"PROGRESS","In Progress"},{"LOCKED","Locked"}}
+    local filters={{"ALL","All"},{"COMPLETE","Completed"},{"PROGRESS","In Progress"},{"LOCKED","Not Started"}}
     local index
     for index=1,4 do
         local key=filters[index][1]
@@ -592,6 +616,22 @@ function OTLGM.__impl180.BuildAchievementsPage174__impl2(self, page)
         row:SetPoint("TOPLEFT",list,"TOPLEFT",8,-8-((index-1)*61))
         row:SetWidth(522) row:SetHeight(57)
         row:SetBackdrop({bgFile="Interface\\Tooltips\\UI-Tooltip-Background",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",tile=true,tileSize=16,edgeSize=9,insets={left=2,right=2,top=2,bottom=2}})
+        -- Selection is deliberately separate from completion/secret semantics.
+        -- A narrow blue rail and subtle wash make the focused card obvious
+        -- without replacing the card's normal gold/purple/neutral palette.
+        row.selectedWash174=row:CreateTexture(nil,"BACKGROUND")
+        row.selectedWash174:SetPoint("TOPLEFT",row,"TOPLEFT",3,-3)
+        row.selectedWash174:SetPoint("BOTTOMRIGHT",row,"BOTTOMRIGHT",-3,3)
+        row.selectedWash174:SetTexture("Interface\\Tooltips\\UI-Tooltip-Background")
+        row.selectedWash174:SetVertexColor(0.16,0.46,0.82,0.20)
+        row.selectedWash174:Hide()
+        row.selectedRail174=row:CreateTexture(nil,"ARTWORK")
+        row.selectedRail174:SetPoint("TOPLEFT",row,"TOPLEFT",3,-4)
+        row.selectedRail174:SetPoint("BOTTOMLEFT",row,"BOTTOMLEFT",3,4)
+        row.selectedRail174:SetWidth(4)
+        row.selectedRail174:SetTexture("Interface\\Tooltips\\UI-Tooltip-Background")
+        row.selectedRail174:SetVertexColor(0.30,0.72,1,0.96)
+        row.selectedRail174:Hide()
         row.icon174=row:CreateTexture(nil,"OVERLAY")
         row.icon174:SetPoint("LEFT",row,"LEFT",8,0) row.icon174:SetWidth(41) row.icon174:SetHeight(41)
         row.name174=Text175(row,"GameFontNormal","",58,-7,324,"LEFT")
@@ -658,6 +698,8 @@ function OTLGM.__impl180.RefreshAchievements174__impl2(self)
         row=self.ui.achievementRows174[index]
         row.achievement174=nil
         row.name174:SetText("") row.description174:SetText("") row.status174:SetText("") row.date174:SetText("")
+        if row.selectedWash174 then row.selectedWash174:Hide() end
+        if row.selectedRail174 then row.selectedRail174:Hide() end
         SetTexture175(row.icon174,SAFE_ICON_175)
         row:Hide()
     end
@@ -672,7 +714,12 @@ function OTLGM.__impl180.RefreshAchievements174__impl2(self)
             row.achievement174=def
             SetTexture175(row.icon174,icon)
             row.name174:SetText(name) row.description174:SetText(description)
-            if complete then
+            if complete and def.secret then
+                row:SetBackdropColor(0.050,0.030,0.065,0.98) row:SetBackdropBorderColor(0.56,0.30,0.68,1)
+                row.icon174:SetVertexColor(1,0.92,1) row.name174:SetTextColor(0.90,0.68,1)
+                row.status174:SetText("COMPLETE • SECRET") row.status174:SetTextColor(0.82,0.56,1)
+                row.date174:SetText(when and date("%d %b %Y",when) or "") row.date174:SetTextColor(0.68,0.62,0.72)
+            elseif complete then
                 row:SetBackdropColor(0.075,0.052,0.020,0.98) row:SetBackdropBorderColor(0.68,0.44,0.12,1)
                 row.icon174:SetVertexColor(1,1,1) row.name174:SetTextColor(1,0.82,0.35)
                 row.status174:SetText("COMPLETE") row.status174:SetTextColor(0.35,0.95,0.42)
@@ -684,11 +731,18 @@ function OTLGM.__impl180.RefreshAchievements174__impl2(self)
             else
                 row:SetBackdropColor(0.025,0.023,0.020,0.98) row:SetBackdropBorderColor(0.24,0.22,0.19,1)
                 row.icon174:SetVertexColor(0.40,0.40,0.40) row.name174:SetTextColor(0.72,0.72,0.70)
-                row.status174:SetText(required>1 and (tostring(math.floor(current)).." / "..tostring(math.floor(required))) or "LOCKED")
+                row.status174:SetText(current > 0 and (tostring(math.floor(current)).." / "..tostring(math.floor(required))) or "Not started")
                 row.status174:SetTextColor(current>0 and 1 or 0.72,current>0 and 0.78 or 0.72,current>0 and 0.18 or 0.68)
                 row.date174:SetText("")
             end
-            if self.ui.achievementFocus174==def.id then row:SetBackdropBorderColor(0.30,0.72,1,1) end
+            if self.ui.achievementFocus174==def.id then
+                row:SetBackdropBorderColor(0.30,0.72,1,1)
+                if row.selectedWash174 then row.selectedWash174:Show() end
+                if row.selectedRail174 then row.selectedRail174:Show() end
+            else
+                if row.selectedWash174 then row.selectedWash174:Hide() end
+                if row.selectedRail174 then row.selectedRail174:Hide() end
+            end
             row:Show()
         end
     end
@@ -814,10 +868,39 @@ local function UpdateReunion175(self,group,silent)
     end
 end
 
+local function TabardSlot175()
+    local slot=19
+    if GetInventorySlotInfo then
+        local resolved=GetInventorySlotInfo("TabardSlot")
+        if tonumber(resolved) and tonumber(resolved)>0 then slot=tonumber(resolved) end
+    end
+    return slot
+end
+
+local function VerifiedGuildTabardLink175(self,unit)
+    unit=unit or "player"
+    if not GetInventoryItemLink then return false,nil end
+    if unit=="player" and GetGuildInfo and not GetGuildInfo("player") then return false,nil end
+    local link=GetInventoryItemLink(unit,TabardSlot175())
+    if not link or link=="" then return false,nil end
+    local _,_,itemId=string.find(link,"item:(%d+)")
+    if tonumber(itemId)==5976 then return true,link end
+    if GetItemInfo then
+        local name=GetItemInfo(link)
+        local lowered=string.lower(tostring(name or ""))
+        if string.find(lowered,"guild tabard",1,true) or string.find(lowered,"guildtabard",1,true) then return true,link end
+    end
+    return false,link
+end
+
+function OTLGM:IsVerifiedGuildTabardEquippedR13(unit)
+    local verified=VerifiedGuildTabardLink175(self,unit or "player")
+    return verified and true or false
+end
+
 local function LocalGroupState175(self,group)
-    local state={ fishing=self.runtime and self.runtime.fishing175 and true or false, resting=IsResting and IsResting() and true or false, tabard=false, zone=CurrentPlace175(self), signature=PartySignature175(group) }
-    if GetInventoryItemLink and GetInventoryItemLink("player",19) then state.tabard=true
-    elseif GetInventoryItemTexture and GetInventoryItemTexture("player",19) then state.tabard=true end
+    local verifiedTabard=VerifiedGuildTabardLink175(self,"player") and true or false
+    local state={ fishing=self.runtime and self.runtime.fishing175 and true or false, resting=IsResting and IsResting() and true or false, tabard=verifiedTabard, tabardVerifiedR13=verifiedTabard, zone=CurrentPlace175(self), signature=PartySignature175(group) }
     return state
 end
 
@@ -831,14 +914,14 @@ local function BroadcastGroupState175(self,group,force)
     if not group or not group.isParty then return end
     self.runtime=self.runtime or {}
     local state=LocalGroupState175(self,group)
-    local encoded=(state.fishing and "1" or "0")..(state.resting and "1" or "0")..(state.tabard and "1" or "0")..":"..state.signature..":"..state.zone
+    local encoded=(state.fishing and "1" or "0")..(state.resting and "1" or "0")..(state.tabard and "1" or "0")..(state.tabardVerifiedR13 and "1" or "0")..":"..state.signature..":"..state.zone
     if not force and self.runtime.lastLocalState175==encoded then return end
     self.runtime.lastLocalState175=encoded
     local index,member
     for index=1,table.getn(group.guildMembers or {}) do
         member=group.guildMembers[index]
         if not IsPlayer175(member.name) then
-            self:QueueReleaseState175("GROUP",(state.fishing and "F" or "-")..(state.resting and "R" or "-")..(state.tabard and "T" or "-"),state.signature,state.zone,member.name)
+            self:QueueReleaseState175("GROUP",(state.fishing and "F" or "-")..(state.resting and "R" or "-")..(state.tabard and "T" or "-")..(state.tabardVerifiedR13 and "V" or "-"),state.signature,state.zone,member.name)
         end
     end
 end
@@ -866,7 +949,7 @@ local function CheckFullPartySharedStates175(self,group,silent)
             if remote and now-(remote.ts or 0)<=120 and remote.signature==signature and remote.zone==zone then
                 if remote.fishing then fishing=fishing+1 end
                 if remote.resting then resting=resting+1 end
-                if remote.tabard then tabards=tabards+1 end
+                if remote.tabard and remote.tabardVerifiedR13 then tabards=tabards+1 end
             end
         end
     end
@@ -882,18 +965,21 @@ local function CheckFullPartySharedStates175(self,group,silent)
     else self.runtime.regularTable175=nil self:SetAchievementCounter174("regularTableSeconds",0) end
 end
 
-local function CheckDiplomaticIncident175(self,silent)
-    -- UNIT_HEALTH can be noisy. Outside an enemy capital this path must stay a
-    -- constant-time no-op and must not rebuild the party snapshot.
-    if self:IsAchievementComplete174("B075") then return end
+function OTLGM:NeedsDiplomaticHealthTracking175()
+    if self:IsAchievementComplete174("B075") then return false end
     local faction=UnitFactionGroup and UnitFactionGroup("player") or ""
     local hostile=HOSTILE_CAPITALS_175[faction]
-    if not hostile then return end
+    if not hostile then return false end
     local zone=CurrentZone175(self)
     local subzone=CurrentSubzone175(self)
-    if not hostile[zone] and not hostile[subzone] then return end
+    if not hostile[zone] and not hostile[subzone] then return false end
     local group,full=FullGuildParty175(self)
-    if not full then return end
+    return full and true or false, group
+end
+
+local function CheckDiplomaticIncident175(self,silent)
+    local needed,group=self:NeedsDiplomaticHealthTracking175()
+    if not needed or not group then return end
     local index,member
     for index=1,table.getn(group.guildMembers) do
         member=group.guildMembers[index]
@@ -930,7 +1016,9 @@ function OTLGM.__impl180.HandleRelease175Message__impl1(self, message,channel,se
             for index=1,table.getn(group.guildMembers or {}) do member=group.guildMembers[index] if member.key==NameKey175(sender) then memberFound=true break end end
             if not memberFound then return false end
             self.runtime=self.runtime or {} self.runtime.groupStates175=self.runtime.groupStates175 or {}
-            self.runtime.groupStates175[NameKey175(sender)]={fishing=string.find(value,"F",1,true)~=nil,resting=string.find(value,"R",1,true)~=nil,tabard=string.find(value,"T",1,true)~=nil,signature=signature,zone=zone,ts=ts}
+            local claimedTabard=string.find(value,"T",1,true)~=nil
+            local verifiedTabard=claimedTabard and string.find(value,"V",1,true)~=nil
+            self.runtime.groupStates175[NameKey175(sender)]={fishing=string.find(value,"F",1,true)~=nil,resting=string.find(value,"R",1,true)~=nil,tabard=verifiedTabard,tabardClaimedR12=claimedTabard,tabardVerifiedR13=verifiedTabard,signature=signature,zone=zone,ts=ts}
             CheckFullPartySharedStates175(self,group,false)
             return true
         elseif stateKind=="SALUTE" and ts>0 and math.abs(self:Now()-ts)<=300 then
@@ -942,8 +1030,10 @@ function OTLGM.__impl180.HandleRelease175Message__impl1(self, message,channel,se
         local zone=fields[4] or ""
         local ts=tonumber(fields[5]) or 0
         if IsPlayer175(target) and math.abs(self:Now()-ts)<=180 and self:IsKnownGuildSender(sender) then
-            local dungeon=IsDungeon175(self)
-            if dungeon and CurrentZone175(self)==zone then
+            local inInstance=self.IsAchievementInstanceContext174 and self:IsAchievementInstanceContext174()
+            if inInstance and CurrentZone175(self)==zone then
+                -- Do not classify the custom zone here. B069 is completed only
+                -- after HandleBossVictory174 resolves a real DUNGEON boss.
                 self.runtime=self.runtime or {}
                 self.runtime.revivedByGuild175={sender=ShortName175(sender),ts=ts,zone=zone}
             end
@@ -966,6 +1056,29 @@ function OTLGM:RecordProudLionSalute175(sender,signature,zone,ts)
     self:SetAchievementCounter174("proudLion",Count175(state.names))
     if Count175(state.names)>=5 then self:CompleteAchievement174("B083",false) end
     return valid
+end
+
+-- Observe normal nearby /salute text as well as addon STATE packets. This is
+-- deliberately local evidence: the sender must be a member of the current full
+-- guild party in Goldshire, and RecordProudLionSalute175 deduplicates names.
+function OTLGM:ObserveProudLionTextEmote175(message,sender)
+    if self.IsAchievementComplete174 and self:IsAchievementComplete174("B083") then return false end
+    local lower=string.lower(tostring(message or ""))
+    if not string.find(lower,"salut",1,true) then return false end
+    sender=ShortName175(sender or "")
+    if sender=="" then local _,_,fallback=string.find(tostring(message or ""),"^([^%s]+)") sender=ShortName175(fallback or "") end
+    local group,full=FullGuildParty175(self)
+    if not full or not IsLocation175(self,"goldshire") then return false end
+    return self:RecordProudLionSalute175(sender,PartySignature175(group),"goldshire",self:Now())
+end
+
+local PreviousAchievementEmote175=OTLGM.HandleAchievementEmote174
+if PreviousAchievementEmote175 then
+    function OTLGM:HandleAchievementEmote174(message,sender)
+        local result=PreviousAchievementEmote175(self,message,sender)
+        self:ObserveProudLionTextEmote175(message,sender)
+        return result
+    end
 end
 
 -- ---------------------------------------------------------------------------
@@ -993,7 +1106,7 @@ function OTLGM:StartBossEncounter174(bossName)
         attempts.count=(tonumber(attempts.count) or 0)+1
         attempts.last=now
         self.runtime.bossAttempts175[key]=attempts
-        self.runtime.bossEncounter175={key=key,boss=Key175(bossName),zone=CurrentZone175(self),started=now,active=true,deaths={},deathCount=0,attempt=attempts.count,failedPrevious=attempts.failedPrevious,group=self:GetGroupSnapshot174()}
+        self.runtime.bossEncounter175={key=key,boss=Key175(bossName),rawBoss=tostring(bossName or ""),zone=CurrentZone175(self),started=now,active=true,deaths={},deathCount=0,attempt=attempts.count,failedPrevious=attempts.failedPrevious,group=self:GetGroupSnapshot174()}
     end
     return true
 end
@@ -1032,24 +1145,22 @@ local function LevelGap175(self,group)
     return low and high and high-low or 0
 end
 
-local function GroupHasLeader175(self,group)
+local function GroupHasLucks175(self,group)
     local members=GetPresentMembers175(self,group)
     local index
     for index=1,table.getn(members) do
-        if IsGuildLeaderName175(self, members[index].name or members[index].key) then return true end
+        if IsLucksName175(members[index].name or members[index].key) then return true end
     end
     return false
 end
 
-local function LocalTabard175()
-    if GetInventoryItemLink and GetInventoryItemLink("player",19) then return true end
-    if GetInventoryItemTexture and GetInventoryItemTexture("player",19) then return true end
-    return false
+local function LocalTabard175(self)
+    return VerifiedGuildTabardLink175(self,"player") and true or false
 end
 
 local function FullPartyTabards175(self,group)
     if not group or not group.isParty or group.total~=5 or group.guild~=5 then return false end
-    local count=LocalTabard175() and 1 or 0
+    local count=LocalTabard175(self) and 1 or 0
     local signature=PartySignature175(group)
     local zone=CurrentPlace175(self)
     local now=self:Now()
@@ -1058,11 +1169,10 @@ local function FullPartyTabards175(self,group)
     for index=1,table.getn(group.guildMembers) do
         member=group.guildMembers[index]
         if not IsPlayer175(member.name) then
-            link=GetInventoryItemLink and GetInventoryItemLink(member.unit,19)
-            if not link and GetInventoryItemTexture then link=GetInventoryItemTexture(member.unit,19) end
+            link=VerifiedGuildTabardLink175(self,member.unit)
             if link then count=count+1 else
                 state=states[member.key]
-                if state and state.tabard and state.signature==signature and state.zone==zone and now-(state.ts or 0)<=120 then count=count+1 end
+                if state and state.tabard and state.tabardVerifiedR13 and state.signature==signature and state.zone==zone and now-(state.ts or 0)<=120 then count=count+1 end
             end
         end
     end
@@ -1135,14 +1245,19 @@ function OTLGM:HandleBossVictory174(bossName)
     local releaseState=self.runtime and self.runtime.bossEncounter175
     local group=releaseState and releaseState.group or self:GetGroupSnapshot174()
     local bossKey=Key175(bossName)
-    local dungeon,_,zone=IsDungeon175(self)
-    local raid=IsRaid175(self)
+    -- Classification must follow the same resolved catalogue rule that the base
+    -- achievement engine accepted.  Re-checking only the visible zone here
+    -- dropped B-series dungeon/raid conditions on Octo custom zone labels.
+    local resolvedRule,resolvedZone=self:ResolveAchievementBossRule174(bossName)
+    local dungeon=resolvedRule and resolvedRule.kind=="DUNGEON" or false
+    local raid=resolvedRule and resolvedRule.kind=="RAID" or false
+    local zone=resolvedZone
     local accepted=PreviousBossVictory175(self,bossName)
     if not accepted then return false end
     local db=self:EnsureAchievements174()
     if dungeon then
         if LevelGap175(self,group)>=20 then self:CompleteAchievement174("B054",false) end
-        if GroupHasLeader175(self,group) then self:CompleteAchievement174("B058",false) end
+        if GroupHasLucks175(self,group) then self:CompleteAchievement174("B058",false) end
         if releaseState and releaseState.attempt==2 and releaseState.failedPrevious and (releaseState.deathCount or 0)==0 then self:CompleteAchievement174("B061",false) end
         if releaseState and releaseState.attempt==3 then self:CompleteAchievement174("B067",false) end
         if group.isParty and group.total==5 and group.guild==5 then
@@ -1201,7 +1316,7 @@ function OTLGM:BeginDuel175(opponent)
     local unit=FindGroupUnitByName175(opponent) or "target"
     local _,classToken=UnitClass and UnitClass(unit)
     self.runtime=self.runtime or {}
-    self.runtime.duel175={opponent=opponent,key=NameKey175(opponent),guild=IsGuildMember175(self,opponent),leader=IsGuildLeaderName175(self,opponent),class=string.upper(tostring(classToken or "")),started=self:Now(),cancelled=false}
+    self.runtime.duel175={opponent=opponent,key=NameKey175(opponent),guild=IsGuildMember175(self,opponent),leader=IsLucksName175(opponent),class=string.upper(tostring(classToken or "")),started=self:Now(),cancelled=false}
 end
 
 function OTLGM:FinishDuel175(cancelled)
@@ -1230,8 +1345,8 @@ end
 local function HandleLocalEmote175(self,token)
     token=string.upper(tostring(token or ""))
     local target=ShortName175(UnitName and UnitName("target") or "")
-    if token=="SALUTE" and target~="" and IsGuildLeaderName175(self,target) then self:CompleteAchievement174("B055",false) end
-    if token=="BONK" and target~="" and IsGuildLeaderName175(self,target) then self:CompleteAchievement174("B086",false) end
+    if token=="SALUTE" and target~="" and IsLucksName175(target) then self:CompleteAchievement174("B055",false) end
+    if token=="BONK" and target~="" and IsLucksName175(target) then self:CompleteAchievement174("B086",false) end
     if token=="MOON" then
         local hour=0
         if GetGameTime then hour=tonumber((GetGameTime())) or 0 else hour=tonumber(date("%H")) or 0 end
@@ -1262,57 +1377,86 @@ function OTLGM:InstallEmoteHook175()
 end
 
 local function IsGuildTabardEquipped175(self)
-    if not GetInventoryItemLink or not GetGuildInfo or not GetGuildInfo("player") then return false end
-    local link=GetInventoryItemLink("player",19)
-    if not link or link=="" then return false end
-    local _,_,itemId=string.find(link,"item:(%d+)")
-    if tonumber(itemId)==5976 then return true end
-    if GetItemInfo then
-        local name=GetItemInfo(link)
-        local lowered=string.lower(tostring(name or ""))
-        if string.find(lowered,"guild tabard",1,true) or string.find(lowered,"guildtabard",1,true) then return true end
-    end
-    return false
+    return VerifiedGuildTabardLink175(self,"player") and true or false
 end
 
 local function CheckUnderBanner175(self,silent)
     if self:IsAchievementComplete174("UNDER_BANNER") then return true end
+    local db=self:EnsureAchievements174()
+    -- R59 CP5: callers already use a short login quiet window, but the delayed
+    -- release baseline is the authoritative boundary. A late equipment event
+    -- during cold login must not turn an already-equipped tabard into a fresh
+    -- toast/guild announcement. After the persisted baseline exists, genuine
+    -- equipment changes remain live.
+    if not db.releaseBaseline175 then silent=true end
     if IsGuildTabardEquipped175(self) then return self:CompleteAchievement174("UNDER_BANNER",silent) end
     return false
 end
 
-local function ScanRiding175(self,silent)
-    local best,cap=0,0
+local RIDING_SPELL_VALUES183 = {
+    ["apprentice riding"] = 75,
+    ["journeyman riding"] = 150,
+    ["expert riding"] = 225,
+    ["artisan riding"] = 300,
+}
+
+local function RidingValueFromRank183(rankText)
+    local normalized = string.lower(tostring(rankText or ""))
+    if string.find(normalized, "artisan", 1, true) then return 300 end
+    if string.find(normalized, "expert", 1, true) then return 225 end
+    if string.find(normalized, "journeyman", 1, true) then return 150 end
+    if string.find(normalized, "apprentice", 1, true) then return 75 end
+    local _, _, digits = string.find(normalized, "(%d+)")
+    local numeric = tonumber(digits) or 0
+    if numeric == 75 or numeric == 150 or numeric == 225 or numeric == 300 then return numeric end
+    return 0
+end
+
+function OTLGM:GetRidingEvidence183()
+    local best,cap=0,300
     if GetNumSkillLines and GetSkillLineInfo then
         local total=tonumber(GetNumSkillLines()) or 0
         local index,name,_,_,rank,_,maximum
         for index=1,total do
             name,_,_,rank,_,maximum=GetSkillLineInfo(index)
-            if string.find(string.lower(tostring(name or "")),"riding",1,true) then
+            -- Exact skill identity only. Custom mount skills such as "Turtle
+            -- Riding" must not count merely because they contain this word.
+            if string.lower(tostring(name or "")) == "riding" then
                 best=math.max(best,tonumber(rank) or 0)
                 cap=math.max(cap,tonumber(maximum) or 0)
             end
         end
     end
-    -- Fallback spell checks for Vanilla clients that expose riding only as spells.
+    -- Conservative spell-book fallback. Only canonical exact names/ranks are
+    -- accepted; mounted state, speed, auras and substring matches are ignored.
     if best==0 and GetSpellName then
         local bookIndex=1 local spellName,spellRank
         while bookIndex<=500 do
             spellName,spellRank=GetSpellName(bookIndex,BOOKTYPE_SPELL)
             if not spellName then break end
-            if string.find(string.lower(spellName),"riding",1,true) then
-                local _, _, digits=string.find(tostring(spellRank or ""),"(%d+)")
-                local numeric=tonumber(digits) or 1
-                best=math.max(best,numeric) cap=math.max(cap,numeric)
-            end
+            local normalizedName=string.lower(tostring(spellName or ""))
+            local numeric=RIDING_SPELL_VALUES183[normalizedName]
+            if not numeric and normalizedName=="riding" then numeric=RidingValueFromRank183(spellRank) end
+            if numeric then best=math.max(best,numeric) end
             bookIndex=bookIndex+1
         end
     end
+    return best,cap
+end
+
+local function ScanRiding175(self,silent)
+    local best,cap=self:GetRidingEvidence183()
     local db=self:EnsureAchievements174()
     db.counters.ridingSkill175=best
     db.counters.ridingCap175=cap
-    if best>0 then self:CompleteAchievement174("B080",silent) end
-    if best>0 and cap>0 and best>=cap then self:CompleteAchievement174("B081",silent) end
+    -- Riding is discovered from current character state rather than from a
+    -- trustworthy "skill purchased just now" event on the 1.12/Octo client.
+    -- SKILL_LINES_CHANGED is also emitted repeatedly during login.  Recording
+    -- these milestones silently is therefore the only deterministic way to
+    -- avoid replaying an old Riding/Speed achievement every login while still
+    -- keeping the catalogue state correct.
+    if best>0 then self:CompleteAchievement174("B080",true) end
+    if best>=300 then self:CompleteAchievement174("B081",true) end
 end
 
 function OTLGM:InstallCraftHooks175()
@@ -1364,6 +1508,34 @@ function OTLGM.__impl180.CheckResurrection175__impl1(self)
         local payload=table.concat({"F1","REVIVE",state.target,state.zone,tostring(self:Now()),tostring(self:Now())..":"..state.key},"^")
         self:QueueNetworkPayload(payload,"WHISPER",state.target,1,"release175","F1REVIVE:"..state.key)
     end
+    return true
+end
+
+
+-- r41: the resurrected player's own Vanilla client receives RESURRECT_REQUEST
+-- with the caster name. This makes B069 observable without requiring the
+-- resurrecting guild member to run OrderOfTheLionGM.
+function OTLGM:BeginIncomingGuildResurrection175(resurrector)
+    if self.IsAchievementComplete174 and self:IsAchievementComplete174("B069") then return false end
+    resurrector=ShortName175(resurrector or "")
+    if resurrector=="" or not IsGuildMember175(self,resurrector) then return false end
+    if UnitIsDeadOrGhost and not UnitIsDeadOrGhost("player") then return false end
+    local inInstance=self.IsAchievementInstanceContext174 and self:IsAchievementInstanceContext174()
+    if not inInstance then return false end
+    self.runtime=self.runtime or {}
+    self.runtime.pendingIncomingRes175={sender=resurrector,ts=self:Now(),zone=CurrentZone175(self)}
+    return true
+end
+
+function OTLGM:ConfirmIncomingGuildResurrection175()
+    local pending=self.runtime and self.runtime.pendingIncomingRes175
+    if not pending then return false end
+    self.runtime.pendingIncomingRes175=nil
+    if self:Now()-(tonumber(pending.ts) or 0)>70 then return false end
+    if CurrentZone175(self)~=pending.zone then return false end
+    if UnitIsDeadOrGhost and UnitIsDeadOrGhost("player") then return false end
+    if not IsGuildMember175(self,pending.sender) then return false end
+    self.runtime.revivedByGuild175={sender=pending.sender,ts=self:Now(),zone=pending.zone,source="vanilla-res-request"}
     return true
 end
 
@@ -1474,17 +1646,32 @@ function OTLGM:CaptureGuildChatMessage(channel,message,sender)
     -- prefer preserving a message over guessing that it was a duplicate.
     local preciseNow=GetTime and GetTime() or nil
     if preciseNow then
-        local previous=tonumber(self.runtime.recentGuildCapture175[key])
+        local recent175=self.runtime.recentGuildCapture175
+        local previous=tonumber(recent175[key])
         if previous and preciseNow-previous>=0 and preciseNow-previous<=0.05 then return true end
-        self.runtime.recentGuildCapture175[key]=preciseNow
-        local oldKey,oldTs,count=nil,nil,0
-        for oldKey,oldTs in pairs(self.runtime.recentGuildCapture175) do
-            count=count+1
-            if preciseNow-(tonumber(oldTs) or 0)>4 then self.runtime.recentGuildCapture175[oldKey]=nil end
-        end
-        if count>80 then
-            self.runtime.recentGuildCapture175={}
-            self.runtime.recentGuildCapture175[key]=preciseNow
+        if not previous then self.runtime.recentGuildCaptureCount184=(tonumber(self.runtime.recentGuildCaptureCount184) or 0)+1 end
+        recent175[key]=preciseNow
+
+        -- RC4-r9: duplicate suppression used to walk the entire recent-message
+        -- map for every single guild-chat line.  Prune at most once per second
+        -- (or immediately near the hard cap) while preserving the 50 ms packet
+        -- dedupe window.  Busy guild chat is now O(1) for the common event.
+        local count184=tonumber(self.runtime.recentGuildCaptureCount184) or 0
+        local lastPrune184=tonumber(self.runtime.recentGuildCapturePrunedAt184) or 0
+        if count184>80 or preciseNow-lastPrune184>=1 then
+            local oldKey,oldTs,newCount184
+            newCount184=0
+            for oldKey,oldTs in pairs(recent175) do
+                if preciseNow-(tonumber(oldTs) or 0)>4 then recent175[oldKey]=nil
+                else newCount184=newCount184+1 end
+            end
+            self.runtime.recentGuildCaptureCount184=newCount184
+            self.runtime.recentGuildCapturePrunedAt184=preciseNow
+            if newCount184>80 then
+                self.runtime.recentGuildCapture175={}
+                self.runtime.recentGuildCapture175[key]=preciseNow
+                self.runtime.recentGuildCaptureCount184=1
+            end
         end
     end
     return PreviousCaptureGuildChat175(self,channel,clean,from)
@@ -1951,21 +2138,30 @@ function OTLGM:RunRelease175LoginBaseline180()
     self:CleanupDuplicateNotifications175()
     local db=self:EnsureAchievements174()
     local silent=not db.releaseBaseline175
-    ScanRiding175(self,silent)
-    CheckUnderBanner175(self,silent)
+    -- Riding/tabard are current-state discoveries. Login/world-entry scans are
+    -- retrospective and must never replay an earned toast; live skill/equipment
+    -- events below still use silent=false for genuinely new progress.
+    ScanRiding175(self,true)
+    CheckUnderBanner175(self,true)
     self:UpdateGroupSession174(silent)
     CheckMetaAchievements175(self,silent)
     db.releaseBaseline175=true
     return true
 end
 
+-- Establish the login quiet window before registering the frame. Some OctoWoW
+-- builds can emit SKILL_LINES_CHANGED during addon startup, before
+-- PLAYER_ENTERING_WORLD. Riding/tabard discoveries in this short window are
+-- retrospective state and must be recorded silently rather than replayed.
+OTLGM.runtime=OTLGM.runtime or {}
+OTLGM.runtime.achievementLoginQuietUntil175=math.max(tonumber(OTLGM.runtime.achievementLoginQuietUntil175) or 0, OTLGM:Now()+20)
 local releaseEventFrame175=CreateFrame("Frame","OTLGM_ReleaseEvent175")
 local releaseEvents175={
-    "PLAYER_LOGIN","PLAYER_ENTERING_WORLD","PLAYER_LOGOUT","PARTY_MEMBERS_CHANGED","RAID_ROSTER_UPDATE","GUILD_ROSTER_UPDATE","PLAYER_GUILD_UPDATE",
+    "PLAYER_ENTERING_WORLD","PLAYER_LOGOUT","PARTY_MEMBERS_CHANGED","RAID_ROSTER_UPDATE","GUILD_ROSTER_UPDATE","PLAYER_GUILD_UPDATE",
     "ZONE_CHANGED_NEW_AREA","MINIMAP_ZONE_CHANGED","PLAYER_REGEN_ENABLED","PLAYER_DEAD","UNIT_HEALTH","PLAYER_TARGET_CHANGED",
     "DUEL_REQUESTED","DUEL_FINISHED","DUEL_OUTOFBOUNDS","CHAT_MSG_SYSTEM","CHAT_MSG_LOOT","CHAT_MSG_COMBAT_SELF_HITS","CHAT_MSG_SPELL_SELF_DAMAGE","CHAT_MSG_COMBAT_HOSTILE_DEATH",
     "SPELLCAST_START","SPELLCAST_STOP","SPELLCAST_FAILED","SPELLCAST_INTERRUPTED","SPELLCAST_CHANNEL_START","SPELLCAST_CHANNEL_STOP",
-    "TRADE_SKILL_UPDATE","CRAFT_UPDATE","SKILL_LINES_CHANGED","PLAYER_EQUIPMENT_CHANGED",
+    "TRADE_SKILL_UPDATE","CRAFT_UPDATE","SKILL_LINES_CHANGED","UNIT_INVENTORY_CHANGED","PLAYER_EQUIPMENT_CHANGED",
 }
 local eventIndex175
 for eventIndex175=1,table.getn(releaseEvents175) do pcall(releaseEventFrame175.RegisterEvent,releaseEventFrame175,releaseEvents175[eventIndex175]) end
@@ -1995,13 +2191,17 @@ end
 releaseEventFrame175:SetScript("OnEvent",function()
     if not OTLGM then return end
     OTLGM.runtime=OTLGM.runtime or {}
-    if event=="PLAYER_LOGIN" then
-        OTLGM:RunRelease175LoginBaseline180()
-    elseif event=="PLAYER_ENTERING_WORLD" then
-        ScanRiding175(OTLGM,false)
-        CheckUnderBanner175(OTLGM,false)
-        OTLGM:UpdateGroupSession174(false)
+    if event=="PLAYER_ENTERING_WORLD" then
+        -- Skill lines can emit one or more late SKILL_LINES_CHANGED events while
+        -- the character is still loading.  Treat that short window as a
+        -- retrospective baseline so an already-known riding skill never produces
+        -- a fresh "earned" popup on login.
+        OTLGM.runtime.achievementLoginQuietUntil175=math.max(tonumber(OTLGM.runtime.achievementLoginQuietUntil175) or 0, OTLGM:Now()+20)
+        ScanRiding175(OTLGM,true)
+        CheckUnderBanner175(OTLGM,true)
+        OTLGM:UpdateGroupSession174(true)
         OTLGM.runtime.revivedByGuild175=nil
+        OTLGM.runtime.pendingIncomingRes175=nil
     elseif event=="PLAYER_LOGOUT" then
         OTLGM.runtime.longWatch175=nil OTLGM.runtime.regularTable175=nil OTLGM.runtime.bossEncounter175=nil
     elseif event=="PARTY_MEMBERS_CHANGED" or event=="RAID_ROSTER_UPDATE" then
@@ -2016,6 +2216,7 @@ releaseEventFrame175:SetScript("OnEvent",function()
     elseif event=="ZONE_CHANGED_NEW_AREA" or event=="MINIMAP_ZONE_CHANGED" then
         OTLGM.runtime.proudLion175=nil OTLGM.runtime.regularTable175=nil OTLGM.runtime.groupStates175={}
         OTLGM.runtime.bossEncounter175=nil OTLGM.runtime.bossAttempts175={}
+        OTLGM.runtime.revivedByGuild175=nil OTLGM.runtime.pendingIncomingRes175=nil
         OTLGM:UpdateGroupSession174(false)
         BroadcastGroupState175(OTLGM,OTLGM:GetGroupSnapshot174(),true)
         CheckDiplomaticIncident175(OTLGM,false)
@@ -2023,7 +2224,12 @@ releaseEventFrame175:SetScript("OnEvent",function()
         OTLGM:MarkBossAttemptFailed175()
     elseif event=="PLAYER_DEAD" then
         OTLGM.runtime.revivedByGuild175=nil
+        OTLGM.runtime.pendingIncomingRes175=nil
         CheckDiplomaticIncident175(OTLGM,false)
+    elseif event=="RESURRECT_REQUEST" then
+        OTLGM:BeginIncomingGuildResurrection175(arg1)
+    elseif event=="PLAYER_ALIVE" then
+        OTLGM:ConfirmIncomingGuildResurrection175()
     elseif event=="UNIT_HEALTH" then
         if OTLGM.runtime.resurrection175 then OTLGM:CheckResurrection175() end
         if arg1=="player" or string.find(tostring(arg1 or ""),"party",1,true) then CheckDiplomaticIncident175(OTLGM,false) end
@@ -2071,10 +2277,23 @@ releaseEventFrame175:SetScript("OnEvent",function()
         OTLGM:ConfirmCraftAction175("CRAFT")
     elseif event=="SKILL_LINES_CHANGED" then
         if not ((OTLGM.IsAchievementComplete174 and OTLGM:IsAchievementComplete174("B080"))
-            and (OTLGM.IsAchievementComplete174 and OTLGM:IsAchievementComplete174("B081"))) then ScanRiding175(OTLGM,false) end
-    elseif event=="PLAYER_EQUIPMENT_CHANGED" then
-        if not (OTLGM.IsAchievementComplete174 and OTLGM:IsAchievementComplete174("UNDER_BANNER"))
-            and (tonumber(arg1)==19 or arg1==nil) then CheckUnderBanner175(OTLGM,false) end
+            and (OTLGM.IsAchievementComplete174 and OTLGM:IsAchievementComplete174("B081"))) then
+            local quietUntil=tonumber(OTLGM.runtime and OTLGM.runtime.achievementLoginQuietUntil175) or 0
+            ScanRiding175(OTLGM,OTLGM:Now()<=quietUntil)
+        end
+    elseif event=="UNIT_INVENTORY_CHANGED" or event=="PLAYER_EQUIPMENT_CHANGED" then
+        local relevant=false
+        local bulkRestore=false
+        if event=="UNIT_INVENTORY_CHANGED" then
+            relevant=(arg1=="player")
+        else
+            relevant=(tonumber(arg1)==TabardSlot175() or arg1==nil)
+            bulkRestore=(arg1==nil)
+        end
+        if relevant and not (OTLGM.IsAchievementComplete174 and OTLGM:IsAchievementComplete174("UNDER_BANNER")) then
+            local quietUntil=tonumber(OTLGM.runtime and OTLGM.runtime.achievementLoginQuietUntil175) or 0
+            CheckUnderBanner175(OTLGM,bulkRestore or OTLGM:Now()<=quietUntil)
+        end
     elseif event=="CHAT_MSG_LOOT" then
         if not (OTLGM.IsAchievementComplete174 and OTLGM:IsAchievementComplete174("B076")) then CheckEpicLoot175(OTLGM,arg1) end
     elseif event=="CHAT_MSG_COMBAT_SELF_HITS" or event=="CHAT_MSG_SPELL_SELF_DAMAGE" then
@@ -2084,6 +2303,6 @@ releaseEventFrame175:SetScript("OnEvent",function()
     end
 end)
 
-OTLGM:RegisterModule("AchievementRaidRuntime",{layer="feature",catalogAdditions=41,catalogAfterLayer=87,finalCatalog=146,eventDriven=true,noOnUpdate=true})
+OTLGM:RegisterModule("AchievementRaidRuntime",{layer="feature",catalogAdditions=41,catalogAfterLayer=88,finalCatalog=147,eventDriven=true,noOnUpdate=true})
 
 -- END EMBEDDED RELEASE 1.7.5 RUNTIME

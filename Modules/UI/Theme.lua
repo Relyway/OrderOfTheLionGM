@@ -32,6 +32,10 @@ function OTLGM:PrepareInteractiveControl170(control, kind)
     elseif objectType == "editbox" then
         if control.EnableMouse then control:EnableMouse(true) end
         if control.EnableKeyboard then control:EnableKeyboard(true) end
+        -- Never let a newly shown form steal WASD/jump from the player. Text
+        -- fields take keyboard focus only after an explicit click or a deliberate
+        -- action such as Copy/Whisper that calls SetFocus itself.
+        if control.SetAutoFocus then control:SetAutoFocus(false) end
         control.otlInteractivePrepared170 = true
     elseif objectType == "slider" then
         if control.EnableMouse then control:EnableMouse(true) end

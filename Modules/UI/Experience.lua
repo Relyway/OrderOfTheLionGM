@@ -124,6 +124,15 @@ local function XSetIconState(button, selected, enabled)
     else button.icon170:SetVertexColor(0.62, 0.58, 0.48) end
 end
 
+local function XDisplayActorR8(value)
+    local raw = tostring(value or "Leadership")
+    local lower = string.lower(raw)
+    local dash = string.find(lower, "-", 1, true)
+    local short = dash and string.sub(lower, 1, dash - 1) or lower
+    if short == "morrow" then return "Lucks" end
+    return raw
+end
+
 local function XGoldToCopper(value)
     value = tonumber(value) or 0
     return math.max(0, math.floor(value * 10000))
@@ -135,9 +144,15 @@ end
 
 function OTLGM:StartExperienceMotion170(frame, fromAlpha, toAlpha, duration)
     if not frame then return false end
-    local mode = OTLGM_DB and OTLGM_DB.settings and OTLGM_DB.settings.motionMode170 or "FULL"
-    if mode == "OFF" or self:InCombat() then frame:SetAlpha(toAlpha or 1) return false end
-    if mode == "REDUCED" then duration = math.min(tonumber(duration) or 0.12, 0.08) end
+    local settings = OTLGM_DB and OTLGM_DB.settings or {}
+    local mode = settings.motionMode170 or "FULL"
+    local profile = settings.performanceProfile181 or "AUTO"
+    local fps
+    if GetFramerate then local ok, value = pcall(GetFramerate) if ok then fps = tonumber(value) end end
+    local guardActive = self.IsPerformanceGuardActive181 and self:IsPerformanceGuardActive181() or false
+    local suppressForLoad = guardActive or (profile == "SMOOTH" and fps and fps < 55) or (profile == "AUTO" and fps and fps < 35)
+    if mode == "OFF" or self:InCombat() or suppressForLoad then frame:SetAlpha(toAlpha or 1) return false end
+    if mode == "REDUCED" or profile == "SMOOTH" then duration = math.min(tonumber(duration) or 0.12, 0.08) end
     self.runtime = self.runtime or {}
     self.runtime.motion170 = self.runtime.motion170 or {}
     local index
@@ -146,12 +161,46 @@ function OTLGM:StartExperienceMotion170(frame, fromAlpha, toAlpha, duration)
     end
     frame:SetAlpha(fromAlpha or 0)
     table.insert(self.runtime.motion170, { frame = frame, from = fromAlpha or 0, target = toAlpha or 1, duration = math.max(0.04, tonumber(duration) or 0.14), elapsed = 0 })
+    -- Motion used to rely on an unrelated search-debounce wake. A deep link
+    -- could therefore leave the entire addon permanently at its starting alpha.
+    -- Give motion its own scheduler deadline.
+    local now = self.GetPreciseTime180 and self:GetPreciseTime180() or (GetTime and GetTime()) or self:Now()
+    self.runtime.motionDue170 = now + 0.05
+    if self.WakeScheduler180 then self:WakeScheduler180("ui-motion")
+    else
+        frame:SetAlpha(toAlpha or 1)
+        self.runtime.motion170 = {}
+        self.runtime.motionDue170 = nil
+        return false
+    end
     return true
+end
+
+function OTLGM:CancelExperienceMotion170(frame, finalAlpha)
+    if not frame then return false end
+    self.runtime = self.runtime or {}
+    local motions = self.runtime.motion170
+    local removed = false
+    local index
+    if motions then
+        for index = table.getn(motions), 1, -1 do
+            if motions[index] and motions[index].frame == frame then
+                table.remove(motions, index)
+                removed = true
+            end
+        end
+        if table.getn(motions) == 0 then self.runtime.motionDue170 = nil end
+    end
+    if frame.SetAlpha then frame:SetAlpha(finalAlpha or 1) end
+    return removed
 end
 
 function OTLGM:ProcessExperienceMotion170(elapsed)
     local motions = self.runtime and self.runtime.motion170
-    if not motions or table.getn(motions) == 0 then return end
+    if not motions or table.getn(motions) == 0 then
+        if self.runtime then self.runtime.motionDue170 = nil end
+        return
+    end
     local index = 1
     while index <= table.getn(motions) do
         local motion = motions[index]
@@ -164,6 +213,13 @@ function OTLGM:ProcessExperienceMotion170(elapsed)
             motion.frame:SetAlpha(motion.from + ((motion.target - motion.from) * progress))
             if progress >= 1 then table.remove(motions, index) else index = index + 1 end
         end
+    end
+    if table.getn(motions) == 0 then
+        self.runtime.motionDue170 = nil
+    else
+        local now = self.GetPreciseTime180 and self:GetPreciseTime180() or (GetTime and GetTime()) or self:Now()
+        self.runtime.motionDue170 = now + 0.05
+        if self.WakeScheduler180 then self:WakeScheduler180("ui-motion") end
     end
 end
 
@@ -264,23 +320,23 @@ function OTLGM.__impl180.BuildTreasuryPage170__impl1(self, page)
     local ui = { page = page, offset = 0 }
     self.ui.treasury170 = ui
     ui.legacyTitle180 = XText(page, "GameFontNormalLarge", "Guild Treasury", 0, -2, 360, "LEFT")
-    ui.legacySubtitle180 = XWrapped(page, "GameFontNormalSmall", "Shared funding goals now; conservative read-only guild-bank support when the server exposes a compatible API.", 0, -28, 700, 32)
+    ui.legacySubtitle180 = XWrapped(page, "GameFontNormalSmall", "Track shared guild funding goals, contributions and recent activity in one place.", 0, -28, 700, 32)
 
     ui.banner = XPanel(page, 0, -64, 718, 86, "raised")
     ui.bannerIcon = ui.banner:CreateTexture(nil, "OVERLAY")
     ui.bannerIcon:SetPoint("LEFT", ui.banner, "LEFT", 12, 0)
     ui.bannerIcon:SetWidth(32) ui.bannerIcon:SetHeight(32)
-    ui.bannerIcon:SetTexture("Interface\\Icons\\INV_Letter_15")
-    ui.contributionTitle = XText(ui.banner, "GameFontNormal", "HOW TO CONTRIBUTE", 54, -8, 330, "LEFT")
+    ui.bannerIcon:SetTexture("Interface\\Icons\\INV_Misc_Coin_02")
+    ui.contributionTitle = XText(ui.banner, "GameFontNormal", "CONTRIBUTE TO TREASURY", 54, -8, 330, "LEFT")
     ui.contributionTitle:SetTextColor(1.0, 0.82, 0.35)
-    ui.contributionDetail = XWrapped(ui.banner, "GameFontNormalSmall", "Mail gold or items to Morrow and state which guild goal they are for. Leadership records the contribution and advances the shared total.", 54, -27, 430, 42)
+    ui.contributionDetail = XWrapped(ui.banner, "GameFontNormalSmall", "Mail gold or items to Lucks and mention the funding goal. Leadership records the contribution against that goal and keeps the shared total current.", 54, -27, 430, 42)
     ui.contributionDetail:SetTextColor(0.78, 0.78, 0.74)
-    ui.bannerStatus = XText(ui.banner, "GameFontNormalSmall", "Manual goals - no money or items are moved by the addon.", 54, -68, 500, "LEFT")
+    ui.bannerStatus = XText(ui.banner, "GameFontNormalSmall", "Recorded by Leadership • the addon never moves your gold or items.", 54, -68, 500, "LEFT")
     ui.bannerStatus:SetTextColor(0.52, 0.52, 0.50)
-    ui.copyMorrow = XButton(ui.banner, "Copy Morrow", 598, -10, 108, 28, function()
-        OTLGM:ShowCopyDialog("Treasury recipient", "Morrow")
+    ui.copyLucks = XButton(ui.banner, "Copy Name", 598, -10, 108, 28, function()
+        OTLGM:ShowCopyDialog("Treasury recipient", "Lucks")
     end, "primary")
-    ui.sync = XButton(ui.banner, "Sync Ledger", 598, -46, 108, 28, function()
+    ui.sync = XButton(ui.banner, "Check Updates", 598, -46, 108, 28, function()
         OTLGM:RequestTreasurySync170(true)
     end, "utility")
 
@@ -289,6 +345,7 @@ function OTLGM.__impl180.BuildTreasuryPage170__impl1(self, page)
     XText(list, "GameFontNormal", "FUNDING GOALS", 12, -12, 220, "LEFT")
     ui.newGoal = XButton(list, "+ New Goal", 324, -8, 112, 26, function()
         ui.selected = nil
+        ui.editorRevision170 = nil
         ui.nameEdit:SetText("") ui.currentEdit:SetText("0") ui.targetEdit:SetText("0")
         ui.editorTitle:SetText("NEW FUNDING GOAL")
     end, "confirm")
@@ -328,22 +385,33 @@ function OTLGM.__impl180.BuildTreasuryPage170__impl1(self, page)
     ui.serverState = XWrapped(detail, "GameFontNormalSmall", "", 12, -34, 236, 48)
     ui.detect = XButton(detail, "Check Server Support", 12, -82, 236, 26, function() OTLGM:RefreshGuildBankAdapter170() OTLGM:RefreshTreasuryPage170() end, "utility")
     ui.editorTitle = XText(detail, "GameFontNormal", "GOAL DETAILS", 12, -124, 236, "LEFT")
-    XText(detail, "GameFontNormalSmall", "Name", 12, -148, 60, "LEFT")
+    ui.nameLabelR25 = XText(detail, "GameFontNormalSmall", "Name", 12, -148, 60, "LEFT")
     ui.nameEdit = XEdit(detail, "OTLGM_TreasuryGoalName170", 72, -142, 176, 26, 42)
-    XText(detail, "GameFontNormalSmall", "Raised (gold)", 12, -180, 108, "LEFT")
-    XText(detail, "GameFontNormalSmall", "Target (gold)", 130, -180, 118, "LEFT")
+    ui.currentLabelR25 = XText(detail, "GameFontNormalSmall", "Raised (gold)", 12, -180, 108, "LEFT")
+    ui.targetLabelR25 = XText(detail, "GameFontNormalSmall", "Target (gold)", 130, -180, 118, "LEFT")
     ui.currentEdit = XEdit(detail, "OTLGM_TreasuryCurrent170", 12, -194, 108, 26, 10)
     ui.targetEdit = XEdit(detail, "OTLGM_TreasuryTarget170", 130, -194, 118, 26, 10)
     ui.save = XButton(detail, "Save Shared Goal", 12, -228, 152, 28, function()
         local id = ui.selected or ("CUSTOM" .. tostring(OTLGM:Now()) .. tostring(math.random(10, 99)))
         local selectedGoal = ui.selected and OTLGM:GetTreasuryGoal170(ui.selected)
-        local ok, problem = OTLGM:SetTreasuryGoal170(id, ui.nameEdit:GetText(), XGoldToCopper(ui.currentEdit:GetText()), XGoldToCopper(ui.targetEdit:GetText()), selectedGoal and selectedGoal.category or "CUSTOM")
-        if not ok then OTLGM:ShowNotice("Treasury Goal", problem) else ui.selected = id OTLGM:RefreshTreasuryPage170(true) end
+        local expectedRevision = ui.selected and ui.editorRevision170 or nil
+        local ok, problem, code = OTLGM:SetTreasuryGoal170(id, ui.nameEdit:GetText(), XGoldToCopper(ui.currentEdit:GetText()), XGoldToCopper(ui.targetEdit:GetText()), selectedGoal and selectedGoal.category or "CUSTOM", expectedRevision)
+        if not ok then
+            if code == "STALE" then
+                -- Refresh the editor to the winning revision before showing the
+                -- notice, so the user can immediately review the current state.
+                OTLGM:RefreshTreasuryPage170(true)
+            end
+            OTLGM:ShowNotice("Treasury Goal", problem)
+        else
+            ui.selected = id
+            OTLGM:RefreshTreasuryPage170(true)
+        end
     end, "confirm")
     ui.delete = XButton(detail, "Delete", 172, -228, 76, 28, function()
         if ui.selected then OTLGM:ShowConfirm("Delete Treasury Goal", "Delete this shared funding goal?", "Delete", function() OTLGM:DeleteTreasuryGoal170(ui.selected) ui.selected = nil OTLGM:RefreshTreasuryPage170(true) end) end
     end, "danger")
-    XText(detail, "GameFontNormalSmall", "RECENT CHANGES", 12, -266, 236, "LEFT")
+    ui.recentChangesTitleR25 = XText(detail, "GameFontNormalSmall", "RECENT CHANGES • ST", 12, -266, 236, "LEFT")
     ui.history = {}
     for index = 1, 3 do
         ui.history[index] = XText(detail, "GameFontNormalSmall", "", 12, -288 - ((index - 1) * 22), 236, "LEFT")
@@ -367,22 +435,22 @@ function OTLGM.__impl180.RefreshTreasuryPage170__impl1(self, forceEditor)
     local ledgerRows = 0
     local goalId, entries
     for goalId, entries in pairs(treasury.contributions176 or {}) do ledgerRows = ledgerRows + table.getn(entries or {}) end
-    local syncText = "Ledger: " .. tostring(ledgerRows) .. " local entr" .. (ledgerRows == 1 and "y" or "ies")
+    local syncText = tostring(ledgerRows) .. " recorded contribution" .. (ledgerRows == 1 and "" or "s")
     if sync and sync.active then
-        syncText = syncText .. "  |  syncing..."
+        syncText = syncText .. "  •  updating..."
     elseif sync and tonumber(sync.completed) and tonumber(sync.completed) > 0 then
-        syncText = syncText .. "  |  synced " .. tostring(math.max(0, math.floor((self:Now() - sync.completed) / 60))) .. "m ago"
+        syncText = syncText .. "  •  updated " .. tostring(math.max(0, math.floor((self:Now() - sync.completed) / 60))) .. "m ago"
     elseif sync and sync.noPeerR2 then
-        syncText = syncText .. "  |  no compatible leadership peer online"
+        syncText = syncText .. "  •  waiting for another officer to confirm shared updates"
     else
-        syncText = syncText .. "  |  local/cached"
+        syncText = syncText .. "  •  saved"
     end
     if capability.available then
-        ui.bannerStatus:SetText(self.colors.green .. "Server bank adapter available." .. self.colors.reset .. "  " .. syncText)
+        ui.bannerStatus:SetText(self.colors.green .. "Guild bank information is available." .. self.colors.reset .. "  " .. syncText)
         ui.serverState:SetText("Detected: " .. (capability.money and "balance  " or "") .. (capability.tabs and "tabs  " or "") .. (capability.items and "items  " or "") .. (capability.history and "history" or "") .. (snapshot and snapshot.money and ("\nBalance: " .. XMoney(snapshot.money)) or ""))
     else
-        ui.bannerStatus:SetText(syncText .. "  |  recorded manually; the addon never moves money/items.")
-        ui.serverState:SetText("Unavailable on this client build. The adapter is prepared and remains dormant until compatible APIs appear.")
+        ui.bannerStatus:SetText(syncText .. "  •  Contributions are recorded manually; the addon never transfers gold or items.")
+        ui.serverState:SetText("Guild bank information is not available from this game client, so shared goals continue to work from leadership records.")
     end
     local visibleRows = math.max(1, tonumber(ui.visibleRows180) or 5)
     local maximum = math.max(0, table.getn(goals) - visibleRows)
@@ -396,32 +464,44 @@ function OTLGM.__impl180.RefreshTreasuryPage170__impl1(self, forceEditor)
             percentage = (tonumber(goal.target) or 0) > 0 and math.min(1, (tonumber(goal.current) or 0) / goal.target) or 0
             row.name:SetText(XShort(goal.name, 34))
             row.amount:SetText((goal.target or 0) > 0 and (XMoney(goal.current, true) .. " / " .. XMoney(goal.target, true)) or "Goal not set")
-            row.meta:SetText((goal.target or 0) > 0 and (tostring(math.floor(percentage * 100)) .. "% funded  -  updated by " .. tostring(goal.updatedBy or "Leadership")) or "Set a target to begin tracking progress")
+            local percentText = "0%"
+            if percentage > 0 and percentage < 0.01 then percentText = "<1%"
+            elseif percentage >= 0.01 then percentText = tostring(math.floor((percentage * 100) + 0.5)) .. "%" end
+            row.meta:SetText((goal.target or 0) > 0 and (percentText .. " funded  •  updated by " .. XDisplayActorR8(goal.updatedBy)) or "Set a target to begin tracking progress")
             row.progress:SetWidth(math.max(1, math.floor(408 * percentage)))
             XSelect(row, ui.selected == goal.id)
             row:Show()
         else row.goal170 = nil row:Hide() end
     end
     local sync = self.runtime and self.runtime.treasurySync170 or nil
-    local syncText = "Local ledger"
-    if sync and sync.active then syncText = "Sync pending"
+    local syncText = "Saved"
+    if sync and sync.active then syncText = "Updating..."
     elseif sync and tonumber(sync.completed) then
         local minutes = math.max(0, math.floor((self:Now() - tonumber(sync.completed)) / 60))
-        syncText = "Synced " .. tostring(minutes) .. "m ago"
+        syncText = "Updated " .. tostring(minutes) .. "m ago"
     elseif tonumber(self.lastTreasurySync170) then
         local minutes = math.max(0, math.floor((self:Now() - tonumber(self.lastTreasurySync170)) / 60))
-        syncText = "Sync requested " .. tostring(minutes) .. "m ago"
+        syncText = "Update requested " .. tostring(minutes) .. "m ago"
     end
-    ui.status:SetText(tostring(table.getn(goals)) .. " shared goal" .. (table.getn(goals) == 1 and "" or "s") .. "  -  " .. syncText)
+    ui.status:SetText(tostring(table.getn(goals)) .. " shared goal" .. (table.getn(goals) == 1 and "" or "s") .. "  •  " .. syncText)
     XEnable(ui.prev, ui.offset > 0, "First page")
     XEnable(ui.next, ui.offset < maximum, "Last page")
     local selected = ui.selected and self:GetTreasuryGoal170(ui.selected)
-    if selected and (forceEditor or not self:IsEditBoxFocused170(ui.nameEdit)) then
+    local editorFocused = self:IsEditBoxFocused170(ui.nameEdit)
+        or self:IsEditBoxFocused170(ui.currentEdit)
+        or self:IsEditBoxFocused170(ui.targetEdit)
+    if selected and (forceEditor or not editorFocused) then
         ui.nameEdit:SetText(selected.name or "")
         ui.currentEdit:SetText(tostring((tonumber(selected.current) or 0) / 10000))
         ui.targetEdit:SetText(tostring((tonumber(selected.target) or 0) / 10000))
+        ui.editorRevision170 = math.max(0, math.floor(tonumber(selected.revision) or 0))
         ui.editorTitle:SetText("EDIT SHARED GOAL")
     elseif not selected and forceEditor then
+        -- If the selected goal disappeared because another leadership client
+        -- deleted it, drop the stale selection. Otherwise the next Save could
+        -- unintentionally recreate the deleted goal under the same ID.
+        ui.selected = nil
+        ui.editorRevision170 = nil
         ui.nameEdit:SetText("") ui.currentEdit:SetText("0") ui.targetEdit:SetText("0") ui.editorTitle:SetText("NEW FUNDING GOAL")
     end
     local canEdit = self:CanEditTreasury170()
@@ -430,7 +510,12 @@ function OTLGM.__impl180.RefreshTreasuryPage170__impl1(self, forceEditor)
     XEnable(ui.delete, canEdit and selected ~= nil, "Select a goal you can edit.")
     for index = 1, 3 do
         local history = treasury.history[index]
-        ui.history[index]:SetText(history and (date("%d %b", history.ts or self:Now()) .. "  " .. (history.actor or "Leadership") .. "  " .. string.lower(history.kind or "update")) or "")
+        if history then
+            local stamp = self.FormatServerClock180 and self:FormatServerClock180(history.ts or self:Now(), true) or date("%H:%M  %d %b", history.ts or self:Now())
+            ui.history[index]:SetText(stamp .. " ST  •  " .. XDisplayActorR8(history.actor) .. "  •  " .. string.lower(history.kind or "update"))
+        else
+            ui.history[index]:SetText("")
+        end
     end
 end
 
@@ -902,7 +987,7 @@ function OTLGM:RefreshGuildChatExperience170()
                 row.pinButton170:ClearAllPoints()
                 row.pinButton170:SetPoint("TOPRIGHT", row, "TOPRIGHT", -2, -2)
                 if row.newLine:IsVisible() then row.pinButton170:Hide() else row.pinButton170:Show() end
-                local isAchievement = string.find(tostring(message.text or ""), "^%[Guild Achievement%]") ~= nil
+                local isAchievement = self:IsGuildAchievementChatMessage180(message.text or "")
                 -- NativePages owns the current responsive chat widths. Do not
                 -- restore the old 718px-era constants while refreshing pins;
                 -- doing so caused text to jump/overlap after resize.
@@ -1068,7 +1153,6 @@ function OTLGM:OpenGroupFinderComposer170()
     if self.ui.pveGroupFormShield170 then self.ui.pveGroupFormShield170:Show() end
     form:Show()
     self:StartExperienceMotion170(form, 0.45, 1, 0.10)
-    if self.ui.pveRequestActivityEdit then self.ui.pveRequestActivityEdit:SetFocus() end
 end
 
 function OTLGM:BuildGroupFinderExperience170()
@@ -1099,7 +1183,7 @@ function OTLGM:BuildGroupFinderExperience170()
         actions:SetWidth(698)
         self.ui.pveRequestSelectedText:SetWidth(678)
     end
-    self.ui.pveGroupEmpty170 = XWrapped(list, "GameFontNormal", "No open groups right now. Create one when you are ready to lead, or check again after synchronization.", 130, -150, 450, 70)
+    self.ui.pveGroupEmpty170 = XWrapped(list, "GameFontNormal", "No open groups right now. Create one when you are ready to lead, or check again after guild updates arrive.", 130, -150, 450, 70)
     self.ui.pveGroupEmpty170:SetTextColor(0.58, 0.58, 0.56)
     self.ui.pveGroupEmpty170:Hide()
 

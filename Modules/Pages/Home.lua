@@ -34,6 +34,14 @@ local function WordSafePreview(value, maximum)
     return clipped .. "..."
 end
 
+local function HomeDisplayAuthor180(value)
+    local author = tostring(value or "Leadership")
+    local lower = string.lower(author)
+    if lower == "morrow" then return "Lucks" end
+    if lower == "hikol" then return "Lucks" end
+    return author
+end
+
 local function EstimateWrappedHeight180(value, width)
     value = tostring(value or "")
     width = math.max(120, tonumber(width) or 420)
@@ -220,7 +228,6 @@ function OTLGM:OpenHomePostEditor(recordId)
     modal.validation:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
     UI:SetText(modal.publish, record and "Save Changes" or "Publish")
     self:ShowShellModal(modal)
-    modal.titleEdit:SetFocus()
 end
 
 function OTLGM:ShowHomePostReaders(recordId)
@@ -294,7 +301,7 @@ function OTLGM:RefreshHomePostPeople180()
         if name then modal.rows[index].nameText:SetText(tostring(name)) modal.rows[index]:Show()
         else modal.rows[index]:Hide() end
     end
-    modal.empty:SetText(mode == "READ" and "No one has opened this revision yet." or "No reactions are stored for this tab.")
+    modal.empty:SetText(mode == "READ" and "No one has opened this version of the post yet." or "No reactions are stored for this tab.")
     if table.getn(names) == 0 then modal.empty:Show() else modal.empty:Hide() end
     modal.scrollbar.otlSilent = true
     modal.scrollbar:SetMinMaxValues(0, maximum)
@@ -346,10 +353,12 @@ local HOME_ROLE_ICONS = {
 
 local function HomeLeadershipRole(member)
     local rank = string.lower(tostring(member and member.rank or ""))
-    local rankIndex = tonumber(member and member.rankIndex) or 99
     if OTLGM.IsCanonicalGuildLeaderName180 and OTLGM:IsCanonicalGuildLeaderName180(member and member.name) then return "Guild Leader", 1 end
-    if string.find(rank, "raid leader", 1, true) or string.find(rank, "raidlead", 1, true) then return "Raid Leader", 2 end
-    if string.find(rank, "officer", 1, true) or string.find(rank, "lionheart", 1, true) or rankIndex <= 2 then return "Officer", 3 end
+    -- Never infer the raid-leader slot from rankIndex. Octo guilds can freely
+    -- rename/reorder their upper ranks (for example "Right Hand" at index 1),
+    -- so only an explicit live raid-leader rank may occupy this special card.
+    if string.find(rank, "raid leader", 1, true) or string.find(rank, "raidleader", 1, true) or string.find(rank, "raid lead", 1, true) then return "Raid Leader", 2 end
+    if string.find(rank, "officer", 1, true) or string.find(rank, "right hand", 1, true) or string.find(rank, "lionheart", 1, true) then return "Officer", 3 end
     return "Helper", 4
 end
 
@@ -365,11 +374,8 @@ local function CollectHomeLeadership180(owner)
     local index
     for index = 1, table.getn(leaders) do
         local role = HomeLeadershipRole(leaders[index])
-        local shortName = string.lower(tostring(leaders[index].name or ""))
-        local dash = string.find(shortName, "-", 1, true)
-        if dash then shortName = string.sub(shortName, 1, dash - 1) end
         if role == "Guild Leader" and not result.guildLeader then result.guildLeader = leaders[index]
-        elseif shortName == "rangark" and not result.mainRaidLeader then result.mainRaidLeader = leaders[index]
+        elseif role == "Raid Leader" and not result.mainRaidLeader then result.mainRaidLeader = leaders[index]
         else table.insert(result.regular, leaders[index]) end
     end
     return result
@@ -394,12 +400,14 @@ local function BuildOverview(owner, page)
     pinned.icon:SetTexture("Interface\\Icons\\INV_Scroll_03")
     pinned.icon:SetWidth(30) pinned.icon:SetHeight(30)
     pinned.icon:SetPoint("TOPLEFT", pinned, "TOPLEFT", 14, -34)
-    pinned.titleText = Label(pinned, "", "GameFontNormalLarge", 54, -32, 420, "LEFT")
-    pinned.badgeText = Label(pinned, "", "GameFontNormalSmall", 430, -35, 140, "RIGHT")
+    pinned.titleText = Label(pinned, "", "GameFontNormalLarge", 54, -30, 356, "LEFT")
+    pinned.titleText:SetHeight(36)
+    pinned.titleText:SetJustifyV("TOP")
+    pinned.badgeText = Label(pinned, "", "GameFontNormalSmall", 416, -34, 154, "RIGHT")
     pinned.badgeText:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
-    pinned.metaText = Label(pinned, "", "GameFontNormalSmall", 54, -58, 500, "LEFT")
+    pinned.metaText = Label(pinned, "", "GameFontNormalSmall", 54, -70, 512, "LEFT")
     pinned.metaText:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
-    pinned.bodyText = Label(pinned, "", "GameFontHighlightSmall", 14, -88, 548, "LEFT")
+    pinned.bodyText = Label(pinned, "", "GameFontHighlightSmall", 14, -96, 548, "LEFT")
     pinned.bodyText:SetHeight(78)
     pinned.bodyText:SetJustifyV("TOP")
     pinned.open = UI:Button(pinned, "Open Post", 94, 26, function()
@@ -443,21 +451,27 @@ local function BuildOverview(owner, page)
         row.icon = row:CreateTexture(nil, "ARTWORK")
         row.icon:SetWidth(20) row.icon:SetHeight(20)
         row.icon:SetPoint("TOPLEFT", row, "TOPLEFT", 8, -9)
-        row.titleText = Label(row, "", "GameFontNormal", 36, -7, 390, "LEFT")
-        row.titleText:SetHeight(22)
-        row.badgeText = Label(row, "", "GameFontNormalSmall", 430, -8, 116, "RIGHT")
+        row.titleText = Label(row, "", "GameFontNormal", 36, -7, 334, "LEFT")
+        row.titleText:SetHeight(18)
+        row.titleText:SetJustifyV("TOP")
+        row.badgeText = Label(row, "", "GameFontNormalSmall", 388, -8, 158, "RIGHT")
         row.badgeText:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
-        row.metaText = Label(row, "", "GameFontNormalSmall", 36, -31, 510, "LEFT")
+        row.metaText = Label(row, "", "GameFontNormalSmall", 36, -27, 510, "LEFT")
         row.metaText:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
-        row.previewText = Label(row, "", "GameFontNormalSmall", 36, -47, 510, "LEFT")
+        row.previewText = Label(row, "", "GameFontNormalSmall", 36, -43, 510, "LEFT")
+        row.previewText:SetHeight(16)
+        row.previewText:SetJustifyV("TOP")
         row.previewText:SetTextColor(0.78, 0.76, 0.70)
         row:Hide()
         recent.rows[captured] = row
     end
     recent.empty = Label(recent, "No additional important guild posts.", "GameFontNormalSmall", 14, -48, 540, "CENTER")
     recent.empty:SetTextColor(C.grey[1], C.grey[2], C.grey[3])
-    recent.viewAll = UI:Button(recent, "View all posts", 112, 24, function() owner:SetHomeTab("POSTS") end, "inline")
-    recent.viewAll:SetPoint("BOTTOMRIGHT", recent, "BOTTOMRIGHT", -10, 9)
+    recent.viewAll = UI:Button(recent, "View all posts", 112, 22, function() owner:SetHomeTab("POSTS") end, "inline")
+    -- Keep the navigation action with the card heading. Anchoring it to the
+    -- bottom made a one-post card look like a large empty broken panel and was
+    -- the visible defect repeatedly reported from live screenshots.
+    recent.viewAll:SetPoint("TOPRIGHT", recent, "TOPRIGHT", -10, -5)
     owner.ui.homeRecentPostsCard = recent
 
     local raid = UI:Card(panel, 332, 142, "Next Raid")
@@ -621,6 +635,29 @@ local function BuildOverview(owner, page)
     end
     forYou:Hide()
     owner.ui.homeForYouCard180 = forYou
+
+    local goals = UI:Card(panel, 320, 112, "My Goals")
+    goals:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 0, 0)
+    goals.manage = UI:Button(goals, "Manage", 70, 23, function()
+        if owner.OpenAchievementCommunityDrawer183 then owner:OpenAchievementCommunityDrawer183("GOALS") end
+    end, "utility")
+    goals.manage:SetPoint("TOPRIGHT", goals, "TOPRIGHT", -10, -7)
+    goals.rows = {}
+    for index = 1, 3 do
+        local captured = index
+        local row = UI:TableRow(goals, 292, 24, function(button)
+            if button.otlAchievementId183 and owner.OpenAchievement174 then owner:OpenAchievement174(button.otlAchievementId183) end
+        end)
+        row:SetPoint("TOPLEFT", goals, "TOPLEFT", 12, -31 - ((captured - 1) * 25))
+        row.marker = row:CreateTexture(nil, "ARTWORK")
+        row.marker:SetTexture(C.blue[1], C.blue[2], C.blue[3], 1)
+        row.marker:SetWidth(4) row.marker:SetHeight(16) row.marker:SetPoint("LEFT", row, "LEFT", 6, 0)
+        row.titleText = Label(row, "", "GameFontNormalSmall", 18, -6, 260, "LEFT")
+        row:Hide()
+        goals.rows[captured] = row
+    end
+    goals:Hide()
+    owner.ui.homeGoalsCard183 = goals
 end
 
 local function BuildPosts(owner, page)
@@ -806,6 +843,20 @@ local function BuildHome(owner, page)
     owner.ui.homeOverviewTab:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -4)
     owner.ui.homePostsTab = UI:Tab(page, "Guild Posts", 132, function() owner:SetHomeTab("POSTS") end)
     owner.ui.homePostsTab:SetPoint("LEFT", owner.ui.homeOverviewTab, "RIGHT", 8, 0)
+    owner.ui.homeMyProfile183 = UI:Tab(page, "My Profile", 126, function()
+        if owner.OpenMyGuildProfile183 then owner:OpenMyGuildProfile183() end
+    end)
+    owner.ui.homeMyProfile183:SetPoint("LEFT", owner.ui.homePostsTab, "RIGHT", 8, 0)
+    owner.ui.homeMyProfile183.icon184 = owner.ui.homeMyProfile183:CreateTexture(nil, "ARTWORK")
+    owner.ui.homeMyProfile183.icon184:SetTexture("Interface\\Icons\\INV_Misc_Note_06")
+    owner.ui.homeMyProfile183.icon184:SetWidth(15) owner.ui.homeMyProfile183.icon184:SetHeight(15)
+    owner.ui.homeMyProfile183.icon184:SetPoint("LEFT", owner.ui.homeMyProfile183, "LEFT", 8, 0)
+    owner.ui.homeMyProfile183.text:ClearAllPoints()
+    owner.ui.homeMyProfile183.text:SetPoint("LEFT", owner.ui.homeMyProfile183, "LEFT", 28, 0)
+    owner.ui.homeMyProfile183.text:SetWidth(90)
+    owner.ui.homeMyProfile183.text:SetJustifyH("LEFT")
+    owner.ui.homeMyProfile183.otlTooltipTitle = "My Guild Profile"
+    owner.ui.homeMyProfile183.otlTooltip = "Open your member profile beside Roster. This is the quickest way to see your guild journey, achievements, professions and recent activity."
     owner.ui.homeGuildInfo = UI:Button(page, "Guild Info", 108, 28, function() owner:ShowPage("guildinfo") end, "utility")
     owner.ui.homeGuildInfo:SetPoint("TOPRIGHT", page, "TOPRIGHT", 0, -4)
     BuildOverview(owner, page)
@@ -937,14 +988,33 @@ local function ApplyHomeBottomLayout180(owner)
     local panel = owner.ui and owner.ui.homeOverviewPanel
     local activity = owner.ui and owner.ui.homeActivityCard
     local forYou = owner.ui and owner.ui.homeForYouCard180
-    if not panel or not activity or not forYou then return end
+    local goals = owner.ui and owner.ui.homeGoalsCard183
+    if not panel or not activity or not forYou or not goals then return end
     local width = math.max(400, panel:GetWidth() or 932)
     local height = math.max(90, activity:GetHeight() or 112)
     local gap = 10
     local hasActions = owner.ui.homeForYouHasActions180 and true or false
+    local hasGoals = owner.ui.homeHasGoals183 and true or false
     activity:ClearAllPoints()
     forYou:ClearAllPoints()
-    if hasActions then
+    goals:ClearAllPoints()
+    if hasActions and hasGoals then
+        local sideWidth = math.max(210, math.floor((width - (gap * 2)) * 0.32))
+        goals:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 0, 0)
+        goals:SetWidth(sideWidth) goals:SetHeight(height) goals:Show()
+        forYou:SetPoint("LEFT", goals, "RIGHT", gap, 0)
+        forYou:SetWidth(sideWidth) forYou:SetHeight(height) forYou:Show()
+        activity:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0, 0)
+        activity:SetWidth(width - (sideWidth * 2) - (gap * 2)) activity:SetHeight(height)
+    elseif hasGoals then
+        local goalWidth = math.max(300, math.floor(width * 0.42))
+        forYou:Hide()
+        goals:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 0, 0)
+        goals:SetWidth(goalWidth) goals:SetHeight(height) goals:Show()
+        activity:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0, 0)
+        activity:SetWidth(width - goalWidth - gap) activity:SetHeight(height)
+    elseif hasActions then
+        goals:Hide()
         local forWidth = math.max(320, math.floor(width * 0.48))
         local activityWidth = width - forWidth - gap
         forYou:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 0, 0)
@@ -952,7 +1022,7 @@ local function ApplyHomeBottomLayout180(owner)
         activity:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0, 0)
         activity:SetWidth(activityWidth) activity:SetHeight(height)
     else
-        forYou:Hide()
+        forYou:Hide() goals:Hide()
         activity:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 0, 0)
         activity:SetWidth(width) activity:SetHeight(height)
     end
@@ -968,9 +1038,14 @@ local function ApplyHomeBottomLayout180(owner)
         row:SetWidth(forYou:GetWidth() - 24)
         row.titleText:SetWidth(math.max(150, forYou:GetWidth() - 48))
     end
+    for index = 1, table.getn(goals.rows or {}) do
+        local row = goals.rows[index]
+        row:SetWidth(goals:GetWidth() - 24)
+        row.titleText:SetWidth(math.max(130, goals:GetWidth() - 48))
+    end
 end
 
-local function RefreshOverview(owner)
+local function GetHomeOverviewPostSelection180(owner)
     local announcements = owner:GetAnnouncementList152(false) or {}
     local pinned, index
     for index = 1, table.getn(announcements) do
@@ -982,12 +1057,37 @@ local function RefreshOverview(owner)
         end
     end
     pinned = pinned or announcements[1]
+
+    local candidates, fallback = {}, {}
+    for index = 1, table.getn(announcements) do
+        local record = announcements[index]
+        if not pinned or record.id ~= pinned.id then
+            local unread = owner.IsAnnouncementUnread154 and owner:IsAnnouncementUnread154(record.id)
+            if unread or record.importance == "CRITICAL" or record.importance == "IMPORTANT" then table.insert(candidates, record)
+            else table.insert(fallback, record) end
+        end
+    end
+    for index = 1, table.getn(fallback) do
+        if table.getn(candidates) >= 2 then break end
+        table.insert(candidates, fallback[index])
+    end
+    return announcements, pinned, candidates
+end
+
+local function RefreshOverview(owner)
+    local announcements, pinned, candidates = GetHomeOverviewPostSelection180(owner)
+    local index
     local card = owner.ui.homePinnedCard
     if pinned then
         card.otlRecordId = pinned.id
-        card.titleText:SetText(Short(pinned.title or "Guild Post", 70))
+        local pinnedTitleWidth180 = math.max(120, tonumber(card.titleText:GetWidth()) or 300)
+        -- The title owns two lines. Keep enough text to use that space instead
+        -- of producing odd single-line ellipses on normal/Fit widths.
+        card.titleText:SetText(WordSafePreview(pinned.title or "Guild Post",
+            math.max(42, math.min(92, math.floor((pinnedTitleWidth180 / 7.0) * 2)))))
+        card.titleText.otlTooltipTitle = tostring(pinned.title or "Guild Post")
         card.badgeText:SetText(HomePostBadges(owner, pinned))
-        card.metaText:SetText("By " .. tostring(pinned.author or "Leadership") .. "  •  " .. owner:Stamp(pinned.createdAt))
+        card.metaText:SetText("By " .. HomeDisplayAuthor180(pinned.author or "Leadership") .. "  •  " .. owner:Stamp(pinned.createdAt))
         card.bodyText:SetText(WordSafePreview(pinned.body or "", 560))
         card.icon:SetTexture(pinned.importance == "CRITICAL" and "Interface\\Icons\\Ability_Warrior_RallyingCry" or "Interface\\Icons\\INV_Scroll_03")
         -- Semantic importance belongs to the card frame, not a bright full fill.
@@ -1033,29 +1133,31 @@ local function RefreshOverview(owner)
         for index = 1, table.getn(card.reactions or {}) do card.reactions[index]:Hide() end
     end
 
-    local candidates, fallback = {}, {}
-    for index = 1, table.getn(announcements) do
-        local record = announcements[index]
-        if not pinned or record.id ~= pinned.id then
-            local unread = owner.IsAnnouncementUnread154 and owner:IsAnnouncementUnread154(record.id)
-            if unread or record.importance == "CRITICAL" or record.importance == "IMPORTANT" then table.insert(candidates, record)
-            else table.insert(fallback, record) end
-        end
-    end
-    for index = 1, table.getn(fallback) do
-        if table.getn(candidates) >= 2 then break end
-        table.insert(candidates, fallback[index])
-    end
     local recent = owner.ui.homeRecentPostsCard
+    local actualRecentCount180 = math.min(2, table.getn(candidates))
+    -- If data arrived after the first geometry pass, immediately reflow once.
+    -- This makes one-post/zero-post cards compact on first live refresh instead
+    -- of waiting for the player to resize the window or change pages.
+    if recent.otlDataRows180 ~= actualRecentCount180 then
+        recent.otlDataRows180 = actualRecentCount180
+        if owner.ui and owner.ui.main and owner.ui.main:IsVisible() and owner.ui.currentPage == "home"
+            and owner.LayoutShellPage180 then owner:LayoutShellPage180("home", "recent-post-count") end
+    end
+    -- At minimum/Fit height the card cannot physically hold two 50px-class
+    -- rows plus its title and bottom action.  Showing one readable post is
+    -- preferable to clipping two rows into the View all action.
+    local recentCapacity180 = tonumber(recent.otlCapacity180) or (((tonumber(recent:GetHeight()) or 0) < 169) and 1 or 2)
     for index = 1, table.getn(recent.rows) do
-        local row, record = recent.rows[index], candidates[index]
+        local row, record = recent.rows[index], (index <= recentCapacity180) and candidates[index] or nil
         if record then
             row.otlRecordId = record.id
             row.icon:SetTexture(record.importance == "CRITICAL" and "Interface\\Icons\\Ability_Warrior_RallyingCry" or "Interface\\Icons\\INV_Scroll_03")
-            row.titleText:SetText(Short(record.title or "Guild Post", 64))
+            local recentTitleWidth180 = math.max(100, tonumber(row.titleText:GetWidth()) or 240)
+            row.titleText:SetText(Short(record.title or "Guild Post", math.max(22, math.floor(recentTitleWidth180 / 7.0))))
+            row.otlTooltipTitle = tostring(record.title or "Guild Post")
             row.badgeText:SetText(HomePostBadges(owner, record))
-            row.metaText:SetText("By " .. tostring(record.author or "Leadership") .. "  •  " .. owner:Stamp(record.createdAt))
-            row.previewText:SetText(WordSafePreview(record.body or "", 84))
+            row.metaText:SetText("By " .. HomeDisplayAuthor180(record.author or "Leadership") .. "  •  " .. owner:Stamp(record.createdAt))
+            row.previewText:SetText(WordSafePreview(record.body or "", tonumber(row.otlPreviewChars180) or 92))
             row:Show()
         else
             row.otlRecordId = nil
@@ -1122,7 +1224,7 @@ local function RefreshOverview(owner)
     if guildLeader then
         local row = leadership.guildLeader
         row.otlMemberName = guildLeader.name
-        row.nameText:SetText(owner:GetClassColor(guildLeader.class) .. tostring(guildLeader.name or "Morrow") .. owner.colors.reset)
+        row.nameText:SetText(owner:GetClassColor(guildLeader.class) .. tostring(guildLeader.name or "Lucks") .. owner.colors.reset)
         row.roleText:SetText("Guild Leader")
         row.icon:SetTexture(HOME_ROLE_ICONS["Guild Leader"])
         row:Show()
@@ -1130,7 +1232,7 @@ local function RefreshOverview(owner)
     if mainRaidLeader then
         local row = leadership.mainRaidLeader
         row.otlMemberName = mainRaidLeader.name
-        row.nameText:SetText(owner:GetClassColor(mainRaidLeader.class) .. tostring(mainRaidLeader.name or "Rangark") .. owner.colors.reset)
+        row.nameText:SetText(owner:GetClassColor(mainRaidLeader.class) .. tostring(mainRaidLeader.name or "Raid Leader") .. owner.colors.reset)
         row:Show()
     else leadership.mainRaidLeader.otlMemberName = nil leadership.mainRaidLeader:Hide() end
     local regularCapacity = math.max(0, tonumber(leadership.otlRegularCapacity180) or 4)
@@ -1141,7 +1243,9 @@ local function RefreshOverview(owner)
             row.otlMemberName = member.name
             row.icon:SetTexture(HOME_ROLE_ICONS[role] or HOME_ROLE_ICONS.Helper)
             row.nameText:SetText(owner:GetClassColor(member.class) .. Short(member.name or "", 12) .. owner.colors.reset)
-            row.rankText:SetText(role == "Raid Leader" and "RL" or role == "Officer" and "Officer" or "Helper")
+            local liveRankText180 = tostring(member.rank or "")
+            if liveRankText180 == "" then liveRankText180 = role == "Raid Leader" and "RL" or role == "Officer" and "Officer" or "Helper" end
+            row.rankText:SetText(Short(liveRankText180, 13))
             row:Show()
         else row.otlMemberName = nil row:Hide() end
     end
@@ -1174,6 +1278,13 @@ local function RefreshOverview(owner)
         if entry then
             row.otlAction = entry
             local body = tostring(entry.body or "")
+            -- r28: distinct private moderation cases must not collapse into
+            -- visually identical "New Leadership report" rows. The inbox is
+            -- still deduplicated only by its real object/case identity; Home
+            -- merely renders safe case metadata for Leadership when available.
+            if tostring(entry.objectType or "") == "MOD_REPORT" and owner.GetOfficerCaseHomePreviewR28 then
+                body = owner:GetOfficerCaseHomePreviewR28(entry.objectId) or body
+            end
             row.titleText:SetText(Short(tostring(entry.title or "Action") .. (body ~= "" and (" — " .. body) or ""), 78))
             if entry.read then row.marker:Hide() else row.marker:Show() end
             row:Show()
@@ -1181,6 +1292,16 @@ local function RefreshOverview(owner)
             row.otlAction = nil
             row:Hide()
         end
+    end
+    local goals = owner.GetTrackedAchievementGoals183 and owner:GetTrackedAchievementGoals183() or {}
+    owner.ui.homeHasGoals183 = table.getn(goals) > 0
+    for index = 1, table.getn(owner.ui.homeGoalsCard183.rows) do
+        local row, goal = owner.ui.homeGoalsCard183.rows[index], goals[index]
+        if goal then
+            row.otlAchievementId183 = goal.id
+            row.titleText:SetText(Short(tostring(goal.name or goal.id or "Achievement") .. " — " .. tostring(goal.progressText or "Tracked"), 58))
+            row:Show()
+        else row.otlAchievementId183 = nil row:Hide() end
     end
     ApplyHomeBottomLayout180(owner)
 end
@@ -1227,13 +1348,16 @@ local function RefreshPosts(owner)
             if urgent then row.kindIcon:SetTexture("Interface\\Icons\\Ability_Warrior_RallyingCry")
             elseif record.pinned then row.kindIcon:SetTexture("Interface\\Icons\\INV_Misc_Note_01")
             else row.kindIcon:SetTexture("Interface\\Icons\\INV_Scroll_03") end
-            row.titleText:SetText(Short(record.title or "Guild Post", 72))
+            local listTitleWidth180 = math.max(100, tonumber(row.titleText:GetWidth()) or 160)
+            row.titleText:SetText(Short(record.title or "Guild Post",
+                math.max(28, math.floor((listTitleWidth180 / 7.0) * 2))))
+            row.otlTooltipTitle = tostring(record.title or "Guild Post")
             local badges = ""
             if record.pinned then badges = "PIN" end
             if urgent then badges = badges .. (badges ~= "" and "  " or "") .. "URG" end
             if unread then badges = badges .. (badges ~= "" and "  " or "") .. "NEW" end
             row.badgeText:SetText(badges)
-            row.metaText:SetText((unread and "Unread  |  " or "") .. tostring(record.author or "Leadership") .. "  " .. date("%d %b %H:%M", record.createdAt or owner:Now()))
+            row.metaText:SetText((unread and "Unread  |  " or "") .. HomeDisplayAuthor180(record.author or "Leadership") .. "  " .. date("%d %b %H:%M", record.createdAt or owner:Now()))
             row.previewText:SetText(WordSafePreview(record.body or "", 72))
             local dateGroup = HomePostDateGroup(owner, record.createdAt)
             local showHeader = dateGroup ~= previousDateGroup
@@ -1296,7 +1420,10 @@ local function RefreshPosts(owner)
     details.empty:Hide()
     details.otlRecordId = selected.id
     local importance = selected.importance == "CRITICAL" and "URGENT" or (selected.importance == "IMPORTANT" and "IMPORTANT" or "GUILD POST")
-    details.postTitle:SetText(importance .. "  " .. tostring(selected.title or "Guild Post"))
+    local detailTitleFull180 = importance .. "  " .. tostring(selected.title or "Guild Post")
+    local detailTitleWidth180 = math.max(180, tonumber(details.postTitle:GetWidth()) or 420)
+    details.postTitle:SetText(Short(detailTitleFull180, math.max(44, math.floor((detailTitleWidth180 / 7.2) * 2))))
+    details.postTitle.otlTooltipTitle = tostring(selected.title or "Guild Post")
     local dateMeta = "Published " .. owner:Stamp(selected.createdAt)
     if selected.archived and tonumber(selected.archivedAt) then dateMeta = dateMeta .. "  |  Archived " .. owner:Stamp(selected.archivedAt) end
     details.meta:SetText("By " .. tostring(selected.author or "Leadership") .. "  |  " .. dateMeta .. (selected.pinned and "  |  Pinned" or ""))
@@ -1376,6 +1503,47 @@ function OTLGM:RefreshHomePage()
 end
 
 local function LayoutHome(owner, page, width, height)
+    -- Re-anchor every Home toolbar control on every layout pass. Optional
+    -- feature modules attach later in load order, so relying on their original
+    -- anchors can leave stale points after Fit/resize and stack buttons.
+    if owner.ui.homeOverviewTab then
+        owner.ui.homeOverviewTab:ClearAllPoints()
+        owner.ui.homeOverviewTab:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -4)
+        owner.ui.homeOverviewTab:SetWidth(120) owner.ui.homeOverviewTab:SetHeight(28)
+    end
+    if owner.ui.homePostsTab then
+        owner.ui.homePostsTab:ClearAllPoints()
+        owner.ui.homePostsTab:SetPoint("LEFT", owner.ui.homeOverviewTab, "RIGHT", 8, 0)
+        owner.ui.homePostsTab:SetWidth(132) owner.ui.homePostsTab:SetHeight(28)
+    end
+    if owner.ui.homeMyProfile183 then
+        owner.ui.homeMyProfile183:ClearAllPoints()
+        owner.ui.homeMyProfile183:SetPoint("LEFT", owner.ui.homePostsTab, "RIGHT", 8, 0)
+        owner.ui.homeMyProfile183:SetWidth(126) owner.ui.homeMyProfile183:SetHeight(28)
+    end
+    if owner.ui.homeGuildInfo then
+        owner.ui.homeGuildInfo:ClearAllPoints()
+        owner.ui.homeGuildInfo:SetPoint("TOPRIGHT", page, "TOPRIGHT", 0, -4)
+        owner.ui.homeGuildInfo:SetWidth(108) owner.ui.homeGuildInfo:SetHeight(28)
+    end
+    if owner.ui.homeModeration183 then
+        owner.ui.homeModeration183:ClearAllPoints()
+        owner.ui.homeModeration183:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -40)
+        owner.ui.homeModeration183:SetWidth(104) owner.ui.homeModeration183:SetHeight(28)
+    end
+    if owner.ui.homeSinceVisit183 then
+        owner.ui.homeSinceVisit183:ClearAllPoints()
+        if owner.ui.homeModeration183 then
+            owner.ui.homeSinceVisit183:SetPoint("LEFT", owner.ui.homeModeration183, "RIGHT", 8, 0)
+        else
+            owner.ui.homeSinceVisit183:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -40)
+        end
+        owner.ui.homeSinceVisit183:SetWidth(154) owner.ui.homeSinceVisit183:SetHeight(28)
+    end
+    -- Keep the primary Home tabs and the quick utility actions on separate rows.
+    -- On Fit/compact widths the previous single-row composition let Report /
+    -- Help, Since Last Visit and My Profile collide with each other.
+    local panelTop180 = 74
     -- First-open geometry must be based on actual leadership data, not on the
     -- pre-bind visibility of hidden row frames.
     local leadershipData = CollectHomeLeadership180(owner)
@@ -1385,10 +1553,14 @@ local function LayoutHome(owner, page, width, height)
         leadershipCard.otlHasGuildLeader180 = leadershipData.guildLeader and true or false
         leadershipCard.otlHasMainRaidLeader180 = leadershipData.mainRaidLeader and true or false
     end
-    local panelHeight = math.max(420, height - 40)
+    local panelHeight = math.max(420, height - panelTop180)
     local gap = 10
+    owner.ui.homeOverviewPanel:ClearAllPoints()
+    owner.ui.homeOverviewPanel:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -panelTop180)
     owner.ui.homeOverviewPanel:SetWidth(width)
     owner.ui.homeOverviewPanel:SetHeight(panelHeight)
+    owner.ui.homePostsPanel:ClearAllPoints()
+    owner.ui.homePostsPanel:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -panelTop180)
     owner.ui.homePostsPanel:SetWidth(width)
     owner.ui.homePostsPanel:SetHeight(panelHeight)
 
@@ -1396,35 +1568,66 @@ local function LayoutHome(owner, page, width, height)
     local mainHeight = panelHeight - activityHeight - gap
     local leftWidth = math.floor(width * 0.64)
     local rightWidth = width - leftWidth - gap
-    local pinnedHeight = math.max(178, math.min(224, math.floor(mainHeight * 0.54)))
-    local recentHeight = mainHeight - pinnedHeight - gap
+
+    -- The recent-post card is content-sized. With only one additional post the
+    -- old fixed split left roughly half the card visibly empty (the live defect
+    -- in r13-r15). Give that room back to the pinned post instead.
+    local _, _, layoutRecent180 = GetHomeOverviewPostSelection180(owner)
+    local recentDataCount180 = math.min(2, table.getn(layoutRecent180 or {}))
+    local desiredRecentHeight180 = recentDataCount180 >= 2 and 170 or (recentDataCount180 == 1 and 126 or 76)
+    local maximumRecentHeight180 = math.max(76, mainHeight - 178 - gap)
+    local recentHeight = math.min(desiredRecentHeight180, maximumRecentHeight180)
+    local pinnedHeight = mainHeight - recentHeight - gap
+    if pinnedHeight < 178 then
+        pinnedHeight = 178
+        recentHeight = math.max(76, mainHeight - pinnedHeight - gap)
+    end
 
     local pinned = owner.ui.homePinnedCard
     pinned:ClearAllPoints() pinned:SetPoint("TOPLEFT", owner.ui.homeOverviewPanel, "TOPLEFT", 0, 0)
     pinned:SetWidth(leftWidth) pinned:SetHeight(pinnedHeight)
-    pinned.titleText:SetWidth(math.max(220, leftWidth - 210))
-    pinned.badgeText:ClearAllPoints() pinned.badgeText:SetPoint("TOPRIGHT", pinned, "TOPRIGHT", -14, -35)
-    pinned.badgeText:SetWidth(150)
-    pinned.metaText:SetWidth(leftWidth - 72)
+    local pinnedBadgeWidth180 = math.max(72, math.min(112, math.floor(leftWidth * 0.20)))
+    pinned.badgeText:ClearAllPoints() pinned.badgeText:SetPoint("TOPRIGHT", pinned, "TOPRIGHT", -14, -34)
+    pinned.badgeText:SetWidth(pinnedBadgeWidth180)
+    pinned.titleText:SetWidth(math.max(180, leftWidth - 54 - pinnedBadgeWidth180 - 28))
+    pinned.titleText:SetHeight(36)
+    pinned.metaText:ClearAllPoints() pinned.metaText:SetPoint("TOPLEFT", pinned, "TOPLEFT", 54, -70)
+    pinned.metaText:SetWidth(math.max(160, leftWidth - 72))
+    pinned.bodyText:ClearAllPoints() pinned.bodyText:SetPoint("TOPLEFT", pinned, "TOPLEFT", 14, -96)
     pinned.bodyText:SetWidth(leftWidth - 28)
-    pinned.bodyText:SetHeight(math.max(44, pinnedHeight - 148))
+    pinned.bodyText:SetHeight(math.max(44, pinnedHeight - 156))
 
     local recent = owner.ui.homeRecentPostsCard
     recent:ClearAllPoints() recent:SetPoint("TOPLEFT", pinned, "BOTTOMLEFT", 0, -gap)
     recent:SetWidth(leftWidth) recent:SetHeight(recentHeight)
-    local recentBodyHeight = math.max(62, recentHeight - 60)
-    local recentRowHeight = math.max(50, math.floor(recentBodyHeight / 2))
+    -- View all now lives in the heading, so the entire body below y=-32 is
+    -- available for rows. Capacity follows both data and actual compact height.
+    local recentCapacity180 = 0
+    if recentDataCount180 >= 2 and recentHeight >= 146 then recentCapacity180 = 2
+    elseif recentDataCount180 >= 1 then recentCapacity180 = 1 end
+    recent.otlCapacity180 = recentCapacity180
+    recent.otlDataRows180 = recentDataCount180
+    local recentRowHeight = recentCapacity180 >= 2
+        and math.max(48, math.floor((recentHeight - 38) / 2))
+        or math.max(48, recentHeight - 40)
     local index
     for index = 1, table.getn(recent.rows) do
         local row = recent.rows[index]
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", recent, "TOPLEFT", 12, -32 - ((index - 1) * recentRowHeight))
-        row:SetWidth(leftWidth - 24) row:SetHeight(recentRowHeight - 4)
+        row:SetWidth(leftWidth - 24) row:SetHeight(math.max(44, recentRowHeight - 4))
         row.titleText:SetWidth(math.max(160, leftWidth - 180))
         row.badgeText:ClearAllPoints() row.badgeText:SetPoint("TOPRIGHT", row, "TOPRIGHT", -8, -8)
         row.badgeText:SetWidth(126)
         row.metaText:SetWidth(leftWidth - 64)
         row.previewText:SetWidth(leftWidth - 64)
+        if recentCapacity180 == 1 then
+            row.previewText:SetHeight(31)
+            row.otlPreviewChars180 = math.max(88, math.floor(((leftWidth - 64) / 6.8) * 2))
+        else
+            row.previewText:SetHeight(16)
+            row.otlPreviewChars180 = math.max(52, math.floor((leftWidth - 64) / 6.8))
+        end
     end
     recent.empty:SetWidth(leftWidth - 28)
 
@@ -1526,13 +1729,16 @@ local function LayoutHome(owner, page, width, height)
     for index = 1, table.getn(owner.ui.homePostList.rows) do
         local row = owner.ui.homePostList.rows[index]
         row:SetWidth(listWidth - 40)
-        row.titleText:SetWidth(math.max(112, listWidth - 144))
+        -- Badge owns a compact right column; the title gets the remaining width
+        -- instead of a character-count guess that could wrap underneath it.
+        local badgeWidth180 = math.max(62, math.min(82, math.floor((listWidth - 40) * 0.24)))
+        row.titleText:SetWidth(math.max(118, (listWidth - 40) - badgeWidth180 - 46))
         row.titleText:SetHeight(30)
         row.badgeText:ClearAllPoints()
         row.badgeText:SetPoint("TOPRIGHT", row, "TOPRIGHT", -8, -6)
-        row.badgeText:SetWidth(92)
-        row.metaText:SetWidth(listWidth - 72)
-        row.previewText:SetWidth(listWidth - 72)
+        row.badgeText:SetWidth(badgeWidth180)
+        row.metaText:SetWidth(math.max(120, listWidth - 72))
+        row.previewText:SetWidth(math.max(120, listWidth - 72))
     end
     owner.ui.homePostDetails:ClearAllPoints()
     owner.ui.homePostDetails:SetPoint("TOPRIGHT", owner.ui.homePostsPanel, "TOPRIGHT", 0, 0)
@@ -1558,7 +1764,7 @@ OTLGM:CreateShellPageModule180("home", BuildHome,
 
 OTLGM:RegisterModule("HomePage180", {
     stage = "B",
-    revision = 9,
+    revision = 10,
     lazy = true,
     migrated = true,
     nativeContentHost = true,

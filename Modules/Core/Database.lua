@@ -116,6 +116,7 @@ local function EnsureGuildContainers170(db)
         "weeklySnapshots", "announcements", "announcementDeleted",
         "pendingAnnouncements", "announcementRead", "notificationSeen",
         "notificationUnread", "recentUsefulActivity", "pve", "achievements174",
+        "guildProfiles183", "sinceVisit183", "moderation183",
     }
     local index, key
     for index = 1, table.getn(fields) do
@@ -338,8 +339,20 @@ function OTLGM:EnsureDB()
     local settings = OTLGM_DB.settings
 
     ApplyDefault(settings, "pauseBulkSyncInCombat", true)
+    ApplyDefault(settings, "adaptiveStutterGuard181", true)
+    ApplyDefault(settings, "autoMaintenance181", true)
+    ApplyDefault(settings, "performanceProfile181", "AUTO")
     ApplyDefault(settings, "networkPacketBudget", tonumber(self.networkPacketBudget180) or 2)
     ApplyDefault(settings, "motionMode170", "FULL")
+    ApplyDefault(settings, "useQuickDockWhenParked182", true)
+    -- The main X may use the already-safe Park/Quick Dock lifecycle. Users who
+    -- prefer the old hard-close behaviour can opt out without changing what
+    -- the explicit Park button does.
+    ApplyDefault(settings, "closeToQuickDock183", true)
+    -- Guild Profile is a cache-only companion window. The preference controls
+    -- presentation only; it never enables a roster/profession/network refresh.
+    ApplyDefault(settings, "showGuildProfileOnRoster183", true)
+    ApplyDefault(settings, "socialGuildOpensRoster183", true)
     ApplyDefault(settings, "craftingLevelBasis170", "ITEM")
     ApplyDefault(settings, "recruitmentRotation170", {})
     ApplyDefault(settings, "nextRecruitIndex", 1)
@@ -356,9 +369,12 @@ function OTLGM:EnsureDB()
     -- same canonical value used by RuntimeCoordination and Transport.
     settings.networkPacketBudget = tonumber(self.networkPacketBudget180) or 2
     if settings.motionMode170 ~= "FULL" and settings.motionMode170 ~= "REDUCED" and settings.motionMode170 ~= "OFF" then settings.motionMode170 = "FULL" end
+    if settings.performanceProfile181 ~= "AUTO" and settings.performanceProfile181 ~= "SMOOTH" and settings.performanceProfile181 ~= "FRESH" then settings.performanceProfile181 = "AUTO" end
     if settings.craftingLevelBasis170 ~= "ITEM" and settings.craftingLevelBasis170 ~= "REQUIRED" and settings.craftingLevelBasis170 ~= "SKILL" then settings.craftingLevelBasis170 = "ITEM" end
     if type(settings.recruitmentRotation170) ~= "table" then settings.recruitmentRotation170 = {} end
-    if tonumber(settings.nextRecruitIndex) ~= 1 and tonumber(settings.nextRecruitIndex) ~= 2 then settings.nextRecruitIndex = 1 else settings.nextRecruitIndex = tonumber(settings.nextRecruitIndex) end
+    local nextRecruitIndexR55 = math.floor(tonumber(settings.nextRecruitIndex) or 1)
+    if nextRecruitIndexR55 < 1 or nextRecruitIndexR55 > 4 then nextRecruitIndexR55 = 1 end
+    settings.nextRecruitIndex = nextRecruitIndexR55
 
     -- RC5: account PvE maps are already bounded at their write sites. The
     -- expensive full nested prune is therefore a migration/session maintenance
@@ -396,7 +412,8 @@ function OTLGM:MigrateGuildDB(db)
             if type(db.crafting.details) ~= "table" then db.crafting.details = {} end
         end
         EnsureFoundation170(db)
-        EnsureStageC0GuildFoundation180(db)
+        -- The Stage C0 foundation was already repaired immediately above.
+        -- Do not repeat its nested scans/prunes on every schema-15 cache miss.
         return db
     end
 
@@ -493,6 +510,17 @@ function OTLGM.__impl180.GetGuildDB__impl1(self)
     end
 
     self:MigrateGuildDB(db)
+    -- r59 CP3: Database.lua owns the canonical GetGuildDB path after load.
+    -- The original one-time History repair lived in Guild:GetOrCreateGuildDB,
+    -- which later runtime callers do not necessarily use. Apply the repair here
+    -- as well so an r58 SavedVariables upgrade is guaranteed to normalize the
+    -- impossible unread aggregate on the first real guild DB access.
+    if self.RecountHistoryUnreadR59 and db.historyUnreadRecountR59 ~= true then
+        self:RecountHistoryUnreadR59(db, true)
+    end
+    if self.RepairSyntheticHistoryBurst183 and not db.historySyntheticBurstRepair183 then
+        self:RepairSyntheticHistoryBurst183(db)
+    end
     return db
 end
 

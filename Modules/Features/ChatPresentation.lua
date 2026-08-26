@@ -69,7 +69,7 @@ if OTLGM.RegisterModule then
         layer = "feature",
         corrective = true,
         revision = 7,
-        totalAchievements = 146,
+        totalAchievements = 147,
         eventDriven = true,
         noOnUpdate = true,
         keyboardSafety = true,
